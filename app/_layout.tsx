@@ -13,6 +13,7 @@ import "react-native-reanimated";
 import { ThemeProvider, useTheme } from "@/src/context/themeContext";
 import { NotificationService } from "@/src/services/notificationService";
 import { AudioService } from "@/src/services/audioService";
+import { useHabitStore } from "@/src/context/habitStore";
 
 export {
 	// Catch any errors thrown by the Layout component.
@@ -44,16 +45,44 @@ export default function RootLayout() {
 		}
 	}, [loaded]);
 
-	// Initialize notification service
+	// Initialize notification service and reschedule notifications for existing habits
 	useEffect(() => {
 		NotificationService.setNotificationHandler();
 		AudioService.setAudioMode();
 
-		// Request notification permissions
+		// Request notification permissions and reschedule habit reminders
 		(async () => {
 			const permitted = await NotificationService.requestPermissions();
 			if (permitted) {
 				console.log("✅ Notification permissions granted");
+
+				// Reschedule notifications for all habits with notifications enabled
+				const { habits } = useHabitStore.getState();
+				const activeHabits = habits.filter(
+					(h) => !h.isArchived && h.notificationEnabled && h.notificationTime
+				);
+
+				console.log(
+					`📱 Found ${activeHabits.length} habits with notifications enabled`
+				);
+
+				for (const habit of activeHabits) {
+					try {
+						await NotificationService.scheduleHabitReminder(
+							habit.id,
+							habit.name,
+							habit.notificationTime!
+						);
+					} catch (error) {
+						console.error(
+							`Failed to reschedule notification for ${habit.name}:`,
+							error
+						);
+					}
+				}
+
+				// Debug: show all scheduled notifications
+				await NotificationService.debugListScheduledNotifications();
 			} else {
 				console.log("❌ Notification permissions denied");
 			}

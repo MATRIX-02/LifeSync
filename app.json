@@ -2,20 +2,23 @@
   "expo": {
     "name": "LifeSync",
     "slug": "HabitTrackerApp",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "lifesync",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
-    "main": "AppEntry.tsx",
     "splash": {
       "image": "./assets/images/splash-icon.png",
       "resizeMode": "contain",
       "backgroundColor": "#ffffff"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.matrix122001.HabitTrackerApp",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -24,7 +27,14 @@
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
-      "package": "com.matrix122001.HabitTrackerApp"
+      "package": "com.matrix122001.HabitTrackerApp",
+      "permissions": [
+        "android.permission.RECEIVE_BOOT_COMPLETED",
+        "android.permission.SCHEDULE_EXACT_ALARM",
+        "android.permission.USE_EXACT_ALARM",
+        "android.permission.VIBRATE",
+        "android.permission.POST_NOTIFICATIONS"
+      ]
     },
     "web": {
       "bundler": "metro",
@@ -55,4 +65,3 @@
     "owner": "matrix122001"
   }
 }
-

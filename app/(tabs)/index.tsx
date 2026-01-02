@@ -38,6 +38,7 @@ import { useRouter } from "expo-router";
 import { useTheme, useColors, Theme } from "@/src/context/themeContext";
 import { useHabitStore } from "@/src/context/habitStore";
 import { useWorkoutStore } from "@/src/context/workoutStore";
+import { NotificationService } from "@/src/services/notificationService";
 
 const { width, height } = Dimensions.get("window");
 
@@ -716,7 +717,24 @@ export default function DashboardScreen() {
 			<CreateHabitModal
 				visible={modalVisible}
 				onClose={() => setModalVisible(false)}
-				onCreateHabit={addHabit}
+				onCreateHabit={async (habit: Habit) => {
+					addHabit(habit);
+					// Schedule notification if enabled
+					if (habit.notificationEnabled && habit.notificationTime) {
+						try {
+							await NotificationService.scheduleHabitReminder(
+								habit.id,
+								habit.name,
+								habit.notificationTime
+							);
+							console.log(
+								`✅ Notification scheduled for ${habit.name} at ${habit.notificationTime}`
+							);
+						} catch (error) {
+							console.error("Failed to schedule notification:", error);
+						}
+					}
+				}}
 				theme={theme}
 			/>
 		</SafeAreaView>

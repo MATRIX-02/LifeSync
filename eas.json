@@ -1,21 +1,31 @@
 {
 	"cli": {
-		"version": ">= 5.0.0"
+		"version": ">= 5.0.0",
+		"appVersionSource": "local"
 	},
 	"build": {
 		"development": {
 			"developmentClient": true,
-			"distribution": "internal"
+			"distribution": "internal",
+			"android": {
+				"buildType": "apk"
+			}
 		},
 		"preview": {
 			"android": {
 				"buildType": "apk"
 			},
-			"distribution": "internal"
+			"distribution": "internal",
+			"cache": {
+				"disabled": false
+			}
 		},
 		"production": {
 			"android": {
-				"buildType": "app-bundle"
+				"buildType": "apk"
+			},
+			"cache": {
+				"disabled": false
 			}
 		}
 	},

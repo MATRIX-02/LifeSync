@@ -94,8 +94,18 @@ interface FinanceStore {
 	) => void;
 	updateSavingsGoal: (id: string, updates: Partial<SavingsGoal>) => void;
 	deleteSavingsGoal: (id: string) => void;
-	contributeToGoal: (goalId: string, amount: number, note?: string) => void;
-	withdrawFromGoal: (goalId: string, amount: number, note?: string) => void;
+	contributeToGoal: (
+		goalId: string,
+		amount: number,
+		note?: string,
+		accountId?: string
+	) => void;
+	withdrawFromGoal: (
+		goalId: string,
+		amount: number,
+		note?: string,
+		accountId?: string
+	) => void;
 
 	// Bill Reminders
 	billReminders: BillReminder[];
@@ -104,7 +114,7 @@ interface FinanceStore {
 	) => void;
 	updateBillReminder: (id: string, updates: Partial<BillReminder>) => void;
 	deleteBillReminder: (id: string) => void;
-	markBillPaid: (id: string) => void;
+	markBillPaid: (id: string, accountId?: string) => void;
 	getUpcomingBills: (days: number) => BillReminder[];
 
 	// Debts
@@ -122,7 +132,12 @@ interface FinanceStore {
 	) => void;
 	updateDebt: (id: string, updates: Partial<Debt>) => void;
 	deleteDebt: (id: string) => void;
-	recordDebtPayment: (debtId: string, amount: number, note?: string) => void;
+	recordDebtPayment: (
+		debtId: string,
+		amount: number,
+		note?: string,
+		accountId?: string
+	) => void;
 	settleDebt: (debtId: string) => void;
 
 	// Split Groups
@@ -509,9 +524,41 @@ export const useFinanceStore = create<FinanceStore>()(
 					savingsGoals: state.savingsGoals.filter((g) => g.id !== id),
 				})),
 
-			contributeToGoal: (goalId, amount, note) =>
-				set((state) => ({
-					savingsGoals: state.savingsGoals.map((g) => {
+			contributeToGoal: (goalId, amount, note, accountId?: string) =>
+				set((state) => {
+					const goal = state.savingsGoals.find((g) => g.id === goalId);
+					if (!goal) return state;
+
+					// Update account balance if accountId provided
+					let accounts = state.accounts;
+					let transactions = state.transactions;
+
+					if (accountId) {
+						accounts = state.accounts.map((acc) =>
+							acc.id === accountId
+								? { ...acc, balance: acc.balance - amount } // Money goes from account to savings
+								: acc
+						);
+
+						// Create transfer transaction
+						const newTransaction = {
+							id: generateId(),
+							type: "expense" as const,
+							amount: amount,
+							category: "investments" as const,
+							description: `Savings: ${goal.name}`,
+							date: new Date().toISOString().split("T")[0],
+							time: new Date().toTimeString().split(" ")[0],
+							accountId: accountId,
+							paymentMethod: "net_banking" as const,
+							isRecurring: false,
+							createdAt: new Date().toISOString(),
+							updatedAt: new Date().toISOString(),
+						};
+						transactions = [newTransaction, ...state.transactions];
+					}
+
+					const savingsGoals = state.savingsGoals.map((g) => {
 						if (g.id !== goalId) return g;
 						const newAmount = g.currentAmount + amount;
 						return {
@@ -525,18 +572,57 @@ export const useFinanceStore = create<FinanceStore>()(
 									amount,
 									date: new Date().toISOString(),
 									note,
+									accountId,
+									type: "contribution" as const,
 								},
 							],
 							updatedAt: new Date().toISOString(),
 						};
-					}),
-				})),
+					});
 
-			withdrawFromGoal: (goalId, amount, note) =>
-				set((state) => ({
-					savingsGoals: state.savingsGoals.map((g) => {
+					return { savingsGoals, accounts, transactions };
+				}),
+
+			withdrawFromGoal: (goalId, amount, note, accountId?: string) =>
+				set((state) => {
+					const goal = state.savingsGoals.find((g) => g.id === goalId);
+					if (!goal) return state;
+
+					// Cap withdrawal at current amount
+					const actualWithdrawal = Math.min(amount, goal.currentAmount);
+
+					// Update account balance if accountId provided
+					let accounts = state.accounts;
+					let transactions = state.transactions;
+
+					if (accountId && actualWithdrawal > 0) {
+						accounts = state.accounts.map((acc) =>
+							acc.id === accountId
+								? { ...acc, balance: acc.balance + actualWithdrawal } // Money goes back to account
+								: acc
+						);
+
+						// Create income transaction
+						const newTransaction = {
+							id: generateId(),
+							type: "income" as const,
+							amount: actualWithdrawal,
+							category: "other" as const,
+							description: `Withdrawal from: ${goal.name}`,
+							date: new Date().toISOString().split("T")[0],
+							time: new Date().toTimeString().split(" ")[0],
+							accountId: accountId,
+							paymentMethod: "net_banking" as const,
+							isRecurring: false,
+							createdAt: new Date().toISOString(),
+							updatedAt: new Date().toISOString(),
+						};
+						transactions = [newTransaction, ...state.transactions];
+					}
+
+					const savingsGoals = state.savingsGoals.map((g) => {
 						if (g.id !== goalId) return g;
-						const newAmount = Math.max(0, g.currentAmount - amount);
+						const newAmount = g.currentAmount - actualWithdrawal;
 						return {
 							...g,
 							currentAmount: newAmount,
@@ -545,15 +631,19 @@ export const useFinanceStore = create<FinanceStore>()(
 								...g.contributions,
 								{
 									id: generateId(),
-									amount: -amount,
+									amount: -actualWithdrawal,
 									date: new Date().toISOString(),
 									note,
+									accountId,
+									type: "withdrawal" as const,
 								},
 							],
 							updatedAt: new Date().toISOString(),
 						};
-					}),
-				})),
+					});
+
+					return { savingsGoals, accounts, transactions };
+				}),
 
 			// Bill Reminder Methods
 			addBillReminder: (bill) =>
@@ -581,14 +671,80 @@ export const useFinanceStore = create<FinanceStore>()(
 					billReminders: state.billReminders.filter((b) => b.id !== id),
 				})),
 
-			markBillPaid: (id) =>
-				set((state) => ({
-					billReminders: state.billReminders.map((b) =>
+			markBillPaid: (id, accountId?: string) =>
+				set((state) => {
+					const bill = state.billReminders.find((b) => b.id === id);
+					if (!bill || bill.isPaid) return state; // Don't allow unpaying
+
+					// Deduct from account if provided
+					let accounts = state.accounts;
+					let transactions = state.transactions;
+
+					if (accountId) {
+						accounts = state.accounts.map((acc) =>
+							acc.id === accountId
+								? { ...acc, balance: acc.balance - bill.amount }
+								: acc
+						);
+
+						// Create expense transaction
+						const newTransaction = {
+							id: generateId(),
+							type: "expense" as const,
+							amount: bill.amount,
+							category: bill.category,
+							description: `Bill Payment: ${bill.name}`,
+							date: new Date().toISOString().split("T")[0],
+							time: new Date().toTimeString().split(" ")[0],
+							accountId: accountId,
+							paymentMethod: "net_banking" as const,
+							isRecurring: false,
+							createdAt: new Date().toISOString(),
+							updatedAt: new Date().toISOString(),
+						};
+						transactions = [newTransaction, ...state.transactions];
+					}
+
+					// If recurring, create next bill
+					let newBillReminders = state.billReminders.map((b) =>
 						b.id === id
-							? { ...b, isPaid: true, paidDate: new Date().toISOString() }
+							? {
+									...b,
+									isPaid: true,
+									paidDate: new Date().toISOString(),
+									paidFromAccountId: accountId,
+							  }
 							: b
-					),
-				})),
+					);
+
+					// Create next bill for recurring bills
+					if (bill.frequency !== "once") {
+						const dueDate = new Date(bill.dueDate);
+						switch (bill.frequency) {
+							case "weekly":
+								dueDate.setDate(dueDate.getDate() + 7);
+								break;
+							case "monthly":
+								dueDate.setMonth(dueDate.getMonth() + 1);
+								break;
+							case "yearly":
+								dueDate.setFullYear(dueDate.getFullYear() + 1);
+								break;
+						}
+
+						newBillReminders.push({
+							...bill,
+							id: generateId(),
+							dueDate: dueDate.toISOString().split("T")[0],
+							isPaid: false,
+							paidDate: undefined,
+							paidFromAccountId: undefined,
+							createdAt: new Date().toISOString(),
+						});
+					}
+
+					return { billReminders: newBillReminders, accounts, transactions };
+				}),
 
 			getUpcomingBills: (days) => {
 				const { billReminders } = get();
@@ -634,11 +790,56 @@ export const useFinanceStore = create<FinanceStore>()(
 					debts: state.debts.filter((d) => d.id !== id),
 				})),
 
-			recordDebtPayment: (debtId, amount, note) =>
-				set((state) => ({
-					debts: state.debts.map((d) => {
+			recordDebtPayment: (debtId, amount, note, accountId?: string) =>
+				set((state) => {
+					const debt = state.debts.find((d) => d.id === debtId);
+					if (!debt || debt.isSettled) return state; // Don't allow payment on settled debt
+
+					// Handle overpayment - cap at remaining amount
+					const actualPayment = Math.min(amount, debt.remainingAmount);
+					const overpayment = amount - actualPayment;
+					const newRemaining = debt.remainingAmount - actualPayment;
+
+					// Update accounts if accountId provided
+					let accounts = state.accounts;
+					let transactions = state.transactions;
+
+					if (accountId && actualPayment > 0) {
+						const isOwe = debt.type === "owe";
+
+						accounts = state.accounts.map((acc) =>
+							acc.id === accountId
+								? {
+										...acc,
+										balance: isOwe
+											? acc.balance - actualPayment // I owe = money goes out
+											: acc.balance + actualPayment, // They owe me = money comes in
+								  }
+								: acc
+						);
+
+						// Create transaction
+						const newTransaction = {
+							id: generateId(),
+							type: isOwe ? ("expense" as const) : ("income" as const),
+							amount: actualPayment,
+							category: isOwe ? ("personal" as const) : ("other" as const),
+							description: isOwe
+								? `Debt Payment to ${debt.personName}`
+								: `Debt Received from ${debt.personName}`,
+							date: new Date().toISOString().split("T")[0],
+							time: new Date().toTimeString().split(" ")[0],
+							accountId: accountId,
+							paymentMethod: "net_banking" as const,
+							isRecurring: false,
+							createdAt: new Date().toISOString(),
+							updatedAt: new Date().toISOString(),
+						};
+						transactions = [newTransaction, ...state.transactions];
+					}
+
+					const debts = state.debts.map((d) => {
 						if (d.id !== debtId) return d;
-						const newRemaining = Math.max(0, d.remainingAmount - amount);
 						return {
 							...d,
 							remainingAmount: newRemaining,
@@ -647,15 +848,23 @@ export const useFinanceStore = create<FinanceStore>()(
 								...d.payments,
 								{
 									id: generateId(),
-									amount,
+									amount: actualPayment,
 									date: new Date().toISOString(),
-									note,
+									note:
+										overpayment > 0
+											? `${
+													note || ""
+											  } (Overpayment of ${overpayment} ignored)`.trim()
+											: note,
+									accountId,
 								},
 							],
 							updatedAt: new Date().toISOString(),
 						};
-					}),
-				})),
+					});
+
+					return { debts, accounts, transactions };
+				}),
 
 			settleDebt: (debtId) =>
 				set((state) => ({

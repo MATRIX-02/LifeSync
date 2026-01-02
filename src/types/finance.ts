@@ -121,15 +121,18 @@ export interface SavingsGoal {
 	priority: "low" | "medium" | "high";
 	isCompleted: boolean;
 	contributions: GoalContribution[];
+	linkedAccountId?: string; // Account linked to this goal
 	createdAt: string;
 	updatedAt: string;
 }
 
 export interface GoalContribution {
 	id: string;
-	amount: number;
+	amount: number; // Positive = contribution, Negative = withdrawal
 	date: string;
 	note?: string;
+	accountId?: string; // Account the contribution came from / went to
+	type: "contribution" | "withdrawal";
 }
 
 // Bill Reminder
@@ -142,9 +145,12 @@ export interface BillReminder {
 	frequency: "once" | "weekly" | "monthly" | "yearly";
 	isPaid: boolean;
 	paidDate?: string;
+	paidFromAccountId?: string; // Account used to pay the bill
 	reminderDays: number; // Days before due date to remind
 	isAutoDeduct: boolean;
 	accountId?: string;
+	notificationId?: string; // ID for canceling scheduled notification
+	notes?: string;
 	createdAt: string;
 }
 
@@ -159,8 +165,10 @@ export interface Debt {
 	description: string;
 	dueDate?: string;
 	interestRate?: number;
+	minimumPayment?: number;
 	payments: DebtPayment[];
 	isSettled: boolean;
+	linkedAccountId?: string; // Account to deduct payments from
 	createdAt: string;
 	updatedAt: string;
 }
@@ -170,6 +178,7 @@ export interface DebtPayment {
 	amount: number;
 	date: string;
 	note?: string;
+	accountId?: string; // Account payment was made from
 }
 
 // ============== SPLITWISE FEATURES ==============

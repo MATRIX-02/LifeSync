@@ -20,8 +20,9 @@ import {
 	GroupMember,
 	SplitExpense,
 	Settlement,
-	SplitMethod,
 } from "@/src/types/finance";
+
+type SplitMethod = "equal" | "exact" | "percentage" | "shares";
 
 interface SplitWiseProps {
 	theme: Theme;
@@ -64,7 +65,7 @@ export default function SplitWise({
 }: SplitWiseProps) {
 	const {
 		splitGroups,
-		createSplitGroup,
+		addSplitGroup,
 		deleteSplitGroup,
 		addGroupMember,
 		removeGroupMember,
@@ -119,7 +120,12 @@ export default function SplitWise({
 			Alert.alert("Error", "Please enter a group name");
 			return;
 		}
-		createSplitGroup(groupForm.name.trim(), groupForm.icon, groupForm.color);
+		addSplitGroup({
+			name: groupForm.name.trim(),
+			icon: groupForm.icon,
+			color: groupForm.color,
+			members: [],
+		});
 		setGroupForm({ name: "", icon: "people", color: COLORS[0] });
 		setShowCreateGroup(false);
 	};
@@ -187,7 +193,7 @@ export default function SplitWise({
 			description: expenseForm.description,
 			amount,
 			paidBy: expenseForm.paidBy,
-			splitType: expenseForm.splitMethod,
+			splitMethod: expenseForm.splitMethod,
 			splits,
 		});
 
