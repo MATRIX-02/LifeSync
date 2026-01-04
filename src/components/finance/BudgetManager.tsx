@@ -1,33 +1,30 @@
 // Budget Manager - Create and manage budgets with progress tracking
 
-import React, { useState, useMemo, useEffect } from "react";
-import {
-	View,
-	Text,
-	StyleSheet,
-	TouchableOpacity,
-	ScrollView,
-	Modal,
-	TextInput,
-	Alert,
-	FlatList,
-	Platform,
-} from "react-native";
-import DateTimePicker from "@react-native-community/datetimepicker";
-import Ionicons from "@expo/vector-icons/Ionicons";
-import { Theme } from "@/src/context/themeContext";
 import { useFinanceStore } from "@/src/context/financeStore";
+import { Theme } from "@/src/context/themeContext";
 import { NotificationService } from "@/src/services/notificationService";
 import {
-	Budget,
-	SavingsGoal,
 	BillReminder,
-	Debt,
-	ExpenseCategory,
-	EXPENSE_CATEGORIES,
 	COLORS,
-	Account,
+	Debt,
+	EXPENSE_CATEGORIES,
+	ExpenseCategory,
+	SavingsGoal,
 } from "@/src/types/finance";
+import Ionicons from "@expo/vector-icons/Ionicons";
+import DateTimePicker from "@react-native-community/datetimepicker";
+import React, { useMemo, useState } from "react";
+import {
+	Alert,
+	Modal,
+	Platform,
+	ScrollView,
+	StyleSheet,
+	Text,
+	TextInput,
+	TouchableOpacity,
+	View,
+} from "react-native";
 
 interface BudgetManagerProps {
 	theme: Theme;
@@ -364,68 +361,79 @@ export default function BudgetManager({
 	};
 
 	// Helper to render account selector
-	const renderAccountSelector = () => (
-		<View style={styles.accountSelectorContainer}>
-			<Text style={styles.inputLabel}>Select Account (Optional)</Text>
-			<ScrollView
-				horizontal
-				showsHorizontalScrollIndicator={false}
-				style={styles.accountScroll}
-			>
-				<TouchableOpacity
-					style={[
-						styles.accountOption,
-						!selectedAccountId && styles.accountOptionSelected,
-					]}
-					onPress={() => setSelectedAccountId("")}
+	const renderAccountSelector = () => {
+		// Filter out the credit card account if this is a CC debt payment
+		const availableAccounts = accounts.filter((acc) => {
+			// If this is a credit card debt, exclude the linked credit card from selection
+			if (showPayDebt?.linkedCreditCardId) {
+				return acc.id !== showPayDebt.linkedCreditCardId;
+			}
+			return true;
+		});
+
+		return (
+			<View style={styles.accountSelectorContainer}>
+				<Text style={styles.inputLabel}>Select Account (Optional)</Text>
+				<ScrollView
+					horizontal
+					showsHorizontalScrollIndicator={false}
+					style={styles.accountScroll}
 				>
-					<Ionicons
-						name="cash-outline"
-						size={18}
-						color={!selectedAccountId ? theme.primary : theme.textMuted}
-					/>
-					<Text
-						style={[
-							styles.accountOptionText,
-							!selectedAccountId && { color: theme.primary },
-						]}
-					>
-						None
-					</Text>
-				</TouchableOpacity>
-				{accounts.map((acc) => (
 					<TouchableOpacity
-						key={acc.id}
 						style={[
 							styles.accountOption,
-							selectedAccountId === acc.id && styles.accountOptionSelected,
+							!selectedAccountId && styles.accountOptionSelected,
 						]}
-						onPress={() => setSelectedAccountId(acc.id)}
+						onPress={() => setSelectedAccountId("")}
 					>
 						<Ionicons
-							name={acc.icon as any}
+							name="cash-outline"
 							size={18}
-							color={
-								selectedAccountId === acc.id ? theme.primary : theme.textMuted
-							}
+							color={!selectedAccountId ? theme.primary : theme.textMuted}
 						/>
 						<Text
 							style={[
 								styles.accountOptionText,
-								selectedAccountId === acc.id && { color: theme.primary },
+								!selectedAccountId && { color: theme.primary },
 							]}
 						>
-							{acc.name}
-						</Text>
-						<Text style={styles.accountBalance}>
-							{currency}
-							{formatAmount(acc.balance)}
+							None
 						</Text>
 					</TouchableOpacity>
-				))}
-			</ScrollView>
-		</View>
-	);
+					{availableAccounts.map((acc) => (
+						<TouchableOpacity
+							key={acc.id}
+							style={[
+								styles.accountOption,
+								selectedAccountId === acc.id && styles.accountOptionSelected,
+							]}
+							onPress={() => setSelectedAccountId(acc.id)}
+						>
+							<Ionicons
+								name={acc.icon as any}
+								size={18}
+								color={
+									selectedAccountId === acc.id ? theme.primary : theme.textMuted
+								}
+							/>
+							<Text
+								style={[
+									styles.accountOptionText,
+									selectedAccountId === acc.id && { color: theme.primary },
+								]}
+							>
+								{acc.name}
+							</Text>
+							<Text style={styles.accountBalance}>
+								{currency}
+								{formatAmount(acc.balance)}
+							</Text>
+						</TouchableOpacity>
+					))}
+				</ScrollView>
+			</View>
+		);
+	};
 
 	const renderBudgetsTab = () => (
 		<ScrollView style={styles.tabContent} showsVerticalScrollIndicator={false}>
@@ -1046,7 +1054,7 @@ export default function BudgetManager({
 						style={styles.addSmallButton}
 						onPress={() => setShowAddDebt(true)}
 					>
-						<Ionicons name="add" size={18} color={theme.primary} />
+						<Ionicons name="add" size={18} color="#FFF" />
 						<Text style={styles.addSmallText}>Add Debt</Text>
 					</TouchableOpacity>
 				</View>

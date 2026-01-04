@@ -1,31 +1,30 @@
 // Finance Dashboard - Main overview with quick actions
 
-import React, { useState, useMemo } from "react";
-import {
-	View,
-	Text,
-	StyleSheet,
-	TouchableOpacity,
-	ScrollView,
-	Modal,
-	TextInput,
-	Alert,
-	Dimensions,
-} from "react-native";
-import Ionicons from "@expo/vector-icons/Ionicons";
-import { Theme } from "@/src/context/themeContext";
 import { useFinanceStore } from "@/src/context/financeStore";
+import { Theme } from "@/src/context/themeContext";
 import {
 	Account,
-	Transaction,
-	TransactionType,
+	COLORS,
+	EXPENSE_CATEGORIES,
 	ExpenseCategory,
+	INCOME_CATEGORIES,
 	IncomeCategory,
 	PaymentMethod,
-	EXPENSE_CATEGORIES,
-	INCOME_CATEGORIES,
-	COLORS,
+	TransactionType,
 } from "@/src/types/finance";
+import Ionicons from "@expo/vector-icons/Ionicons";
+import React, { useMemo, useState } from "react";
+import {
+	Alert,
+	Dimensions,
+	Modal,
+	ScrollView,
+	StyleSheet,
+	Text,
+	TextInput,
+	TouchableOpacity,
+	View,
+} from "react-native";
 
 const { width } = Dimensions.get("window");
 
@@ -47,6 +46,7 @@ export default function FinanceDashboard({
 		billReminders,
 		debts,
 		addAccount,
+		deleteAccount,
 		addTransaction,
 		getFinancialSummary,
 		getUpcomingBills,
@@ -103,10 +103,9 @@ export default function FinanceDashboard({
 			return;
 		}
 
-		addAccount({
+		const accountData: any = {
 			name: accountName,
 			type: accountType,
-			balance: parseFloat(accountBalance) || 0,
 			currency: "INR",
 			color: accountColor,
 			icon:
@@ -116,7 +115,19 @@ export default function FinanceDashboard({
 					? "card"
 					: "wallet",
 			isDefault: accounts.length === 0,
-		});
+		};
+
+		// For credit card, use creditLimit; for other types, use balance
+		if (accountType === "credit_card") {
+			accountData.creditLimit = parseFloat(accountBalance) || 0;
+			accountData.creditUsed = 0;
+			accountData.isSettled = false;
+			accountData.balance = 0; // CC balance is the outstanding amount
+		} else {
+			accountData.balance = parseFloat(accountBalance) || 0;
+		}
+
+		addAccount(accountData);
 
 		setAccountName("");
 		setAccountBalance("");
@@ -139,6 +150,34 @@ export default function FinanceDashboard({
 			return;
 		}
 
+		// For credit card expenses, payment method is always credit_card
+		const selectedSourceAccount = accounts.find(
+			(a) => a.id === selectedAccount
+		);
+		const finalPaymentMethod =
+			selectedSourceAccount?.type === "credit_card"
+				? "credit_card"
+				: paymentMethod;
+
+		// Validate credit card limit
+		if (selectedSourceAccount?.type === "credit_card") {
+			const creditLimit = selectedSourceAccount.creditLimit || 0;
+			const currentUsed = selectedSourceAccount.creditUsed || 0;
+			const availableCredit = creditLimit - currentUsed;
+			const transactionAmount = parseFloat(amount);
+
+			if (transactionAmount > availableCredit) {
+				Alert.alert(
+					"Credit Limit Exceeded",
+					`Available credit: ${currency}${formatAmount(
+						availableCredit
+					)}\nTrying to spend: ${currency}${formatAmount(transactionAmount)}`,
+					[{ text: "OK" }]
+				);
+				return;
+			}
+		}
+
 		addTransaction({
 			type: transactionType,
 			amount: parseFloat(amount),
@@ -147,7 +186,7 @@ export default function FinanceDashboard({
 			date: today,
 			time: new Date().toTimeString().split(" ")[0],
 			accountId: selectedAccount,
-			paymentMethod,
+			paymentMethod: finalPaymentMethod as any,
 			isRecurring: false,
 		});
 
@@ -375,7 +414,20 @@ export default function FinanceDashboard({
 				) : (
 					<ScrollView horizontal showsHorizontalScrollIndicator={false}>
 						{accounts.map((account) => (
-							<TouchableOpacity key={account.id} style={styles.accountCard}>
+							<TouchableOpacity
+								key={account.id}
+								style={styles.accountCard}
+								onLongPress={() => {
+									Alert.alert("Delete Account", `Delete "${account.name}"?`, [
+										{ text: "Cancel", style: "cancel" },
+										{
+											text: "Delete",
+											style: "destructive",
+											onPress: () => deleteAccount(account.id),
+										},
+									]);
+								}}
+							>
 								<View
 									style={[
 										styles.accountIconWrapper,
@@ -405,6 +457,10 @@ export default function FinanceDashboard({
 								<Text style={styles.accountBalance}>
 									{hideBalance
 										? "••••"
+										: account.type === "credit_card"
+										? `${currency}${formatAmount(
+												(account.creditLimit || 0) - (account.creditUsed || 0)
+										  )} / ${formatAmount(account.creditLimit || 0)}`
 										: `${currency}${formatAmount(account.balance)}`}
 								</Text>
 							</TouchableOpacity>
@@ -744,7 +800,11 @@ export default function FinanceDashboard({
 							</View>
 
 							<View style={styles.formGroup}>
-								<Text style={styles.formLabel}>Current Balance</Text>
+								<Text style={styles.formLabel}>
+									{accountType === "credit_card"
+										? "Max Limit"
+										: "Current Balance"}
+								</Text>
 								<TextInput
 									style={styles.formInput}
 									value={accountBalance}
@@ -753,10 +813,6 @@ export default function FinanceDashboard({
 									placeholderTextColor={theme.textMuted}
 									keyboardType="numeric"
 								/>
-							</View>
-
-							<View style={styles.formGroup}>
-								<Text style={styles.formLabel}>Color</Text>
 								<View style={styles.colorSelector}>
 									{COLORS.map((color) => (
 										<TouchableOpacity
@@ -872,7 +928,7 @@ export default function FinanceDashboard({
 													: EXPENSE_CATEGORIES
 											).map(([key, cat]) => (
 												<TouchableOpacity
-													key={key}
+													key={`${transactionType}-${key}`}
 													style={[
 														styles.categoryOption,
 														selectedCategory === key && {
@@ -955,29 +1011,58 @@ export default function FinanceDashboard({
 
 							<View style={styles.formGroup}>
 								<Text style={styles.formLabel}>Payment Method</Text>
-								<View style={styles.paymentSelector}>
-									{paymentMethods.map((method) => (
+								{selectedAccount &&
+								accounts.find((a) => a.id === selectedAccount)?.type ===
+									"credit_card" ? (
+									// For credit cards, show read-only credit_card payment method
+									<View style={[styles.paymentSelector, { opacity: 0.7 }]}>
 										<TouchableOpacity
-											key={method}
-											style={[
-												styles.paymentOption,
-												paymentMethod === method && styles.paymentOptionActive,
-											]}
-											onPress={() => setPaymentMethod(method)}
+											style={[styles.paymentOption, styles.paymentOptionActive]}
+											disabled
 										>
 											<Text
-												style={[
-													styles.paymentText,
-													paymentMethod === method && styles.paymentTextActive,
-												]}
+												style={[styles.paymentText, styles.paymentTextActive]}
 											>
-												{method.replace("_", " ").toUpperCase()}
+												CREDIT CARD
 											</Text>
 										</TouchableOpacity>
-									))}
-								</View>
+										<Text
+											style={{
+												color: theme.textMuted,
+												fontSize: 12,
+												marginTop: 8,
+											}}
+										>
+											Auto-selected for credit card accounts
+										</Text>
+									</View>
+								) : (
+									// For other accounts, show all payment methods
+									<View style={styles.paymentSelector}>
+										{paymentMethods.map((method) => (
+											<TouchableOpacity
+												key={method}
+												style={[
+													styles.paymentOption,
+													paymentMethod === method &&
+														styles.paymentOptionActive,
+												]}
+												onPress={() => setPaymentMethod(method)}
+											>
+												<Text
+													style={[
+														styles.paymentText,
+														paymentMethod === method &&
+															styles.paymentTextActive,
+													]}
+												>
+													{method.replace("_", " ").toUpperCase()}
+												</Text>
+											</TouchableOpacity>
+										))}
+									</View>
+								)}
 							</View>
-
 							<TouchableOpacity
 								style={styles.submitButton}
 								onPress={handleAddTransaction}

@@ -51,6 +51,10 @@ export interface Account {
 	color: string;
 	icon: string;
 	isDefault: boolean;
+	// Credit Card specific
+	creditLimit?: number; // Only for credit_card type
+	creditUsed?: number; // Amount currently spent on credit card
+	isSettled?: boolean; // For credit cards that have been settled/paid off
 	createdAt: string;
 	updatedAt: string;
 }
@@ -157,7 +161,7 @@ export interface BillReminder {
 // Debt Tracking
 export interface Debt {
 	id: string;
-	type: "owe" | "lent"; // owe = I owe someone, lent = someone owes me
+	type: "owe" | "lent" | "credit_card"; // credit_card = CC debt
 	personName: string;
 	personContact?: string;
 	originalAmount: number;
@@ -168,7 +172,8 @@ export interface Debt {
 	minimumPayment?: number;
 	payments: DebtPayment[];
 	isSettled: boolean;
-	linkedAccountId?: string; // Account to deduct payments from
+	linkedAccountId?: string; // Account to deduct payments from (or credit card account)
+	linkedCreditCardId?: string; // For credit card debts, the credit card account ID
 	createdAt: string;
 	updatedAt: string;
 }

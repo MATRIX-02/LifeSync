@@ -10,10 +10,10 @@ import * as SplashScreen from "expo-splash-screen";
 import { useEffect } from "react";
 import "react-native-reanimated";
 
-import { ThemeProvider, useTheme } from "@/src/context/themeContext";
-import { NotificationService } from "@/src/services/notificationService";
-import { AudioService } from "@/src/services/audioService";
 import { useHabitStore } from "@/src/context/habitStore";
+import { ThemeProvider, useTheme } from "@/src/context/themeContext";
+import { AudioService } from "@/src/services/audioService";
+import { NotificationService } from "@/src/services/notificationService";
 
 export {
 	// Catch any errors thrown by the Layout component.
@@ -56,6 +56,15 @@ export default function RootLayout() {
 			if (permitted) {
 				console.log("✅ Notification permissions granted");
 
+				// IMPORTANT: Cancel all scheduled notifications first to prevent duplicates
+				// This ensures we don't create new notifications if they already exist
+				try {
+					await NotificationService.cancelAllNotifications();
+					console.log("🗑️  Cleared all previously scheduled notifications");
+				} catch (error) {
+					console.error("Failed to clear old notifications:", error);
+				}
+
 				// Reschedule notifications for all habits with notifications enabled
 				const { habits } = useHabitStore.getState();
 				const activeHabits = habits.filter(
@@ -68,11 +77,14 @@ export default function RootLayout() {
 
 				for (const habit of activeHabits) {
 					try {
-						await NotificationService.scheduleHabitReminder(
-							habit.id,
-							habit.name,
-							habit.notificationTime!
-						);
+						const notificationId =
+							await NotificationService.scheduleHabitReminder(
+								habit.id,
+								habit.name,
+								habit.notificationTime!
+							);
+						// Store the notification ID in the habit for future reference
+						useHabitStore.getState().updateHabit(habit.id, { notificationId });
 					} catch (error) {
 						console.error(
 							`Failed to reschedule notification for ${habit.name}:`,

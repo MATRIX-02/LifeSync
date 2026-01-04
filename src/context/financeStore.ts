@@ -1,33 +1,26 @@
 // Finance Store - Zustand state management for Finance Tracker
 
-import { create } from "zustand";
-import { persist, createJSONStorage } from "zustand/middleware";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
 	Account,
-	Transaction,
-	TransactionType,
-	ExpenseCategory,
-	IncomeCategory,
-	PaymentMethod,
-	RecurringTransaction,
-	Budget,
-	SavingsGoal,
-	GoalContribution,
-	BillReminder,
-	Debt,
-	DebtPayment,
-	SplitGroup,
-	GroupMember,
-	SplitExpense,
-	ExpenseSplit,
-	Settlement,
 	Balance,
-	SpendingByCategory,
-	MonthlyTrend,
+	BillReminder,
+	Budget,
+	Debt,
+	ExpenseCategory,
 	FinancialSummary,
-	EXPENSE_CATEGORIES,
+	IncomeCategory,
+	MonthlyTrend,
+	RecurringTransaction,
+	SavingsGoal,
+	Settlement,
+	SpendingByCategory,
+	SplitExpense,
+	SplitGroup,
+	Transaction,
 } from "@/src/types/finance";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { create } from "zustand";
+import { createJSONStorage, persist } from "zustand/middleware";
 
 interface FinanceStore {
 	// Accounts
@@ -292,7 +285,20 @@ export const useFinanceStore = create<FinanceStore>()(
 									: transaction.type === "expense"
 									? -transaction.amount
 									: -transaction.amount; // transfer out
-							return { ...acc, balance: acc.balance + balanceChange };
+
+							// For credit card expenses, also track creditUsed
+							const updatedAcc = {
+								...acc,
+								balance: acc.balance + balanceChange,
+							};
+							if (
+								transaction.type === "expense" &&
+								acc.type === "credit_card"
+							) {
+								updatedAcc.creditUsed =
+									(acc.creditUsed || 0) + transaction.amount;
+							}
+							return updatedAcc;
 						}
 						if (transaction.toAccountId && acc.id === transaction.toAccountId) {
 							return { ...acc, balance: acc.balance + transaction.amount }; // transfer in
@@ -300,9 +306,58 @@ export const useFinanceStore = create<FinanceStore>()(
 						return acc;
 					});
 
+					// Create credit card debt if expense is from a credit card
+					let newDebts = state.debts;
+					const sourceAccount = state.accounts.find(
+						(a) => a.id === transaction.accountId
+					);
+
+					if (
+						transaction.type === "expense" &&
+						sourceAccount?.type === "credit_card"
+					) {
+						// Check if there's already an unsettled CC debt for this card
+						const existingCCDebt = state.debts.find(
+							(d) =>
+								d.linkedCreditCardId === transaction.accountId && !d.isSettled
+						);
+
+						if (existingCCDebt) {
+							// Update existing credit card debt
+							newDebts = state.debts.map((d) =>
+								d.id === existingCCDebt.id
+									? {
+											...d,
+											originalAmount: d.originalAmount + transaction.amount,
+											remainingAmount: d.remainingAmount + transaction.amount,
+											description: `Credit card expenses on ${sourceAccount.name}`,
+											updatedAt: new Date().toISOString(),
+									  }
+									: d
+							);
+						} else {
+							// Create new credit card debt
+							const ccDebt: Debt = {
+								id: generateId(),
+								type: "owe", // User owes the credit card company
+								personName: `${sourceAccount.name} (Credit Card)`,
+								originalAmount: transaction.amount,
+								remainingAmount: transaction.amount,
+								description: `Credit card debt on ${sourceAccount.name}`,
+								payments: [],
+								isSettled: false,
+								linkedCreditCardId: transaction.accountId,
+								createdAt: new Date().toISOString(),
+								updatedAt: new Date().toISOString(),
+							};
+							newDebts = [ccDebt, ...state.debts];
+						}
+					}
+
 					return {
 						transactions: [newTransaction, ...state.transactions],
 						accounts,
+						debts: newDebts,
 					};
 				}),
 
@@ -329,7 +384,22 @@ export const useFinanceStore = create<FinanceStore>()(
 									: transaction.type === "expense"
 									? transaction.amount
 									: transaction.amount;
-							return { ...acc, balance: acc.balance + balanceChange };
+
+							// For credit card expenses, also reverse creditUsed
+							const updatedAcc = {
+								...acc,
+								balance: acc.balance + balanceChange,
+							};
+							if (
+								transaction.type === "expense" &&
+								acc.type === "credit_card"
+							) {
+								updatedAcc.creditUsed = Math.max(
+									0,
+									(acc.creditUsed || 0) - transaction.amount
+								);
+							}
+							return updatedAcc;
 						}
 						if (transaction.toAccountId && acc.id === transaction.toAccountId) {
 							return { ...acc, balance: acc.balance - transaction.amount };
@@ -337,9 +407,46 @@ export const useFinanceStore = create<FinanceStore>()(
 						return acc;
 					});
 
+					// Reverse credit card debt if applicable
+					let newDebts = state.debts;
+					if (transaction.type === "expense") {
+						const sourceAccount = state.accounts.find(
+							(a) => a.id === transaction.accountId
+						);
+						if (sourceAccount?.type === "credit_card") {
+							const existingCCDebt = state.debts.find(
+								(d) =>
+									d.linkedCreditCardId === transaction.accountId && !d.isSettled
+							);
+
+							if (existingCCDebt) {
+								const newRemainingAmount =
+									existingCCDebt.remainingAmount - transaction.amount;
+								if (newRemainingAmount <= 0) {
+									// If no remaining amount, remove the debt
+									newDebts = state.debts.filter(
+										(d) => d.id !== existingCCDebt.id
+									);
+								} else {
+									// Update the debt
+									newDebts = state.debts.map((d) =>
+										d.id === existingCCDebt.id
+											? {
+													...d,
+													remainingAmount: newRemainingAmount,
+													updatedAt: new Date().toISOString(),
+											  }
+											: d
+									);
+								}
+							}
+						}
+					}
+
 					return {
 						transactions: state.transactions.filter((t) => t.id !== id),
 						accounts,
+						debts: newDebts,
 					};
 				}),
 
@@ -806,25 +913,37 @@ export const useFinanceStore = create<FinanceStore>()(
 
 					if (accountId && actualPayment > 0) {
 						const isOwe = debt.type === "owe";
+						const isCreditCard = debt.type === "credit_card";
 
-						accounts = state.accounts.map((acc) =>
-							acc.id === accountId
-								? {
+						accounts = state.accounts.map((acc) => {
+							if (acc.id === accountId) {
+								if (isCreditCard) {
+									// For CC payments, money goes out
+									return {
+										...acc,
+										balance: acc.balance - actualPayment,
+									};
+								} else {
+									return {
 										...acc,
 										balance: isOwe
 											? acc.balance - actualPayment // I owe = money goes out
 											: acc.balance + actualPayment, // They owe me = money comes in
-								  }
-								: acc
-						);
+									};
+								}
+							}
+							return acc;
+						});
 
 						// Create transaction
 						const newTransaction = {
 							id: generateId(),
-							type: isOwe ? ("expense" as const) : ("income" as const),
+							type: "expense" as const,
 							amount: actualPayment,
-							category: isOwe ? ("personal" as const) : ("other" as const),
-							description: isOwe
+							category: "personal" as const,
+							description: isCreditCard
+								? `Credit Card Payment - ${debt.personName}`
+								: isOwe
 								? `Debt Payment to ${debt.personName}`
 								: `Debt Received from ${debt.personName}`,
 							date: new Date().toISOString().split("T")[0],
@@ -863,12 +982,34 @@ export const useFinanceStore = create<FinanceStore>()(
 						};
 					});
 
+					// If CC debt is fully settled, mark the account as settled
+					if (
+						debt.type === "credit_card" &&
+						newRemaining === 0 &&
+						debt.linkedCreditCardId
+					) {
+						accounts = accounts.map((acc) =>
+							acc.id === debt.linkedCreditCardId
+								? {
+										...acc,
+										isSettled: true,
+										creditUsed: 0,
+										updatedAt: new Date().toISOString(),
+								  }
+								: acc
+						);
+					}
+
 					return { debts, accounts, transactions };
 				}),
 
 			settleDebt: (debtId) =>
-				set((state) => ({
-					debts: state.debts.map((d) =>
+				set((state) => {
+					const debtToSettle = state.debts.find((d) => d.id === debtId);
+					if (!debtToSettle) return state;
+
+					// Update debts
+					const updatedDebts = state.debts.map((d) =>
 						d.id === debtId
 							? {
 									...d,
@@ -877,8 +1018,31 @@ export const useFinanceStore = create<FinanceStore>()(
 									updatedAt: new Date().toISOString(),
 							  }
 							: d
-					),
-				})),
+					);
+
+					// If it's a credit card debt, mark the card as settled
+					let updatedAccounts = state.accounts;
+					if (
+						debtToSettle.type === "credit_card" &&
+						debtToSettle.linkedCreditCardId
+					) {
+						updatedAccounts = state.accounts.map((acc) =>
+							acc.id === debtToSettle.linkedCreditCardId
+								? {
+										...acc,
+										isSettled: true,
+										creditUsed: 0,
+										updatedAt: new Date().toISOString(),
+								  }
+								: acc
+						);
+					}
+
+					return {
+						debts: updatedDebts,
+						accounts: updatedAccounts,
+					};
+				}),
 
 			// Split Group Methods
 			addSplitGroup: (group) =>

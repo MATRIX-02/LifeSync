@@ -1,27 +1,27 @@
 // Transaction List - Full transaction history with filters
 
-import React, { useState, useMemo } from "react";
+import { useFinanceStore } from "@/src/context/financeStore";
+import { Theme } from "@/src/context/themeContext";
 import {
-	View,
-	Text,
-	StyleSheet,
-	TouchableOpacity,
+	EXPENSE_CATEGORIES,
+	ExpenseCategory,
+	INCOME_CATEGORIES,
+	IncomeCategory,
+	Transaction,
+} from "@/src/types/finance";
+import Ionicons from "@expo/vector-icons/Ionicons";
+import React, { useMemo, useState } from "react";
+import {
+	Alert,
 	FlatList,
 	Modal,
+	ScrollView,
+	StyleSheet,
+	Text,
 	TextInput,
-	Alert,
+	TouchableOpacity,
+	View,
 } from "react-native";
-import Ionicons from "@expo/vector-icons/Ionicons";
-import { Theme } from "@/src/context/themeContext";
-import { useFinanceStore } from "@/src/context/financeStore";
-import {
-	Transaction,
-	TransactionType,
-	ExpenseCategory,
-	IncomeCategory,
-	EXPENSE_CATEGORIES,
-	INCOME_CATEGORIES,
-} from "@/src/types/finance";
 
 interface TransactionListProps {
 	theme: Theme;
@@ -56,6 +56,7 @@ export default function TransactionList({
 	const [searchQuery, setSearchQuery] = useState("");
 	const [showFilters, setShowFilters] = useState(false);
 	const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+	const [selectedAccount, setSelectedAccount] = useState<string | null>(null);
 	const [selectedTransaction, setSelectedTransaction] =
 		useState<Transaction | null>(null);
 	const [showEditModal, setShowEditModal] = useState(false);
@@ -102,14 +103,28 @@ export default function TransactionList({
 			filtered = filtered.filter((t) => t.category === selectedCategory);
 		}
 
-		// Apply search filter
+		// Apply account filter
+		if (selectedAccount) {
+			filtered = filtered.filter((t) => t.accountId === selectedAccount);
+		}
+
+		// Apply search filter (description, category, and amount)
 		if (searchQuery.trim()) {
 			const query = searchQuery.toLowerCase();
-			filtered = filtered.filter(
-				(t) =>
+			const searchAmount = parseFloat(searchQuery);
+			const isNumericSearch = !isNaN(searchAmount);
+
+			filtered = filtered.filter((t) => {
+				// If search is a number, check if it matches the amount
+				if (isNumericSearch && t.amount === searchAmount) {
+					return true;
+				}
+				// Otherwise, check description and category
+				return (
 					(t.description?.toLowerCase() || "").includes(query) ||
 					t.category.toLowerCase().includes(query)
-			);
+				);
+			});
 		}
 
 		// Sort by date descending
@@ -152,7 +167,14 @@ export default function TransactionList({
 		return Object.values(groups).sort(
 			(a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
 		);
-	}, [transactions, filterType, dateFilter, selectedCategory, searchQuery]);
+	}, [
+		transactions,
+		filterType,
+		dateFilter,
+		selectedCategory,
+		selectedAccount,
+		searchQuery,
+	]);
 
 	const handleDeleteTransaction = (transaction: Transaction) => {
 		Alert.alert(
@@ -213,6 +235,55 @@ export default function TransactionList({
 	const getAccountName = (accountId: string) => {
 		const account = accounts.find((a) => a.id === accountId);
 		return account?.name || "Unknown";
+	};
+
+	const getClosingBalance = (transaction: Transaction): number => {
+		const account = accounts.find((acc) => acc.id === transaction.accountId);
+		if (!account) return 0;
+
+		// Get all transactions for this account up to and including current transaction
+		const relatedTransactions = transactions
+			.filter((t) => t.accountId === transaction.accountId)
+			.sort(
+				(a, b) =>
+					new Date(a.date).getTime() - new Date(b.date).getTime() ||
+					(a.time < b.time ? -1 : 1)
+			);
+
+		let balance = account.balance;
+		for (const t of relatedTransactions) {
+			if (t.id === transaction.id) {
+				break;
+			}
+			if (t.type === "income") {
+				balance += t.amount;
+			} else if (t.type === "expense") {
+				balance -= t.amount;
+			} else if (
+				t.type === "transfer" &&
+				t.toAccountId === transaction.accountId
+			) {
+				balance += t.amount;
+			} else if (t.type === "transfer") {
+				balance -= t.amount;
+			}
+		}
+
+		// Apply the current transaction
+		if (transaction.type === "income") {
+			balance += transaction.amount;
+		} else if (transaction.type === "expense") {
+			balance -= transaction.amount;
+		} else if (
+			transaction.type === "transfer" &&
+			transaction.toAccountId === account.id
+		) {
+			balance += transaction.amount;
+		} else if (transaction.type === "transfer") {
+			balance -= transaction.amount;
+		}
+
+		return balance;
 	};
 
 	const renderTransactionItem = (transaction: Transaction) => {
@@ -409,7 +480,9 @@ export default function TransactionList({
 							{ key: null, name: "All", icon: "apps", color: theme.primary },
 							...allCategories,
 						]}
-						keyExtractor={(item) => item.key || "all"}
+						keyExtractor={(item) =>
+							item.key ? `${item.type}-${item.key}` : "all"
+						}
 						renderItem={({ item }) => (
 							<TouchableOpacity
 								style={[
@@ -432,6 +505,52 @@ export default function TransactionList({
 									style={[
 										styles.categoryFilterText,
 										selectedCategory === item.key && { color: item.color },
+									]}
+									numberOfLines={1}
+								>
+									{item.name}
+								</Text>
+							</TouchableOpacity>
+						)}
+					/>
+
+					<Text style={[styles.filterLabel, { marginTop: 16 }]}>
+						Filter by Account
+					</Text>
+					<FlatList
+						horizontal
+						showsHorizontalScrollIndicator={false}
+						data={[
+							{ id: null, name: "All", color: theme.primary },
+							...accounts.map((acc) => ({
+								id: acc.id,
+								name: acc.name,
+								color: acc.color,
+							})),
+						]}
+						keyExtractor={(item) => item.id || "all"}
+						renderItem={({ item }) => (
+							<TouchableOpacity
+								style={[
+									styles.categoryFilterOption,
+									selectedAccount === item.id && {
+										backgroundColor: item.color + "20",
+										borderColor: item.color,
+									},
+								]}
+								onPress={() => setSelectedAccount(item.id)}
+							>
+								<Ionicons
+									name="wallet-outline"
+									size={16}
+									color={
+										selectedAccount === item.id ? item.color : theme.textMuted
+									}
+								/>
+								<Text
+									style={[
+										styles.categoryFilterText,
+										selectedAccount === item.id && { color: item.color },
 									]}
 									numberOfLines={1}
 								>
@@ -535,63 +654,74 @@ export default function TransactionList({
 										);
 									})()}
 								</View>
-
-								<View style={styles.detailRows}>
-									<View style={styles.detailRow}>
-										<Text style={styles.detailLabel}>Category</Text>
-										<Text style={styles.detailValue}>
-											{selectedTransaction.type === "income"
-												? INCOME_CATEGORIES[
-														selectedTransaction.category as IncomeCategory
-												  ]?.name
-												: EXPENSE_CATEGORIES[
-														selectedTransaction.category as ExpenseCategory
-												  ]?.name}
-										</Text>
-									</View>
-									<View style={styles.detailRow}>
-										<Text style={styles.detailLabel}>Account</Text>
-										<Text style={styles.detailValue}>
-											{getAccountName(selectedTransaction.accountId)}
-										</Text>
-									</View>
-									<View style={styles.detailRow}>
-										<Text style={styles.detailLabel}>Date</Text>
-										<Text style={styles.detailValue}>
-											{new Date(selectedTransaction.date).toLocaleDateString(
-												"en-US",
-												{
-													weekday: "long",
-													year: "numeric",
-													month: "long",
-													day: "numeric",
-												}
-											)}
-										</Text>
-									</View>
-									<View style={styles.detailRow}>
-										<Text style={styles.detailLabel}>Time</Text>
-										<Text style={styles.detailValue}>
-											{selectedTransaction.time}
-										</Text>
-									</View>
-									<View style={styles.detailRow}>
-										<Text style={styles.detailLabel}>Payment Method</Text>
-										<Text style={styles.detailValue}>
-											{selectedTransaction.paymentMethod
-												.replace("_", " ")
-												.toUpperCase()}
-										</Text>
-									</View>
-									{selectedTransaction.note && (
+								<ScrollView
+									style={{ maxHeight: 350, marginBottom: 20 }}
+									showsVerticalScrollIndicator={true}
+								>
+									<View style={styles.detailRows}>
 										<View style={styles.detailRow}>
-											<Text style={styles.detailLabel}>Note</Text>
+											<Text style={styles.detailLabel}>Category</Text>
 											<Text style={styles.detailValue}>
-												{selectedTransaction.note}
+												{selectedTransaction.type === "income"
+													? INCOME_CATEGORIES[
+															selectedTransaction.category as IncomeCategory
+													  ]?.name
+													: EXPENSE_CATEGORIES[
+															selectedTransaction.category as ExpenseCategory
+													  ]?.name}
 											</Text>
 										</View>
-									)}
-								</View>
+										<View style={styles.detailRow}>
+											<Text style={styles.detailLabel}>Account</Text>
+											<Text style={styles.detailValue}>
+												{getAccountName(selectedTransaction.accountId)}
+											</Text>
+										</View>
+										<View style={styles.detailRow}>
+											<Text style={styles.detailLabel}>Date</Text>
+											<Text style={styles.detailValue}>
+												{new Date(selectedTransaction.date).toLocaleDateString(
+													"en-US",
+													{
+														weekday: "long",
+														year: "numeric",
+														month: "long",
+														day: "numeric",
+													}
+												)}
+											</Text>
+										</View>
+										<View style={styles.detailRow}>
+											<Text style={styles.detailLabel}>Time</Text>
+											<Text style={styles.detailValue}>
+												{selectedTransaction.time}
+											</Text>
+										</View>
+										<View style={styles.detailRow}>
+											<Text style={styles.detailLabel}>Payment Method</Text>
+											<Text style={styles.detailValue}>
+												{selectedTransaction.paymentMethod
+													.replace("_", " ")
+													.toUpperCase()}
+											</Text>
+										</View>
+										<View style={styles.detailRow}>
+											<Text style={styles.detailLabel}>Closing Balance</Text>
+											<Text style={styles.detailValue}>
+												{currency}
+												{formatAmount(getClosingBalance(selectedTransaction))}
+											</Text>
+										</View>
+										{selectedTransaction.note && (
+											<View style={styles.detailRow}>
+												<Text style={styles.detailLabel}>Note</Text>
+												<Text style={styles.detailValue}>
+													{selectedTransaction.note}
+												</Text>
+											</View>
+										)}
+									</View>
+								</ScrollView>
 
 								<View style={styles.modalActions}>
 									<TouchableOpacity

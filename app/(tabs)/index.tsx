@@ -1,44 +1,45 @@
+import Ionicons from "@expo/vector-icons/Ionicons";
+import DateTimePicker from "@react-native-community/datetimepicker";
 import React, {
-	useState,
 	useCallback,
 	useEffect,
 	useMemo,
 	useRef,
+	useState,
 } from "react";
 import {
-	View,
-	Text,
-	StyleSheet,
-	TouchableOpacity,
-	ScrollView,
-	Modal,
-	TextInput,
 	Alert,
-	Dimensions,
-	StatusBar,
-	Platform,
 	Animated,
-	Image,
+	Dimensions,
+	Modal,
 	PanResponder,
+	Platform,
+	ScrollView,
+	StatusBar,
+	StyleSheet,
+	Text,
+	TextInput,
+	TouchableOpacity,
 	TouchableWithoutFeedback,
+	View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import Ionicons from "@expo/vector-icons/Ionicons";
-import DateTimePicker from "@react-native-community/datetimepicker";
 import Svg, { Circle } from "react-native-svg";
 
-import {
-	Habit,
-	HabitType,
-	FrequencyType,
-	TargetType,
-	HabitLog,
-} from "@/src/types";
-import { useRouter } from "expo-router";
-import { useTheme, useColors, Theme } from "@/src/context/themeContext";
+import { SharedDrawer } from "@/src/components/SharedDrawer";
 import { useHabitStore } from "@/src/context/habitStore";
+import { useModuleStore } from "@/src/context/moduleContext";
+import { Theme, useColors, useTheme } from "@/src/context/themeContext";
 import { useWorkoutStore } from "@/src/context/workoutStore";
 import { NotificationService } from "@/src/services/notificationService";
+import {
+	FrequencyType,
+	Habit,
+	HabitLog,
+	HabitType,
+	TargetType,
+} from "@/src/types";
+import { useRouter } from "expo-router";
 
 const { width, height } = Dimensions.get("window");
 
@@ -104,6 +105,24 @@ export default function DashboardScreen() {
 	const router = useRouter();
 	const { isDark, toggleTheme } = useTheme();
 	const theme = useColors();
+	const { isModuleEnabled, getFirstEnabledModule } = useModuleStore();
+
+	// Check if module is disabled BEFORE any other hooks
+	const isHabitsEnabled = isModuleEnabled("habits");
+	const firstEnabledModule = getFirstEnabledModule();
+
+	// Early return if module is disabled - MUST be before other hooks
+	if (!isHabitsEnabled) {
+		useEffect(() => {
+			if (firstEnabledModule === "workout") {
+				router.replace("/(tabs)/workout");
+			} else if (firstEnabledModule === "finance") {
+				router.replace("/(tabs)/finance");
+			}
+		}, []);
+		return null;
+	}
+
 	const {
 		habits,
 		addHabit,
@@ -316,177 +335,21 @@ export default function DashboardScreen() {
 			{/* Drawer Overlay */}
 			{drawerOpen && (
 				<TouchableOpacity
-					style={styles.drawerOverlay}
+					style={[styles.drawerOverlay, { zIndex: 15 }]}
 					activeOpacity={1}
 					onPress={() => setDrawerOpen(false)}
 				/>
 			)}
 
-			{/* Animated Drawer */}
-			<Animated.View
-				style={[styles.drawer, { transform: [{ translateX: drawerAnim }] }]}
-			>
-				<TouchableOpacity
-					style={styles.drawerHeader}
-					onPress={() => {
-						setDrawerOpen(false);
-						router.push({
-							pathname: "/(tabs)/profile",
-							params: { from: "habits" },
-						} as any);
-					}}
-					activeOpacity={0.7}
-				>
-					{profile?.avatar ? (
-						<Image
-							source={{ uri: profile.avatar }}
-							style={styles.drawerAvatarImage}
-						/>
-					) : (
-						<View style={styles.drawerAvatar}>
-							<Ionicons name="person" size={32} color={theme.textSecondary} />
-						</View>
-					)}
-					<Text style={styles.drawerName}>{userName}</Text>
-					<Text style={styles.drawerEmail}>
-						{profile?.email || "Tap to set up profile"}
-					</Text>
-				</TouchableOpacity>
-
-				<View style={styles.drawerContent}>
-					<Text style={styles.drawerSectionTitle}>MODULES</Text>
-
-					<TouchableOpacity
-						style={[styles.drawerItem, styles.drawerItemActive]}
-						onPress={() => setDrawerOpen(false)}
-					>
-						<View
-							style={[
-								styles.drawerItemIconNew,
-								{ backgroundColor: theme.primary },
-							]}
-						>
-							<Ionicons name="sparkles" size={20} color="#fff" />
-						</View>
-						<View style={styles.drawerItemContent}>
-							<Text
-								style={[styles.drawerItemText, styles.drawerItemTextActive]}
-							>
-								Daily Rituals
-							</Text>
-							<Text style={styles.drawerItemSubtext}>Build better habits</Text>
-						</View>
-						<View style={styles.drawerItemBadge}>
-							<Ionicons name="checkmark" size={16} color={theme.primary} />
-						</View>
-					</TouchableOpacity>
-
-					<TouchableOpacity
-						style={styles.drawerItem}
-						onPress={() => {
-							setDrawerOpen(false);
-							router.push("/(tabs)/workout" as any);
-						}}
-					>
-						<View
-							style={[
-								styles.drawerItemIconNew,
-								{ backgroundColor: theme.success },
-							]}
-						>
-							<Ionicons name="flame" size={20} color="#fff" />
-						</View>
-						<View style={styles.drawerItemContent}>
-							<Text style={styles.drawerItemText}>FitZone</Text>
-							<Text style={styles.drawerItemSubtext}>Track your workouts</Text>
-						</View>
-						<Ionicons
-							name="chevron-forward"
-							size={18}
-							color={theme.textMuted}
-						/>
-					</TouchableOpacity>
-
-					<TouchableOpacity
-						style={styles.drawerItem}
-						onPress={() => {
-							setDrawerOpen(false);
-							router.push("/(tabs)/finance" as any);
-						}}
-					>
-						<View
-							style={[
-								styles.drawerItemIconNew,
-								{ backgroundColor: theme.warning },
-							]}
-						>
-							<Ionicons name="trending-up" size={20} color="#fff" />
-						</View>
-						<View style={styles.drawerItemContent}>
-							<Text style={styles.drawerItemText}>Money Hub</Text>
-							<Text style={styles.drawerItemSubtext}>Manage your finances</Text>
-						</View>
-						<Ionicons
-							name="chevron-forward"
-							size={18}
-							color={theme.textMuted}
-						/>
-					</TouchableOpacity>
-
-					<View style={styles.drawerDivider} />
-
-					<Text style={styles.drawerSectionTitle}>GENERAL</Text>
-
-					<TouchableOpacity
-						style={styles.drawerItem}
-						onPress={() => {
-							setDrawerOpen(false);
-							router.push("/two?from=");
-						}}
-					>
-						<View
-							style={[
-								styles.drawerItemIconNew,
-								{ backgroundColor: theme.accent },
-							]}
-						>
-							<Ionicons name="cog" size={20} color="#fff" />
-						</View>
-						<View style={styles.drawerItemContent}>
-							<Text style={styles.drawerItemText}>Preferences</Text>
-							<Text style={styles.drawerItemSubtext}>Customize your app</Text>
-						</View>
-						<Ionicons
-							name="chevron-forward"
-							size={18}
-							color={theme.textMuted}
-						/>
-					</TouchableOpacity>
-				</View>
-
-				<View style={styles.drawerFooter}>
-					<View style={styles.themeToggle}>
-						<View style={styles.themeToggleLabel}>
-							<Ionicons
-								name={isDark ? "moon" : "sunny"}
-								size={20}
-								color={theme.text}
-							/>
-							<Text style={styles.themeToggleText}>
-								{isDark ? "Dark Mode" : "Light Mode"}
-							</Text>
-						</View>
-						<TouchableOpacity
-							style={[styles.toggle, isDark && styles.toggleOn]}
-							onPress={toggleTheme}
-						>
-							<View
-								style={[styles.toggleThumb, isDark && styles.toggleThumbOn]}
-							/>
-						</TouchableOpacity>
-					</View>
-				</View>
-			</Animated.View>
+			{/* Shared Drawer Component */}
+			<SharedDrawer
+				theme={theme}
+				isDark={isDark}
+				toggleTheme={toggleTheme}
+				drawerAnim={drawerAnim}
+				currentModule="habits"
+				onCloseDrawer={() => setDrawerOpen(false)}
+			/>
 
 			<ScrollView
 				style={styles.scrollView}
@@ -496,7 +359,7 @@ export default function DashboardScreen() {
 				<View style={styles.habitsSection}>
 					{/* Header Row with Days */}
 					<View style={styles.habitTableHeader}>
-						<Text style={styles.habitsTitle}>Habits</Text>
+						<Text style={styles.habitsTitle}>Habits Tracker</Text>
 						{/* Header Actions */}
 						<View style={styles.headerActions}>
 							<TouchableOpacity onPress={() => setModalVisible(true)}>

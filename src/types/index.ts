@@ -42,6 +42,7 @@ export interface Habit {
 
 	// Reminders
 	notificationTime?: string; // HH:mm format (legacy support)
+	notificationId?: string; // ID of scheduled notification for cancellation
 	reminderTime?: string; // HH:mm format
 	reminderEnabled?: boolean;
 	reminderDays?: number[]; // 0-6, Sunday to Saturday

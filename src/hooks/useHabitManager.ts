@@ -1,9 +1,9 @@
 import { useCallback } from "react";
 
+import { useHabitStore } from "../context/habitStore";
+import { NotificationService } from "../services/notificationService";
 import { Habit, HabitStats } from "../types";
 import { generateId } from "../utils/helpers";
-import { NotificationService } from "../services/notificationService";
-import { useHabitStore } from "../context/habitStore";
 
 export const useHabitManager = () => {
 	const store = useHabitStore();
@@ -22,11 +22,14 @@ export const useHabitManager = () => {
 			// Schedule notification if enabled
 			if (habit.notificationEnabled && habit.notificationTime) {
 				try {
-					await NotificationService.scheduleHabitReminder(
-						habit.id,
-						habit.name,
-						habit.notificationTime
-					);
+					const notificationId =
+						await NotificationService.scheduleHabitReminder(
+							habit.id,
+							habit.name,
+							habit.notificationTime
+						);
+					// Store the notification ID for later cancellation
+					store.updateHabit(habit.id, { notificationId });
 				} catch (error) {
 					console.error("Failed to schedule notification:", error);
 				}
@@ -55,23 +58,37 @@ export const useHabitManager = () => {
 				updates.notificationTime = notificationTime;
 			}
 
-			store.updateHabit(habitId, updates);
+			// Cancel old notification if it exists
+			if (habit.notificationId) {
+				try {
+					await NotificationService.cancelNotification(habit.notificationId);
+				} catch (error) {
+					console.error("Failed to cancel old notification:", error);
+				}
+			}
 
-			// Reschedule notifications
+			// Reschedule notifications if enabled
 			if (notificationEnabled) {
 				const timeToUse = notificationTime || habit.notificationTime;
 				if (timeToUse) {
 					try {
-						await NotificationService.scheduleHabitReminder(
-							habitId,
-							habit.name,
-							timeToUse
-						);
+						const newNotificationId =
+							await NotificationService.scheduleHabitReminder(
+								habitId,
+								habit.name,
+								timeToUse
+							);
+						updates.notificationId = newNotificationId;
 					} catch (error) {
 						console.error("Failed to reschedule notification:", error);
 					}
 				}
+			} else {
+				// Clear notification ID if notifications are disabled
+				updates.notificationId = undefined;
 			}
+
+			store.updateHabit(habitId, updates);
 		},
 		[store]
 	);
@@ -85,7 +102,16 @@ export const useHabitManager = () => {
 	);
 
 	const deleteHabitPermanently = useCallback(
-		(habitId: string) => {
+		async (habitId: string) => {
+			const habit = store.getHabit(habitId);
+			// Cancel notification if it exists
+			if (habit?.notificationId) {
+				try {
+					await NotificationService.cancelNotification(habit.notificationId);
+				} catch (error) {
+					console.error("Failed to cancel notification:", error);
+				}
+			}
 			store.deleteHabit(habitId);
 		},
 		[store]

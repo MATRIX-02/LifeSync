@@ -1,30 +1,30 @@
 // Finance Tracker - Main Screen
 
-import React, { useState, useRef, useEffect } from "react";
-import {
-	View,
-	Text,
-	StyleSheet,
-	TouchableOpacity,
-	ScrollView,
-	StatusBar,
-	Animated,
-	Dimensions,
-	Image,
-} from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SharedDrawer } from "@/src/components/SharedDrawer";
+import { useFinanceStore } from "@/src/context/financeStore";
+import { useHabitStore } from "@/src/context/habitStore";
+import { useModuleStore } from "@/src/context/moduleContext";
+import { Theme, useColors, useTheme } from "@/src/context/themeContext";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useRouter } from "expo-router";
-import { useTheme, useColors, Theme } from "@/src/context/themeContext";
-import { useHabitStore } from "@/src/context/habitStore";
-import { useFinanceStore } from "@/src/context/financeStore";
+import React, { useEffect, useState } from "react";
+import {
+	Animated,
+	Dimensions,
+	StatusBar,
+	StyleSheet,
+	Text,
+	TouchableOpacity,
+	View,
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 
 // Import Finance Components
-import FinanceDashboard from "@/src/components/finance/FinanceDashboard";
-import TransactionList from "@/src/components/finance/TransactionList";
 import BudgetManager from "@/src/components/finance/BudgetManager";
-import SplitWise from "@/src/components/finance/SplitWise";
 import FinanceAnalytics from "@/src/components/finance/FinanceAnalytics";
+import FinanceDashboard from "@/src/components/finance/FinanceDashboard";
+import SplitWise from "@/src/components/finance/SplitWise";
+import TransactionList from "@/src/components/finance/TransactionList";
 
 const { width, height } = Dimensions.get("window");
 
@@ -41,6 +41,24 @@ export default function FinanceScreen() {
 	const theme = useColors();
 	const { profile } = useHabitStore();
 	const { currency } = useFinanceStore();
+	const { isModuleEnabled, getFirstEnabledModule } = useModuleStore();
+
+	// Check if module is disabled BEFORE any other hooks
+	const isFinanceEnabled = isModuleEnabled("finance");
+	const firstEnabledModule = getFirstEnabledModule();
+
+	// Early return if module is disabled - MUST be before other hooks
+	if (!isFinanceEnabled) {
+		useEffect(() => {
+			if (firstEnabledModule === "habits") {
+				router.replace("/(tabs)");
+			} else if (firstEnabledModule === "workout") {
+				router.replace("/(tabs)/workout");
+			}
+		}, []);
+		return null;
+	}
+
 	const styles = createStyles(theme);
 
 	const [activeTab, setActiveTab] = useState<FinanceTab>("dashboard");
@@ -139,179 +157,21 @@ export default function FinanceScreen() {
 			{/* Drawer Overlay */}
 			{drawerOpen && (
 				<TouchableOpacity
-					style={styles.drawerOverlay}
+					style={[styles.drawerOverlay, { zIndex: 15 }]}
 					activeOpacity={1}
 					onPress={() => setDrawerOpen(false)}
 				/>
 			)}
 
-			{/* Animated Drawer */}
-			<Animated.View
-				style={[styles.drawer, { transform: [{ translateX: drawerAnim }] }]}
-			>
-				<TouchableOpacity
-					style={styles.drawerHeader}
-					onPress={() => {
-						setDrawerOpen(false);
-						router.push({
-							pathname: "/(tabs)/profile",
-							params: { from: "finance" },
-						} as any);
-					}}
-					activeOpacity={0.7}
-				>
-					{profile?.avatar ? (
-						<Image
-							source={{ uri: profile.avatar }}
-							style={styles.drawerAvatarImage}
-						/>
-					) : (
-						<View style={styles.drawerAvatar}>
-							<Ionicons name="person" size={32} color={theme.textSecondary} />
-						</View>
-					)}
-					<Text style={styles.drawerName}>{userName}</Text>
-					<Text style={styles.drawerEmail}>
-						{profile?.email || "Tap to set up profile"}
-					</Text>
-				</TouchableOpacity>
-
-				<View style={styles.drawerContent}>
-					<Text style={styles.drawerSectionTitle}>MODULES</Text>
-
-					<TouchableOpacity
-						style={styles.drawerItem}
-						onPress={() => {
-							setDrawerOpen(false);
-							router.push("/(tabs)/" as any);
-						}}
-					>
-						<View
-							style={[
-								styles.drawerItemIconNew,
-								{ backgroundColor: theme.primary },
-							]}
-						>
-							<Ionicons name="sparkles" size={20} color="#fff" />
-						</View>
-						<View style={styles.drawerItemContent}>
-							<Text style={styles.drawerItemText}>Daily Rituals</Text>
-							<Text style={styles.drawerItemSubtext}>Build better habits</Text>
-						</View>
-						<Ionicons
-							name="chevron-forward"
-							size={18}
-							color={theme.textMuted}
-						/>
-					</TouchableOpacity>
-
-					<TouchableOpacity
-						style={styles.drawerItem}
-						onPress={() => {
-							setDrawerOpen(false);
-							router.push("/(tabs)/workout" as any);
-						}}
-					>
-						<View
-							style={[
-								styles.drawerItemIconNew,
-								{ backgroundColor: theme.success },
-							]}
-						>
-							<Ionicons name="flame" size={20} color="#fff" />
-						</View>
-						<View style={styles.drawerItemContent}>
-							<Text style={styles.drawerItemText}>FitZone</Text>
-							<Text style={styles.drawerItemSubtext}>Track your workouts</Text>
-						</View>
-						<Ionicons
-							name="chevron-forward"
-							size={18}
-							color={theme.textMuted}
-						/>
-					</TouchableOpacity>
-
-					<TouchableOpacity
-						style={[styles.drawerItem, styles.drawerItemActive]}
-						onPress={() => setDrawerOpen(false)}
-					>
-						<View
-							style={[
-								styles.drawerItemIconNew,
-								{ backgroundColor: theme.warning },
-							]}
-						>
-							<Ionicons name="trending-up" size={20} color="#fff" />
-						</View>
-						<View style={styles.drawerItemContent}>
-							<Text
-								style={[styles.drawerItemText, styles.drawerItemTextActive]}
-							>
-								Money Hub
-							</Text>
-							<Text style={styles.drawerItemSubtext}>Manage your finances</Text>
-						</View>
-						<View style={styles.drawerItemBadge}>
-							<Ionicons name="checkmark" size={16} color={theme.warning} />
-						</View>
-					</TouchableOpacity>
-
-					<View style={styles.drawerDivider} />
-
-					<Text style={styles.drawerSectionTitle}>GENERAL</Text>
-
-					<TouchableOpacity
-						style={styles.drawerItem}
-						onPress={() => {
-							setDrawerOpen(false);
-							router.push("/two?from=finance");
-						}}
-					>
-						<View
-							style={[
-								styles.drawerItemIconNew,
-								{ backgroundColor: theme.accent },
-							]}
-						>
-							<Ionicons name="cog" size={20} color="#fff" />
-						</View>
-						<View style={styles.drawerItemContent}>
-							<Text style={styles.drawerItemText}>Preferences</Text>
-							<Text style={styles.drawerItemSubtext}>Customize your app</Text>
-						</View>
-						<Ionicons
-							name="chevron-forward"
-							size={18}
-							color={theme.textMuted}
-						/>
-					</TouchableOpacity>
-				</View>
-
-				<View style={styles.drawerFooter}>
-					<View style={styles.themeToggle}>
-						<View style={styles.themeToggleLabel}>
-							<Ionicons
-								name={isDark ? "moon" : "sunny"}
-								size={20}
-								color={theme.text}
-							/>
-							<Text style={styles.themeToggleText}>
-								{isDark ? "Dark Mode" : "Light Mode"}
-							</Text>
-						</View>
-						<TouchableOpacity
-							style={[styles.toggle, isDark && styles.toggleOn]}
-							onPress={toggleTheme}
-						>
-							<View
-								style={[styles.toggleThumb, isDark && styles.toggleThumbOn]}
-							/>
-						</TouchableOpacity>
-					</View>
-				</View>
-			</Animated.View>
-
-			{/* Header - Same style as Workout page */}
+			{/* Shared Drawer Component */}
+			<SharedDrawer
+				theme={theme}
+				isDark={isDark}
+				toggleTheme={toggleTheme}
+				drawerAnim={drawerAnim}
+				currentModule="finance"
+				onCloseDrawer={() => setDrawerOpen(false)}
+			/>
 			<View style={styles.header}>
 				<Text style={styles.headerTitle}>Finance Tracker</Text>
 				<TouchableOpacity onPress={() => setDrawerOpen(true)}>
@@ -393,13 +253,14 @@ const createStyles = (theme: Theme) =>
 		},
 		tabIconContainer: {
 			width: 40,
-			height: 32,
-			borderRadius: 16,
+			height: 40,
+			borderRadius: 10,
 			justifyContent: "center",
 			alignItems: "center",
 		},
 		tabIconContainerActive: {
 			backgroundColor: theme.primary + "20",
+			borderRadius: 10,
 		},
 		tabLabel: {
 			fontSize: 10,

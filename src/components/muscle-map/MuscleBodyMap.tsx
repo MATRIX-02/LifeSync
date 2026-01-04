@@ -2,14 +2,13 @@
 // Similar to fitness app muscle maps with dark background and red highlighted muscles
 
 import React from "react";
-import { View, Text, StyleSheet } from "react-native";
-import Svg, { Path, G, Defs, LinearGradient, Stop } from "react-native-svg";
+import { StyleSheet, Text, View } from "react-native";
+import Svg, { Defs, G, LinearGradient, Path, Stop } from "react-native-svg";
 import { MuscleGroup } from "../../types/workout";
-import { MUSCLE_GROUP_INFO } from "../../data/exerciseDatabase";
-import { MuscleBodyMapProps } from "./types";
-import { MALE_FRONT_MUSCLES, FEMALE_FRONT_MUSCLES } from "./frontMuscles";
-import { MALE_BACK_MUSCLES, FEMALE_BACK_MUSCLES } from "./backMuscles";
+import { FEMALE_BACK_MUSCLES, MALE_BACK_MUSCLES } from "./backMuscles";
 import { BODY_OUTLINE, MUSCLE_DEFINITION_LINES } from "./bodyOutline";
+import { FEMALE_FRONT_MUSCLES, MALE_FRONT_MUSCLES } from "./frontMuscles";
+import { MuscleBodyMapProps } from "./types";
 
 const MuscleBodyMap: React.FC<MuscleBodyMapProps> = ({
 	gender,
@@ -21,7 +20,7 @@ const MuscleBodyMap: React.FC<MuscleBodyMapProps> = ({
 	theme,
 	view,
 }) => {
-	// Select appropriate muscle set
+	// Select appropriate muscle set based on gender and view
 	const muscles =
 		view === "front"
 			? gender === "male"
@@ -31,11 +30,12 @@ const MuscleBodyMap: React.FC<MuscleBodyMapProps> = ({
 			? MALE_BACK_MUSCLES
 			: FEMALE_BACK_MUSCLES;
 
-	const outline = view === "front" ? BODY_OUTLINE.front : BODY_OUTLINE.back;
-	const defLines =
-		view === "front"
-			? MUSCLE_DEFINITION_LINES.front
-			: MUSCLE_DEFINITION_LINES.back;
+	// Select appropriate body outline based on gender and view
+	const outlineSet = view === "front" ? BODY_OUTLINE.front : BODY_OUTLINE.back;
+	const outline = gender === "male" ? outlineSet.male : outlineSet.female;
+
+	const frontDefLines = MUSCLE_DEFINITION_LINES.front;
+	const backDefLines = MUSCLE_DEFINITION_LINES.back;
 
 	// Get muscle color based on intensity (like the reference image)
 	const getMuscleColor = (
@@ -160,55 +160,140 @@ const MuscleBodyMap: React.FC<MuscleBodyMapProps> = ({
 					/>
 				</G>
 
-				{/* Muscle Definition Lines */}
-				<G opacity="0.4">
+				{/* Muscle Definition Lines - White lines showing muscle boundaries */}
+				<G opacity="0.5">
 					{view === "front" ? (
 						<>
+							{/* Chest separation */}
 							<Path
-								d={defLines.chestSeparation}
-								stroke={definitionLineColor}
-								strokeWidth="0.8"
+								d={frontDefLines.chestSeparation}
+								stroke="#FFFFFF"
+								strokeWidth="1"
 								fill="none"
 							/>
+							{/* Linea alba */}
 							<Path
-								d={defLines.lineaAlba}
-								stroke={definitionLineColor}
-								strokeWidth="0.6"
+								d={frontDefLines.lineaAlba}
+								stroke="#FFFFFF"
+								strokeWidth="1"
 								fill="none"
 							/>
-							{defLines.abLines?.map((line, i) => (
+							{/* Ab horizontal lines */}
+							{frontDefLines.abLines?.map((line: string, i: number) => (
 								<Path
 									key={`ab-${i}`}
 									d={line}
-									stroke={definitionLineColor}
-									strokeWidth="0.5"
+									stroke="#FFFFFF"
+									strokeWidth="0.8"
 									fill="none"
 								/>
 							))}
-							{defLines.vLine?.map((line, i) => (
+							{/* V-lines */}
+							{frontDefLines.vLine?.map((line: string, i: number) => (
 								<Path
 									key={`v-${i}`}
 									d={line}
-									stroke={definitionLineColor}
-									strokeWidth="0.4"
+									stroke="#FFFFFF"
+									strokeWidth="0.8"
+									fill="none"
+								/>
+							))}
+							{/* Pec lines */}
+							{frontDefLines.pecLines?.map((line: string, i: number) => (
+								<Path
+									key={`pec-${i}`}
+									d={line}
+									stroke="#FFFFFF"
+									strokeWidth="0.7"
+									fill="none"
+								/>
+							))}
+							{/* Serratus lines */}
+							{frontDefLines.serratusLines?.map((line: string, i: number) => (
+								<Path
+									key={`serratus-${i}`}
+									d={line}
+									stroke="#FFFFFF"
+									strokeWidth="0.6"
+									fill="none"
+								/>
+							))}
+							{/* Shoulder lines */}
+							{frontDefLines.shoulderLines?.map((line: string, i: number) => (
+								<Path
+									key={`shoulder-${i}`}
+									d={line}
+									stroke="#FFFFFF"
+									strokeWidth="0.7"
+									fill="none"
+								/>
+							))}
+							{/* Bicep peak lines */}
+							{frontDefLines.bicepLines?.map((line: string, i: number) => (
+								<Path
+									key={`bicep-${i}`}
+									d={line}
+									stroke="#FFFFFF"
+									strokeWidth="0.6"
 									fill="none"
 								/>
 							))}
 						</>
 					) : (
 						<>
+							{/* Spine */}
 							<Path
-								d={defLines.spine}
-								stroke={definitionLineColor}
-								strokeWidth="0.6"
+								d={backDefLines.spine}
+								stroke="#FFFFFF"
+								strokeWidth="1.2"
 								fill="none"
 							/>
-							{defLines.scapula?.map((line, i) => (
+							{/* Scapula */}
+							{backDefLines.scapula?.map((line: string, i: number) => (
 								<Path
 									key={`scap-${i}`}
 									d={line}
-									stroke={definitionLineColor}
-									strokeWidth="0.5"
+									stroke="#FFFFFF"
+									strokeWidth="0.7"
+									fill="none"
+								/>
+							))}
+							{/* Lat V-taper lines */}
+							{backDefLines.latLines?.map((line: string, i: number) => (
+								<Path
+									key={`lat-${i}`}
+									d={line}
+									stroke="#FFFFFF"
+									strokeWidth="0.8"
+									fill="none"
+								/>
+							))}
+							{/* Lower back/erector spinae */}
+							{backDefLines.lowerBackLines?.map((line: string, i: number) => (
+								<Path
+									key={`lowerback-${i}`}
+									d={line}
+									stroke="#FFFFFF"
+									strokeWidth="0.7"
+									fill="none"
+								/>
+							))}
+							{/* Glute separation */}
+							{backDefLines.gluteLine && (
+								<Path
+									d={backDefLines.gluteLine}
+									stroke="#FFFFFF"
+									strokeWidth="1"
+									fill="none"
+								/>
+							)}
+							{/* Trapezius lines */}
+							{backDefLines.trapLines?.map((line: string, i: number) => (
+								<Path
+									key={`trap-${i}`}
+									d={line}
+									stroke="#FFFFFF"
+									strokeWidth="0.7"
 									fill="none"
 								/>
 							))}
