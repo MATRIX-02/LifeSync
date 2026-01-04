@@ -107,21 +107,9 @@ export default function DashboardScreen() {
 	const theme = useColors();
 	const { isModuleEnabled, getFirstEnabledModule } = useModuleStore();
 
-	// Check if module is disabled BEFORE any other hooks
+	// Check if module is disabled
 	const isHabitsEnabled = isModuleEnabled("habits");
 	const firstEnabledModule = getFirstEnabledModule();
-
-	// Early return if module is disabled - MUST be before other hooks
-	if (!isHabitsEnabled) {
-		useEffect(() => {
-			if (firstEnabledModule === "workout") {
-				router.replace("/(tabs)/workout");
-			} else if (firstEnabledModule === "finance") {
-				router.replace("/(tabs)/finance");
-			}
-		}, []);
-		return null;
-	}
 
 	const {
 		habits,
@@ -190,6 +178,50 @@ export default function DashboardScreen() {
 	const today = new Date();
 	const userName = profile?.name || "User";
 
+	// Get workout stats
+	const { getWorkoutStats, workoutPlans, activePlanId } = useWorkoutStore();
+	const workoutStats = getWorkoutStats();
+
+	// Calculate monthly progress for a habit (percentage of days completed this month)
+	const getMonthlyProgress = useCallback(
+		(habitId: string) => {
+			const now = new Date();
+			const year = now.getFullYear();
+			const month = now.getMonth();
+
+			// Get total days in current month
+			const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+			// Get unique completed days this month (not just log count)
+			const completedDays = new Set<string>();
+
+			logs.forEach((log: HabitLog) => {
+				if (log.habitId !== habitId) return;
+				const logDate = new Date(log.completedAt);
+				if (logDate.getFullYear() === year && logDate.getMonth() === month) {
+					// Store day as string to ensure uniqueness
+					completedDays.add(logDate.getDate().toString());
+				}
+			});
+
+			// Calculate percentage (unique days completed / total days in month)
+			const progress = Math.min(
+				100,
+				Math.round((completedDays.size / daysInMonth) * 100)
+			);
+			return progress;
+		},
+		[logs]
+	);
+
+	const handleCompleteHabit = useCallback(
+		(habitId: string) => {
+			logHabitCompletion(habitId);
+			calculateStats(habitId);
+		},
+		[logHabitCompletion, calculateStats]
+	);
+
 	// Animate drawer
 	useEffect(() => {
 		Animated.timing(drawerAnim, {
@@ -198,6 +230,21 @@ export default function DashboardScreen() {
 			useNativeDriver: true,
 		}).start();
 	}, [drawerOpen]);
+
+	// Redirect if module is disabled - MUST be a hook, cannot be conditional
+	useEffect(() => {
+		if (!isHabitsEnabled) {
+			if (firstEnabledModule === "workout") {
+				router.replace("/(tabs)/workout");
+			} else if (firstEnabledModule === "finance") {
+				router.replace("/(tabs)/finance");
+			}
+		}
+	}, [isHabitsEnabled, firstEnabledModule, router]);
+
+	if (!isHabitsEnabled) {
+		return null;
+	}
 
 	const getWeekDates = () => {
 		const dates = [];
@@ -228,14 +275,6 @@ export default function DashboardScreen() {
 				new Date(log.completedAt) <= todayEnd
 		);
 	};
-
-	const handleCompleteHabit = useCallback(
-		(habitId: string) => {
-			logHabitCompletion(habitId);
-			calculateStats(habitId);
-		},
-		[logHabitCompletion, calculateStats]
-	);
 
 	const handleHabitLongPress = (habit: Habit) => {
 		Alert.alert(habit.name, "What would you like to do?", [
@@ -286,42 +325,6 @@ export default function DashboardScreen() {
 		).length;
 		return Math.round((completed / activeHabits.length) * 100);
 	};
-
-	// Get workout stats
-	const { getWorkoutStats, workoutPlans, activePlanId } = useWorkoutStore();
-	const workoutStats = getWorkoutStats();
-
-	// Calculate monthly progress for a habit (percentage of days completed this month)
-	const getMonthlyProgress = useCallback(
-		(habitId: string) => {
-			const now = new Date();
-			const year = now.getFullYear();
-			const month = now.getMonth();
-
-			// Get total days in current month
-			const daysInMonth = new Date(year, month + 1, 0).getDate();
-
-			// Get unique completed days this month (not just log count)
-			const completedDays = new Set<string>();
-
-			logs.forEach((log: HabitLog) => {
-				if (log.habitId !== habitId) return;
-				const logDate = new Date(log.completedAt);
-				if (logDate.getFullYear() === year && logDate.getMonth() === month) {
-					// Store day as string to ensure uniqueness
-					completedDays.add(logDate.getDate().toString());
-				}
-			});
-
-			// Calculate percentage (unique days completed / total days in month)
-			const progress = Math.min(
-				100,
-				Math.round((completedDays.size / daysInMonth) * 100)
-			);
-			return progress;
-		},
-		[logs]
-	);
 
 	const styles = createStyles(theme);
 

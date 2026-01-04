@@ -43,21 +43,9 @@ export default function FinanceScreen() {
 	const { currency } = useFinanceStore();
 	const { isModuleEnabled, getFirstEnabledModule } = useModuleStore();
 
-	// Check if module is disabled BEFORE any other hooks
+	// Check if module is disabled
 	const isFinanceEnabled = isModuleEnabled("finance");
 	const firstEnabledModule = getFirstEnabledModule();
-
-	// Early return if module is disabled - MUST be before other hooks
-	if (!isFinanceEnabled) {
-		useEffect(() => {
-			if (firstEnabledModule === "habits") {
-				router.replace("/(tabs)");
-			} else if (firstEnabledModule === "workout") {
-				router.replace("/(tabs)/workout");
-			}
-		}, []);
-		return null;
-	}
 
 	const styles = createStyles(theme);
 
@@ -67,6 +55,17 @@ export default function FinanceScreen() {
 
 	const userName = profile?.name || "User";
 
+	// Redirect if module is disabled - MUST be a hook, cannot be conditional
+	useEffect(() => {
+		if (!isFinanceEnabled) {
+			if (firstEnabledModule === "habits") {
+				router.replace("/(tabs)");
+			} else if (firstEnabledModule === "workout") {
+				router.replace("/(tabs)/workout");
+			}
+		}
+	}, [isFinanceEnabled, firstEnabledModule, router]);
+
 	// Animate drawer
 	useEffect(() => {
 		Animated.timing(drawerAnim, {
@@ -75,6 +74,10 @@ export default function FinanceScreen() {
 			useNativeDriver: true,
 		}).start();
 	}, [drawerOpen]);
+
+	if (!isFinanceEnabled) {
+		return null;
+	}
 
 	const getGreeting = () => {
 		const hour = new Date().getHours();

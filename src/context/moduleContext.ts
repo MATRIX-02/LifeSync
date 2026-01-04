@@ -21,7 +21,8 @@ export const useModuleStore = create<ModuleStore>()(
 			enabledModules: defaultModules,
 
 			isModuleEnabled: (module: ModuleType) => {
-				return get().enabledModules.includes(module);
+				const modules = get().enabledModules;
+				return modules ? modules.includes(module) : false;
 			},
 
 			toggleModule: async (module: ModuleType, enabled: boolean) => {
@@ -101,17 +102,18 @@ export const useModuleStore = create<ModuleStore>()(
 				}
 
 				set((state) => {
+					const currentModules = state.enabledModules || [];
 					if (enabled) {
 						// Add module if not already present
-						if (!state.enabledModules.includes(module)) {
+						if (!currentModules.includes(module)) {
 							return {
-								enabledModules: [...state.enabledModules, module],
+								enabledModules: [...currentModules, module],
 							};
 						}
 					} else {
 						// Remove module
 						return {
-							enabledModules: state.enabledModules.filter((m) => m !== module),
+							enabledModules: currentModules.filter((m) => m !== module),
 						};
 					}
 					return state;
@@ -120,13 +122,22 @@ export const useModuleStore = create<ModuleStore>()(
 
 			getFirstEnabledModule: () => {
 				const modules = get().enabledModules;
-				if (modules.length === 0) return "habits"; // Fallback
+				if (!modules || modules.length === 0) return "habits"; // Fallback
 				return modules[0];
 			},
 		}),
 		{
 			name: "module-store",
 			storage: createJSONStorage(() => AsyncStorage),
+			// Ensure we always have valid data after rehydration
+			onRehydrateStorage: () => (state) => {
+				if (
+					state &&
+					(!state.enabledModules || state.enabledModules.length === 0)
+				) {
+					state.enabledModules = defaultModules;
+				}
+			},
 		}
 	)
 );

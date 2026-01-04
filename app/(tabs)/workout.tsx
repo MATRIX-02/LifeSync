@@ -46,21 +46,9 @@ export default function WorkoutTrackerScreen() {
 	const { profile } = useHabitStore();
 	const { isModuleEnabled, getFirstEnabledModule } = useModuleStore();
 
-	// Check if module is disabled BEFORE any other hooks
+	// Check if module is disabled
 	const isWorkoutEnabled = isModuleEnabled("workout");
 	const firstEnabledModule = getFirstEnabledModule();
-
-	// Early return if module is disabled - MUST be before other hooks
-	if (!isWorkoutEnabled) {
-		useEffect(() => {
-			if (firstEnabledModule === "habits") {
-				router.replace("/(tabs)");
-			} else if (firstEnabledModule === "finance") {
-				router.replace("/(tabs)/finance");
-			}
-		}, []);
-		return null;
-	}
 
 	const [activeTab, setActiveTab] = useState<TabType>("dashboard");
 	const [tabIndicatorAnim] = useState(new Animated.Value(0));
@@ -71,6 +59,17 @@ export default function WorkoutTrackerScreen() {
 	const userName = profile?.name || "User";
 	const styles = createStyles(theme);
 
+	// Redirect if module is disabled - MUST be a hook, cannot be conditional
+	useEffect(() => {
+		if (!isWorkoutEnabled) {
+			if (firstEnabledModule === "habits") {
+				router.replace("/(tabs)");
+			} else if (firstEnabledModule === "finance") {
+				router.replace("/(tabs)/finance");
+			}
+		}
+	}, [isWorkoutEnabled, firstEnabledModule, router]);
+
 	// Animate drawer
 	useEffect(() => {
 		Animated.timing(drawerAnim, {
@@ -79,6 +78,10 @@ export default function WorkoutTrackerScreen() {
 			useNativeDriver: true,
 		}).start();
 	}, [drawerOpen]);
+
+	if (!isWorkoutEnabled) {
+		return null;
+	}
 
 	const handleTabChange = (tab: TabType) => {
 		const tabIndex = tabs.findIndex((t) => t.key === tab);

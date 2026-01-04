@@ -79,6 +79,11 @@ export const SharedDrawer: React.FC<SharedDrawerProps> = ({
 	};
 
 	const renderModuleItems = () => {
+		// Safety check: if no modules enabled, return empty array
+		if (!enabledModules || enabledModules.length === 0) {
+			return null;
+		}
+
 		return enabledModules.map((module) => {
 			const config = moduleConfig[module];
 			const colorKey = config.color as keyof Theme;

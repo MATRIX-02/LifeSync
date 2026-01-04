@@ -631,467 +631,273 @@ export default function SettingsScreen() {
 					</View>
 				</View>
 
-				{/* Data Management Section - All Data */}
+				{/* Data Management Section */}
 				<View style={styles.section}>
-					<Text style={styles.sectionTitle}>DATA MANAGEMENT - ALL DATA</Text>
+					<Text style={styles.sectionTitle}>DATA MANAGEMENT</Text>
 
+					{/* All Data - Compact Actions */}
 					<View style={styles.settingCard}>
-						<TouchableOpacity
-							style={[
-								styles.settingRow,
-								isExporting === "habits" && { opacity: 0.5 },
-							]}
-							onPress={handleExportAllData}
-							disabled={isExporting !== null}
-						>
-							<View
-								style={[
-									styles.settingIcon,
-									{ backgroundColor: theme.primary + "20" },
-								]}
-							>
-								<Ionicons
-									name="download-outline"
-									size={20}
-									color={theme.primary}
-								/>
-							</View>
-							<View style={styles.settingContent}>
-								<Text style={styles.settingLabel}>
-									{isExporting ? "Exporting..." : "Export All Data"}
-								</Text>
-								<Text style={styles.settingDescription}>
-									Backup all habits, workouts & finance data
-								</Text>
-							</View>
-							<Ionicons
-								name="chevron-forward"
-								size={20}
-								color={theme.textMuted}
-							/>
-						</TouchableOpacity>
-
-						<View style={styles.divider} />
-
-						<TouchableOpacity
-							style={[
-								styles.settingRow,
-								isImporting === "habits" && { opacity: 0.5 },
-							]}
-							onPress={handleImportAllData}
-							disabled={isImporting !== null}
-						>
-							<View
-								style={[
-									styles.settingIcon,
-									{ backgroundColor: theme.accent + "20" },
-								]}
-							>
-								<Ionicons
-									name="cloud-upload-outline"
-									size={20}
-									color={theme.accent}
-								/>
-							</View>
-							<View style={styles.settingContent}>
-								<Text style={styles.settingLabel}>
-									{isImporting ? "Importing..." : "Import All Data"}
-								</Text>
-								<Text style={styles.settingDescription}>
-									Restore from a complete backup file
-								</Text>
-							</View>
-							<Ionicons
-								name="chevron-forward"
-								size={20}
-								color={theme.textMuted}
-							/>
-						</TouchableOpacity>
-
-						<View style={styles.divider} />
-
-						<TouchableOpacity
-							style={styles.settingRow}
-							onPress={handleClearAllData}
-						>
-							<View
-								style={[
-									styles.settingIcon,
-									{ backgroundColor: theme.error + "20" },
-								]}
-							>
-								<Ionicons name="trash-outline" size={20} color={theme.error} />
-							</View>
-							<View style={styles.settingContent}>
-								<Text style={[styles.settingLabel, { color: theme.error }]}>
-									Clear All Data
-								</Text>
-								<Text style={styles.settingDescription}>
-									Delete all data from all modules
-								</Text>
-							</View>
-							<Ionicons
-								name="chevron-forward"
-								size={20}
-								color={theme.textMuted}
-							/>
-						</TouchableOpacity>
-					</View>
-				</View>
-
-				{/* Data Management - Habits */}
-				{moduleStore.isModuleEnabled("habits") && (
-					<View style={styles.section}>
-						<Text style={styles.sectionTitle}>DATA MANAGEMENT - HABITS</Text>
-
-						<View style={styles.settingCard}>
+						<View style={styles.compactHeader}>
+							<Text style={styles.compactHeaderText}>Complete Backup</Text>
+						</View>
+						<View style={styles.compactActions}>
 							<TouchableOpacity
 								style={[
-									styles.settingRow,
+									styles.compactButton,
 									isExporting === "habits" && { opacity: 0.5 },
 								]}
-								onPress={() => handleExportModuleData("habits")}
+								onPress={handleExportAllData}
 								disabled={isExporting !== null}
 							>
 								<View
 									style={[
-										styles.settingIcon,
+										styles.compactIcon,
 										{ backgroundColor: theme.primary + "20" },
 									]}
 								>
 									<Ionicons
 										name="download-outline"
-										size={20}
+										size={18}
 										color={theme.primary}
 									/>
 								</View>
-								<View style={styles.settingContent}>
-									<Text style={styles.settingLabel}>
-										{isExporting === "habits"
-											? "Exporting..."
-											: "Export Habits"}
-									</Text>
-									<Text style={styles.settingDescription}>
-										Backup all your habits and logs
-									</Text>
-								</View>
-								<Ionicons
-									name="chevron-forward"
-									size={20}
-									color={theme.textMuted}
-								/>
+								<Text style={styles.compactButtonText}>Export All</Text>
 							</TouchableOpacity>
-
-							<View style={styles.divider} />
 
 							<TouchableOpacity
 								style={[
-									styles.settingRow,
+									styles.compactButton,
 									isImporting === "habits" && { opacity: 0.5 },
 								]}
-								onPress={() => handleImportModuleData("habits")}
+								onPress={handleImportAllData}
 								disabled={isImporting !== null}
 							>
 								<View
 									style={[
-										styles.settingIcon,
+										styles.compactIcon,
 										{ backgroundColor: theme.accent + "20" },
 									]}
 								>
 									<Ionicons
 										name="cloud-upload-outline"
-										size={20}
+										size={18}
 										color={theme.accent}
 									/>
 								</View>
-								<View style={styles.settingContent}>
-									<Text style={styles.settingLabel}>
-										{isImporting === "habits"
-											? "Importing..."
-											: "Import Habits"}
-									</Text>
-									<Text style={styles.settingDescription}>
-										Restore habits from backup
-									</Text>
-								</View>
-								<Ionicons
-									name="chevron-forward"
-									size={20}
-									color={theme.textMuted}
-								/>
+								<Text style={styles.compactButtonText}>Import All</Text>
 							</TouchableOpacity>
 
-							<View style={styles.divider} />
-
 							<TouchableOpacity
-								style={styles.settingRow}
-								onPress={() => handleClearModuleData("habits")}
+								style={styles.compactButton}
+								onPress={handleClearAllData}
 							>
 								<View
 									style={[
-										styles.settingIcon,
+										styles.compactIcon,
 										{ backgroundColor: theme.error + "20" },
 									]}
 								>
 									<Ionicons
 										name="trash-outline"
-										size={20}
+										size={18}
 										color={theme.error}
 									/>
 								</View>
-								<View style={styles.settingContent}>
-									<Text style={[styles.settingLabel, { color: theme.error }]}>
-										Clear Habits Data
-									</Text>
-									<Text style={styles.settingDescription}>
-										Delete all habits and logs
-									</Text>
-								</View>
-								<Ionicons
-									name="chevron-forward"
-									size={20}
-									color={theme.textMuted}
-								/>
+								<Text
+									style={[styles.compactButtonText, { color: theme.error }]}
+								>
+									Clear All
+								</Text>
 							</TouchableOpacity>
 						</View>
 					</View>
-				)}
 
-				{/* Data Management - Workout */}
-				{moduleStore.isModuleEnabled("workout") && (
-					<View style={styles.section}>
-						<Text style={styles.sectionTitle}>DATA MANAGEMENT - FITZONE</Text>
+					{/* Module-Specific Data */}
+					{(moduleStore.isModuleEnabled("habits") ||
+						moduleStore.isModuleEnabled("workout") ||
+						moduleStore.isModuleEnabled("finance")) && (
+						<View style={[styles.settingCard, { marginTop: 12 }]}>
+							<View style={styles.compactHeader}>
+								<Text style={styles.compactHeaderText}>By Module</Text>
+							</View>
 
-						<View style={styles.settingCard}>
-							<TouchableOpacity
-								style={[
-									styles.settingRow,
-									isExporting === "workout" && { opacity: 0.5 },
-								]}
-								onPress={() => handleExportModuleData("workout")}
-								disabled={isExporting !== null}
-							>
-								<View
-									style={[
-										styles.settingIcon,
-										{ backgroundColor: theme.primary + "20" },
-									]}
-								>
-									<Ionicons
-										name="download-outline"
-										size={20}
-										color={theme.primary}
-									/>
-								</View>
-								<View style={styles.settingContent}>
-									<Text style={styles.settingLabel}>
-										{isExporting === "workout"
-											? "Exporting..."
-											: "Export Workouts"}
-									</Text>
-									<Text style={styles.settingDescription}>
-										Backup all your fitness data
-									</Text>
-								</View>
-								<Ionicons
-									name="chevron-forward"
-									size={20}
-									color={theme.textMuted}
-								/>
-							</TouchableOpacity>
+							{/* Habits */}
+							{moduleStore.isModuleEnabled("habits") && (
+								<>
+									<View style={styles.moduleRow}>
+										<View style={styles.moduleInfo}>
+											<Ionicons
+												name="sparkles"
+												size={16}
+												color={theme.primary}
+											/>
+											<Text style={styles.moduleLabel}>Habits</Text>
+										</View>
+										<View style={styles.moduleActions}>
+											<TouchableOpacity
+												style={styles.iconButton}
+												onPress={() => handleExportModuleData("habits")}
+												disabled={isExporting !== null}
+											>
+												<Ionicons
+													name="download-outline"
+													size={18}
+													color={
+														isExporting === "habits"
+															? theme.textMuted
+															: theme.primary
+													}
+												/>
+											</TouchableOpacity>
+											<TouchableOpacity
+												style={styles.iconButton}
+												onPress={() => handleImportModuleData("habits")}
+												disabled={isImporting !== null}
+											>
+												<Ionicons
+													name="cloud-upload-outline"
+													size={18}
+													color={
+														isImporting === "habits"
+															? theme.textMuted
+															: theme.accent
+													}
+												/>
+											</TouchableOpacity>
+											<TouchableOpacity
+												style={styles.iconButton}
+												onPress={() => handleClearModuleData("habits")}
+											>
+												<Ionicons
+													name="trash-outline"
+													size={18}
+													color={theme.error}
+												/>
+											</TouchableOpacity>
+										</View>
+									</View>
+									{(moduleStore.isModuleEnabled("workout") ||
+										moduleStore.isModuleEnabled("finance")) && (
+										<View style={styles.thinDivider} />
+									)}
+								</>
+							)}
 
-							<View style={styles.divider} />
+							{/* Workout */}
+							{moduleStore.isModuleEnabled("workout") && (
+								<>
+									<View style={styles.moduleRow}>
+										<View style={styles.moduleInfo}>
+											<Ionicons name="flame" size={16} color={theme.success} />
+											<Text style={styles.moduleLabel}>FitZone</Text>
+										</View>
+										<View style={styles.moduleActions}>
+											<TouchableOpacity
+												style={styles.iconButton}
+												onPress={() => handleExportModuleData("workout")}
+												disabled={isExporting !== null}
+											>
+												<Ionicons
+													name="download-outline"
+													size={18}
+													color={
+														isExporting === "workout"
+															? theme.textMuted
+															: theme.primary
+													}
+												/>
+											</TouchableOpacity>
+											<TouchableOpacity
+												style={styles.iconButton}
+												onPress={() => handleImportModuleData("workout")}
+												disabled={isImporting !== null}
+											>
+												<Ionicons
+													name="cloud-upload-outline"
+													size={18}
+													color={
+														isImporting === "workout"
+															? theme.textMuted
+															: theme.accent
+													}
+												/>
+											</TouchableOpacity>
+											<TouchableOpacity
+												style={styles.iconButton}
+												onPress={() => handleClearModuleData("workout")}
+											>
+												<Ionicons
+													name="trash-outline"
+													size={18}
+													color={theme.error}
+												/>
+											</TouchableOpacity>
+										</View>
+									</View>
+									{moduleStore.isModuleEnabled("finance") && (
+										<View style={styles.thinDivider} />
+									)}
+								</>
+							)}
 
-							<TouchableOpacity
-								style={[
-									styles.settingRow,
-									isImporting === "workout" && { opacity: 0.5 },
-								]}
-								onPress={() => handleImportModuleData("workout")}
-								disabled={isImporting !== null}
-							>
-								<View
-									style={[
-										styles.settingIcon,
-										{ backgroundColor: theme.accent + "20" },
-									]}
-								>
-									<Ionicons
-										name="cloud-upload-outline"
-										size={20}
-										color={theme.accent}
-									/>
+							{/* Finance */}
+							{moduleStore.isModuleEnabled("finance") && (
+								<View style={styles.moduleRow}>
+									<View style={styles.moduleInfo}>
+										<Ionicons
+											name="trending-up"
+											size={16}
+											color={theme.warning}
+										/>
+										<Text style={styles.moduleLabel}>Finance</Text>
+									</View>
+									<View style={styles.moduleActions}>
+										<TouchableOpacity
+											style={styles.iconButton}
+											onPress={() => handleExportModuleData("finance")}
+											disabled={isExporting !== null}
+										>
+											<Ionicons
+												name="download-outline"
+												size={18}
+												color={
+													isExporting === "finance"
+														? theme.textMuted
+														: theme.primary
+												}
+											/>
+										</TouchableOpacity>
+										<TouchableOpacity
+											style={styles.iconButton}
+											onPress={() => handleImportModuleData("finance")}
+											disabled={isImporting !== null}
+										>
+											<Ionicons
+												name="cloud-upload-outline"
+												size={18}
+												color={
+													isImporting === "finance"
+														? theme.textMuted
+														: theme.accent
+												}
+											/>
+										</TouchableOpacity>
+										<TouchableOpacity
+											style={styles.iconButton}
+											onPress={() => handleClearModuleData("finance")}
+										>
+											<Ionicons
+												name="trash-outline"
+												size={18}
+												color={theme.error}
+											/>
+										</TouchableOpacity>
+									</View>
 								</View>
-								<View style={styles.settingContent}>
-									<Text style={styles.settingLabel}>
-										{isImporting === "workout"
-											? "Importing..."
-											: "Import Workouts"}
-									</Text>
-									<Text style={styles.settingDescription}>
-										Restore workouts from backup
-									</Text>
-								</View>
-								<Ionicons
-									name="chevron-forward"
-									size={20}
-									color={theme.textMuted}
-								/>
-							</TouchableOpacity>
-
-							<View style={styles.divider} />
-
-							<TouchableOpacity
-								style={styles.settingRow}
-								onPress={() => handleClearModuleData("workout")}
-							>
-								<View
-									style={[
-										styles.settingIcon,
-										{ backgroundColor: theme.error + "20" },
-									]}
-								>
-									<Ionicons
-										name="trash-outline"
-										size={20}
-										color={theme.error}
-									/>
-								</View>
-								<View style={styles.settingContent}>
-									<Text style={[styles.settingLabel, { color: theme.error }]}>
-										Clear Workout Data
-									</Text>
-									<Text style={styles.settingDescription}>
-										Delete all fitness data
-									</Text>
-								</View>
-								<Ionicons
-									name="chevron-forward"
-									size={20}
-									color={theme.textMuted}
-								/>
-							</TouchableOpacity>
+							)}
 						</View>
-					</View>
-				)}
-
-				{/* Data Management - Finance */}
-				{moduleStore.isModuleEnabled("finance") && (
-					<View style={styles.section}>
-						<Text style={styles.sectionTitle}>DATA MANAGEMENT - FINANCE</Text>
-
-						<View style={styles.settingCard}>
-							<TouchableOpacity
-								style={[
-									styles.settingRow,
-									isExporting === "finance" && { opacity: 0.5 },
-								]}
-								onPress={() => handleExportModuleData("finance")}
-								disabled={isExporting !== null}
-							>
-								<View
-									style={[
-										styles.settingIcon,
-										{ backgroundColor: theme.primary + "20" },
-									]}
-								>
-									<Ionicons
-										name="download-outline"
-										size={20}
-										color={theme.primary}
-									/>
-								</View>
-								<View style={styles.settingContent}>
-									<Text style={styles.settingLabel}>
-										{isExporting === "finance"
-											? "Exporting..."
-											: "Export Finance"}
-									</Text>
-									<Text style={styles.settingDescription}>
-										Backup all financial data
-									</Text>
-								</View>
-								<Ionicons
-									name="chevron-forward"
-									size={20}
-									color={theme.textMuted}
-								/>
-							</TouchableOpacity>
-
-							<View style={styles.divider} />
-
-							<TouchableOpacity
-								style={[
-									styles.settingRow,
-									isImporting === "finance" && { opacity: 0.5 },
-								]}
-								onPress={() => handleImportModuleData("finance")}
-								disabled={isImporting !== null}
-							>
-								<View
-									style={[
-										styles.settingIcon,
-										{ backgroundColor: theme.accent + "20" },
-									]}
-								>
-									<Ionicons
-										name="cloud-upload-outline"
-										size={20}
-										color={theme.accent}
-									/>
-								</View>
-								<View style={styles.settingContent}>
-									<Text style={styles.settingLabel}>
-										{isImporting === "finance"
-											? "Importing..."
-											: "Import Finance"}
-									</Text>
-									<Text style={styles.settingDescription}>
-										Restore finance data from backup
-									</Text>
-								</View>
-								<Ionicons
-									name="chevron-forward"
-									size={20}
-									color={theme.textMuted}
-								/>
-							</TouchableOpacity>
-
-							<View style={styles.divider} />
-
-							<TouchableOpacity
-								style={styles.settingRow}
-								onPress={() => handleClearModuleData("finance")}
-							>
-								<View
-									style={[
-										styles.settingIcon,
-										{ backgroundColor: theme.error + "20" },
-									]}
-								>
-									<Ionicons
-										name="trash-outline"
-										size={20}
-										color={theme.error}
-									/>
-								</View>
-								<View style={styles.settingContent}>
-									<Text style={[styles.settingLabel, { color: theme.error }]}>
-										Clear Finance Data
-									</Text>
-									<Text style={styles.settingDescription}>
-										Delete all financial data
-									</Text>
-								</View>
-								<Ionicons
-									name="chevron-forward"
-									size={20}
-									color={theme.textMuted}
-								/>
-							</TouchableOpacity>
-						</View>
-					</View>
-				)}
+					)}
+				</View>
 
 				{/* Developer Section */}
 				<View style={styles.section}>
@@ -1397,6 +1203,73 @@ const createStyles = (theme: Theme) =>
 			height: 1,
 			backgroundColor: theme.border,
 			marginLeft: 74,
+		},
+		thinDivider: {
+			height: 1,
+			backgroundColor: theme.border,
+			marginHorizontal: 12,
+		},
+
+		// Compact Data Management
+		compactHeader: {
+			paddingHorizontal: 16,
+			paddingTop: 12,
+			paddingBottom: 8,
+		},
+		compactHeaderText: {
+			fontSize: 13,
+			fontWeight: "600",
+			color: theme.textSecondary,
+		},
+		compactActions: {
+			flexDirection: "row",
+			padding: 12,
+			gap: 8,
+		},
+		compactButton: {
+			flex: 1,
+			flexDirection: "column",
+			alignItems: "center",
+			padding: 12,
+			borderRadius: 12,
+			backgroundColor: theme.background,
+			gap: 6,
+		},
+		compactIcon: {
+			width: 36,
+			height: 36,
+			borderRadius: 10,
+			justifyContent: "center",
+			alignItems: "center",
+		},
+		compactButtonText: {
+			fontSize: 12,
+			fontWeight: "600",
+			color: theme.text,
+		},
+		moduleRow: {
+			flexDirection: "row",
+			alignItems: "center",
+			justifyContent: "space-between",
+			paddingHorizontal: 16,
+			paddingVertical: 10,
+		},
+		moduleInfo: {
+			flexDirection: "row",
+			alignItems: "center",
+			gap: 8,
+		},
+		moduleLabel: {
+			fontSize: 14,
+			fontWeight: "600",
+			color: theme.text,
+		},
+		moduleActions: {
+			flexDirection: "row",
+			gap: 16,
+		},
+		iconButton: {
+			padding: 4,
 		},
 
 		// Badge
