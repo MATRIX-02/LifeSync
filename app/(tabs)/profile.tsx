@@ -1,35 +1,36 @@
-import React, { useState, useEffect, useMemo } from "react";
-import {
-	View,
-	Text,
-	StyleSheet,
-	ScrollView,
-	TouchableOpacity,
-	TextInput,
-	StatusBar,
-	Alert,
-	Image,
-	ActionSheetIOS,
-	Platform,
-	Dimensions,
-} from "react-native";
-import * as ImagePicker from "expo-image-picker";
-import { SafeAreaView } from "react-native-safe-area-context";
-import Ionicons from "@expo/vector-icons/Ionicons";
-import { useRouter, useLocalSearchParams } from "expo-router";
-import { useTheme, useColors, Theme } from "@/src/context/themeContext";
+import MuscleBodyMap from "@/src/components/MuscleBodyMap";
+import { useAuthStore } from "@/src/context/authStore";
 import { useHabitStore } from "@/src/context/habitStore";
+import { Theme, useColors, useTheme } from "@/src/context/themeContext";
 import { useWorkoutStore } from "@/src/context/workoutStore";
+import { MUSCLE_GROUP_INFO } from "@/src/data/exerciseDatabase";
 import { UserProfile } from "@/src/types";
 import {
-	Gender,
-	FitnessLevel,
 	FitnessGoal,
+	FitnessLevel,
 	FitnessProfile,
+	Gender,
 	MuscleGroup,
 } from "@/src/types/workout";
-import MuscleBodyMap from "@/src/components/MuscleBodyMap";
-import { MUSCLE_GROUP_INFO } from "@/src/data/exerciseDatabase";
+import Ionicons from "@expo/vector-icons/Ionicons";
+import * as ImagePicker from "expo-image-picker";
+import { useLocalSearchParams, useRouter } from "expo-router";
+import React, { useEffect, useMemo, useState } from "react";
+import {
+	ActionSheetIOS,
+	Alert,
+	Dimensions,
+	Image,
+	Platform,
+	ScrollView,
+	StatusBar,
+	StyleSheet,
+	Text,
+	TextInput,
+	TouchableOpacity,
+	View,
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 
 const { width } = Dimensions.get("window");
 
@@ -52,6 +53,7 @@ export default function ProfileScreen() {
 		getWorkoutStats,
 		workoutSessions,
 	} = useWorkoutStore();
+	const { signOut } = useAuthStore();
 	const styles = createStyles(theme);
 
 	const [isEditing, setIsEditing] = useState(false);
@@ -1119,6 +1121,31 @@ export default function ProfileScreen() {
 					</>
 				)}
 
+				{/* Sign Out Button */}
+				<View style={styles.signOutSection}>
+					<TouchableOpacity
+						style={styles.signOutButton}
+						onPress={() => {
+							Alert.alert("Sign Out", "Are you sure you want to sign out?", [
+								{
+									text: "Cancel",
+									style: "cancel",
+								},
+								{
+									text: "Sign Out",
+									style: "destructive",
+									onPress: async () => {
+										await signOut();
+									},
+								},
+							]);
+						}}
+					>
+						<Ionicons name="log-out-outline" size={22} color="#FF3B30" />
+						<Text style={styles.signOutText}>Sign Out</Text>
+					</TouchableOpacity>
+				</View>
+
 				<View style={{ height: 40 }} />
 			</ScrollView>
 		</SafeAreaView>
@@ -1669,5 +1696,28 @@ const createStyles = (theme: Theme) =>
 			fontSize: 15,
 			fontWeight: "600",
 			color: "#FFFFFF",
+		},
+
+		// Sign Out Section
+		signOutSection: {
+			marginTop: 24,
+			marginHorizontal: 20,
+		},
+		signOutButton: {
+			flexDirection: "row",
+			alignItems: "center",
+			justifyContent: "center",
+			backgroundColor: theme.surface,
+			paddingVertical: 16,
+			paddingHorizontal: 24,
+			borderRadius: 14,
+			borderWidth: 1,
+			borderColor: "#FF3B30" + "30",
+			gap: 10,
+		},
+		signOutText: {
+			fontSize: 16,
+			fontWeight: "600",
+			color: "#FF3B30",
 		},
 	});

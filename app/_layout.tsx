@@ -5,11 +5,14 @@ import {
 	ThemeProvider as NavigationThemeProvider,
 } from "@react-navigation/native";
 import { useFonts } from "expo-font";
-import { Stack } from "expo-router";
+import { Stack, useRouter, useSegments } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
+import { ActivityIndicator, View } from "react-native";
 import "react-native-reanimated";
 
+import { isSupabaseConfigured } from "@/src/config/supabase";
+import { useAuthStore } from "@/src/context/authStore";
 import { useHabitStore } from "@/src/context/habitStore";
 import { ThemeProvider, useTheme } from "@/src/context/themeContext";
 import { AudioService } from "@/src/services/audioService";
@@ -113,12 +116,69 @@ export default function RootLayout() {
 }
 
 function RootLayoutNav() {
-	const { isDark } = useTheme();
+	const { isDark, theme } = useTheme();
+	const {
+		user,
+		isLoading: authLoading,
+		initialize: initializeAuth,
+	} = useAuthStore();
+	const segments = useSegments();
+	const router = useRouter();
+	const [isInitialized, setIsInitialized] = useState(false);
+
+	// Initialize auth on mount
+	useEffect(() => {
+		const init = async () => {
+			if (isSupabaseConfigured()) {
+				await initializeAuth();
+			}
+			setIsInitialized(true);
+		};
+		init();
+	}, []);
+
+	// Handle auth state and route protection
+	useEffect(() => {
+		if (!isInitialized || authLoading) return;
+
+		// Skip auth check if Supabase is not configured (development mode)
+		if (!isSupabaseConfigured()) return;
+
+		const inAuthGroup = segments[0] === "auth";
+		const inAdminGroup = segments[0] === "admin";
+
+		if (!user && !inAuthGroup) {
+			// Redirect to login if not authenticated
+			router.replace("/auth/login");
+		} else if (user && inAuthGroup) {
+			// Redirect to home if authenticated and trying to access auth screens
+			router.replace("/(tabs)");
+		}
+	}, [user, segments, isInitialized, authLoading]);
+
+	// Show loading screen while initializing
+	if (!isInitialized || (authLoading && isSupabaseConfigured())) {
+		return (
+			<View
+				style={{
+					flex: 1,
+					justifyContent: "center",
+					alignItems: "center",
+					backgroundColor: isDark ? "#1a1a2e" : "#f8f9fa",
+				}}
+			>
+				<ActivityIndicator size="large" color={theme.primary} />
+			</View>
+		);
+	}
 
 	return (
 		<NavigationThemeProvider value={isDark ? DarkTheme : DefaultTheme}>
 			<Stack>
 				<Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+				<Stack.Screen name="auth" options={{ headerShown: false }} />
+				<Stack.Screen name="admin" options={{ headerShown: false }} />
+				<Stack.Screen name="subscription" options={{ headerShown: false }} />
 				<Stack.Screen name="modal" options={{ presentation: "modal" }} />
 			</Stack>
 		</NavigationThemeProvider>
