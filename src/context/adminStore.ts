@@ -148,8 +148,7 @@ export const useAdminStore = create<AdminStore>((set, get) => ({
 	updateUserRole: async (userId: string, role: UserRole) => {
 		set({ isLoading: true, error: null });
 		try {
-			const { error } = await supabase
-				.from("profiles")
+			const { error } = await (supabase.from("profiles") as any)
 				.update({ role, updated_at: new Date().toISOString() })
 				.eq("id", userId);
 
@@ -172,8 +171,7 @@ export const useAdminStore = create<AdminStore>((set, get) => ({
 	toggleUserActive: async (userId: string, isActive: boolean) => {
 		set({ isLoading: true, error: null });
 		try {
-			const { error } = await supabase
-				.from("profiles")
+			const { error } = await (supabase.from("profiles") as any)
 				.update({ is_active: isActive, updated_at: new Date().toISOString() })
 				.eq("id", userId);
 
@@ -211,14 +209,13 @@ export const useAdminStore = create<AdminStore>((set, get) => ({
 
 			if (existingSub) {
 				// Update existing subscription
-				const { error } = await supabase
-					.from("user_subscriptions")
+				const { error } = await (supabase.from("user_subscriptions") as any)
 					.update({
 						plan_id: planId,
 						status: status as any,
 						updated_at: new Date().toISOString(),
 					})
-					.eq("id", existingSub.id);
+					.eq("id", (existingSub as any).id);
 
 				if (error) throw error;
 			} else {
@@ -227,7 +224,9 @@ export const useAdminStore = create<AdminStore>((set, get) => ({
 				const endDate = new Date();
 				endDate.setFullYear(endDate.getFullYear() + 1);
 
-				const { error } = await supabase.from("user_subscriptions").insert({
+				const { error } = await (
+					supabase.from("user_subscriptions") as any
+				).insert({
 					user_id: userId,
 					plan_id: planId,
 					status: status as any,
@@ -275,7 +274,7 @@ export const useAdminStore = create<AdminStore>((set, get) => ({
 	createCoupon: async (coupon) => {
 		set({ isLoading: true, error: null });
 		try {
-			const { error } = await supabase.from("coupons").insert({
+			const { error } = await (supabase.from("coupons") as any).insert({
 				...coupon,
 				code: coupon.code.toUpperCase(),
 				used_count: 0,
@@ -296,9 +295,8 @@ export const useAdminStore = create<AdminStore>((set, get) => ({
 	updateCoupon: async (id: string, updates: Partial<Coupon>) => {
 		set({ isLoading: true, error: null });
 		try {
-			const { error } = await supabase
-				.from("coupons")
-				.update({ ...updates, updated_at: new Date().toISOString() })
+			const { error } = await (supabase.from("coupons") as any)
+				.update({ ...updates, updated_at: new Date().toISOString() } as any)
 				.eq("id", id);
 
 			if (error) throw error;
@@ -336,8 +334,7 @@ export const useAdminStore = create<AdminStore>((set, get) => ({
 	toggleCouponActive: async (id: string, isActive: boolean) => {
 		set({ isLoading: true, error: null });
 		try {
-			const { error } = await supabase
-				.from("coupons")
+			const { error } = await (supabase.from("coupons") as any)
 				.update({ is_active: isActive, updated_at: new Date().toISOString() })
 				.eq("id", id);
 
@@ -380,9 +377,8 @@ export const useAdminStore = create<AdminStore>((set, get) => ({
 	updatePlan: async (id: string, updates: Partial<SubscriptionPlanRow>) => {
 		set({ isLoading: true, error: null });
 		try {
-			const { error } = await supabase
-				.from("subscription_plans")
-				.update({ ...updates, updated_at: new Date().toISOString() })
+			const { error } = await (supabase.from("subscription_plans") as any)
+				.update({ ...updates, updated_at: new Date().toISOString() } as any)
 				.eq("id", id);
 
 			if (error) throw error;

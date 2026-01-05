@@ -158,7 +158,11 @@ export default function AdminDashboard() {
 
 					{/* Quick Actions */}
 					<Text style={styles.sectionTitle}>Quick Actions</Text>
-					<View style={styles.actionsGrid}>
+					<View
+						style={{
+							...styles.actionsGrid,
+						}}
+					>
 						<TouchableOpacity
 							style={styles.actionCard}
 							onPress={() => router.push("/admin/users")}
@@ -171,10 +175,17 @@ export default function AdminDashboard() {
 							>
 								<Ionicons name="people" size={24} color={theme.primary} />
 							</View>
-							<Text style={styles.actionTitle}>Manage Users</Text>
-							<Text style={styles.actionDescription}>
-								View, edit, and manage user accounts
-							</Text>
+							<View
+								style={{
+									display: "flex",
+									flexDirection: "column",
+								}}
+							>
+								<Text style={styles.actionTitle}>Manage Users</Text>
+								<Text style={styles.actionDescription}>
+									View, edit, and manage user accounts
+								</Text>
+							</View>
 							<Ionicons
 								name="chevron-forward"
 								size={20}
@@ -195,10 +206,17 @@ export default function AdminDashboard() {
 							>
 								<Ionicons name="pricetag" size={24} color={theme.success} />
 							</View>
-							<Text style={styles.actionTitle}>Manage Coupons</Text>
-							<Text style={styles.actionDescription}>
-								Create and manage discount codes
-							</Text>
+							<View
+								style={{
+									display: "flex",
+									flexDirection: "column",
+								}}
+							>
+								<Text style={styles.actionTitle}>Manage Coupons</Text>
+								<Text style={styles.actionDescription}>
+									Create and manage discount codes
+								</Text>
+							</View>
 							<Ionicons
 								name="chevron-forward"
 								size={20}
@@ -219,10 +237,17 @@ export default function AdminDashboard() {
 							>
 								<Ionicons name="diamond" size={24} color={theme.warning} />
 							</View>
-							<Text style={styles.actionTitle}>Subscription Plans</Text>
-							<Text style={styles.actionDescription}>
-								Configure pricing and features
-							</Text>
+							<View
+								style={{
+									display: "flex",
+									flexDirection: "column",
+								}}
+							>
+								<Text style={styles.actionTitle}>Subscription Plans</Text>
+								<Text style={styles.actionDescription}>
+									Configure pricing and features
+								</Text>
+							</View>
 							<Ionicons
 								name="chevron-forward"
 								size={20}
@@ -243,10 +268,17 @@ export default function AdminDashboard() {
 							>
 								<Ionicons name="card" size={24} color={theme.info} />
 							</View>
-							<Text style={styles.actionTitle}>Payment History</Text>
-							<Text style={styles.actionDescription}>
-								View all transactions
-							</Text>
+							<View
+								style={{
+									display: "flex",
+									flexDirection: "column",
+								}}
+							>
+								<Text style={styles.actionTitle}>Payment History</Text>
+								<Text style={styles.actionDescription}>
+									View all transactions
+								</Text>
+							</View>
 							<Ionicons
 								name="chevron-forward"
 								size={20}
@@ -431,6 +463,7 @@ const createStyles = (theme: any) =>
 			padding: 16,
 			flexDirection: "row",
 			alignItems: "center",
+			display: "flex",
 		},
 		actionIcon: {
 			width: 48,

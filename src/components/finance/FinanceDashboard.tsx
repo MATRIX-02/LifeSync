@@ -1,5 +1,6 @@
 // Finance Dashboard - Main overview with quick actions
 
+import { SubscriptionCheckResult } from "@/src/components/PremiumFeatureGate";
 import { useFinanceStore } from "@/src/context/financeStore";
 import { Theme } from "@/src/context/themeContext";
 import {
@@ -32,12 +33,14 @@ interface FinanceDashboardProps {
 	theme: Theme;
 	currency: string;
 	onOpenDrawer?: () => void;
+	subscriptionCheck?: SubscriptionCheckResult;
 }
 
 export default function FinanceDashboard({
 	theme,
 	currency,
 	onOpenDrawer,
+	subscriptionCheck,
 }: FinanceDashboardProps) {
 	const {
 		accounts,

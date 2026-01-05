@@ -61,19 +61,28 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
 	initialize: async () => {
 		try {
 			set({ isLoading: true });
+			console.log("🔐 Initializing auth...");
 
-			// Get current session
+			// Get current session from storage
 			const {
 				data: { session },
 				error,
 			} = await supabase.auth.getSession();
 
-			if (error) throw error;
+			if (error) {
+				console.error("❌ Error getting session:", error);
+				throw error;
+			}
+
+			console.log("📱 Session found:", session ? "Yes" : "No");
 
 			if (session) {
+				console.log("✅ User logged in:", session.user.email);
 				set({ session, user: session.user });
 				// Fetch profile and subscription in parallel
 				await Promise.all([get().fetchProfile(), get().fetchSubscription()]);
+			} else {
+				console.log("ℹ️ No saved session found");
 			}
 
 			// Listen for auth state changes
@@ -148,17 +157,19 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
 
 			console.log("User created:", data.user?.id);
 			console.log("✅ Signup completed successfully");
-			console.log("Note: Profile and subscription will be created automatically");
-			
+			console.log(
+				"Note: Profile and subscription will be created automatically"
+			);
+
 			// Profile is created automatically by database trigger (handle_new_user)
 			// Subscription will be created on first login or can be handled separately
 			// We don't wait here because the user isn't fully authenticated until email verification
-			
+
 			return { error: null };
 		} catch (err) {
-			const error = err as Error;
+			const error = err as AuthError;
 			console.error("Sign up error:", error);
-			set({ error: error.message });
+			set({ error: error.message || "Sign up failed" });
 			return { error };
 		} finally {
 			set({ isLoading: false });
@@ -326,9 +337,8 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
 		}
 
 		try {
-			const { error } = await supabase
-				.from("profiles")
-				.update({ ...updates, updated_at: new Date().toISOString() })
+			const { error } = await (supabase.from("profiles") as any)
+				.update({ ...updates, updated_at: new Date().toISOString() } as any)
 				.eq("id", user.id);
 
 			if (error) {
@@ -353,11 +363,17 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
 				.from("profiles")
 				.select("*")
 				.eq("id", user.id)
-				.single();
+				.maybeSingle();
 
 			if (error) throw error;
 
-			set({ profile: data });
+			if (data) {
+				set({ profile: data });
+			} else {
+				console.log("Profile not found for user:", user.id);
+				// Profile might not exist yet (email not verified or trigger pending)
+				set({ profile: null });
+			}
 		} catch (error) {
 			console.error("Error fetching profile:", error);
 		}
@@ -382,7 +398,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
 
 			if (error && error.code !== "PGRST116") throw error;
 
-			set({ subscription: data as UserSubscriptionWithPlan });
+			set({ subscription: (data || null) as UserSubscriptionWithPlan | null });
 		} catch (error) {
 			console.error("Error fetching subscription:", error);
 		}

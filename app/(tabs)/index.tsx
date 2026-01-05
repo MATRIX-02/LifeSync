@@ -26,6 +26,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import Svg, { Circle } from "react-native-svg";
 
+import { useSubscriptionCheck } from "@/src/components/PremiumFeatureGate";
 import { SharedDrawer } from "@/src/components/SharedDrawer";
 import { useHabitStore } from "@/src/context/habitStore";
 import { useModuleStore } from "@/src/context/moduleContext";
@@ -105,7 +106,10 @@ export default function DashboardScreen() {
 	const router = useRouter();
 	const { isDark, toggleTheme } = useTheme();
 	const theme = useColors();
-	const { isModuleEnabled, getFirstEnabledModule } = useModuleStore();
+	const { isModuleEnabled, getFirstEnabledModule, _hasHydrated } =
+		useModuleStore();
+	const { limits, canAddHabit, showUpgradeAlert, isUnlimited } =
+		useSubscriptionCheck();
 
 	// Check if module is disabled
 	const isHabitsEnabled = isModuleEnabled("habits");
@@ -233,14 +237,20 @@ export default function DashboardScreen() {
 
 	// Redirect if module is disabled - MUST be a hook, cannot be conditional
 	useEffect(() => {
-		if (!isHabitsEnabled) {
+		// Only redirect after store has hydrated to avoid false redirects
+		if (_hasHydrated && !isHabitsEnabled) {
 			if (firstEnabledModule === "workout") {
 				router.replace("/(tabs)/workout");
 			} else if (firstEnabledModule === "finance") {
 				router.replace("/(tabs)/finance");
 			}
 		}
-	}, [isHabitsEnabled, firstEnabledModule, router]);
+	}, [isHabitsEnabled, firstEnabledModule, router, _hasHydrated]);
+
+	// Show nothing while store is hydrating to prevent flash
+	if (!_hasHydrated) {
+		return null;
+	}
 
 	if (!isHabitsEnabled) {
 		return null;
@@ -584,6 +594,18 @@ export default function DashboardScreen() {
 				visible={modalVisible}
 				onClose={() => setModalVisible(false)}
 				onCreateHabit={async (habit: Habit) => {
+					// Check habit limit based on subscription plan (dynamic from DB)
+					if (!canAddHabit(activeHabits.length)) {
+						const limitText = isUnlimited(limits.maxHabits)
+							? "unlimited"
+							: limits.maxHabits.toString();
+						showUpgradeAlert(
+							"Habit Limit Reached",
+							`Your plan allows up to ${limitText} habits. Upgrade your plan for more habits.`
+						);
+						return;
+					}
+
 					addHabit(habit);
 					// Schedule notification if enabled
 					if (habit.notificationEnabled && habit.notificationTime) {

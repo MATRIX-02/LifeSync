@@ -1,5 +1,6 @@
 // Budget Manager - Create and manage budgets with progress tracking
 
+import { SubscriptionCheckResult } from "@/src/components/PremiumFeatureGate";
 import { useFinanceStore } from "@/src/context/financeStore";
 import { Theme } from "@/src/context/themeContext";
 import { NotificationService } from "@/src/services/notificationService";
@@ -30,6 +31,9 @@ interface BudgetManagerProps {
 	theme: Theme;
 	currency: string;
 	onOpenDrawer?: () => void;
+	subscriptionCheck?: SubscriptionCheckResult;
+	currentBudgetCount?: number;
+	currentGoalCount?: number;
 }
 
 type BudgetTab = "budgets" | "savings" | "bills" | "debts";
@@ -38,6 +42,9 @@ export default function BudgetManager({
 	theme,
 	currency,
 	onOpenDrawer,
+	subscriptionCheck,
+	currentBudgetCount = 0,
+	currentGoalCount = 0,
 }: BudgetManagerProps) {
 	const {
 		budgets,

@@ -1,23 +1,24 @@
 // Workout History - View past workout sessions
 
-import React, { useState, useMemo } from "react";
-import {
-	View,
-	Text,
-	StyleSheet,
-	TouchableOpacity,
-	ScrollView,
-	SectionList,
-	Alert,
-} from "react-native";
-import Ionicons from "@expo/vector-icons/Ionicons";
+import { SubscriptionCheckResult } from "@/src/components/PremiumFeatureGate";
 import { Theme } from "@/src/context/themeContext";
 import { useWorkoutStore } from "@/src/context/workoutStore";
-import { WorkoutSession, MuscleGroup } from "@/src/types/workout";
 import { MUSCLE_GROUP_INFO } from "@/src/data/exerciseDatabase";
+import { MuscleGroup, WorkoutSession } from "@/src/types/workout";
+import Ionicons from "@expo/vector-icons/Ionicons";
+import React, { useMemo, useState } from "react";
+import {
+	Alert,
+	SectionList,
+	StyleSheet,
+	Text,
+	TouchableOpacity,
+	View,
+} from "react-native";
 
 interface WorkoutHistoryProps {
 	theme: Theme;
+	subscriptionCheck?: SubscriptionCheckResult;
 }
 
 interface DaySection {
@@ -26,7 +27,10 @@ interface DaySection {
 	data: WorkoutSession[];
 }
 
-export default function WorkoutHistory({ theme }: WorkoutHistoryProps) {
+export default function WorkoutHistory({
+	theme,
+	subscriptionCheck,
+}: WorkoutHistoryProps) {
 	const { workoutSessions, deleteWorkoutSession } = useWorkoutStore();
 	const [expandedSession, setExpandedSession] = useState<string | null>(null);
 	const [filter, setFilter] = useState<"all" | "week" | "month">("all");

@@ -39,6 +39,7 @@ export default function ProfileScreen() {
 	const params = useLocalSearchParams<{ from?: string }>();
 	const { isDark } = useTheme();
 	const theme = useColors();
+	const { isAdmin } = useAuthStore();
 	const {
 		profile,
 		setProfile,
@@ -609,7 +610,32 @@ export default function ProfileScreen() {
 									<View style={styles.actionsList}>
 										<TouchableOpacity
 											style={styles.actionItem}
-											onPress={() => router.push("/two?from=profile")}
+											onPress={() => router.push("/subscription")}
+										>
+											<View
+												style={[
+													styles.actionIcon,
+													{ backgroundColor: "#FFD700" + "20" },
+												]}
+											>
+												<Ionicons name="diamond" size={20} color="#FFD700" />
+											</View>
+											<View style={styles.actionContent}>
+												<Text style={styles.actionTitle}>Subscription</Text>
+												<Text style={styles.actionDescription}>
+													View plans & upgrade
+												</Text>
+											</View>
+											<Ionicons
+												name="chevron-forward"
+												size={20}
+												color={theme.textMuted}
+											/>
+										</TouchableOpacity>
+										<View style={styles.actionDivider} />
+										<TouchableOpacity
+											style={styles.actionItem}
+											onPress={() => router.push("/(tabs)/two")}
 										>
 											<View
 												style={[
@@ -635,6 +661,40 @@ export default function ProfileScreen() {
 												color={theme.textMuted}
 											/>
 										</TouchableOpacity>
+										{/* Admin Panel - Only visible to admins */}
+										{isAdmin() && (
+											<>
+												<View style={styles.actionDivider} />
+												<TouchableOpacity
+													style={styles.actionItem}
+													onPress={() => router.push("/admin")}
+												>
+													<View
+														style={[
+															styles.actionIcon,
+															{ backgroundColor: theme.error + "20" },
+														]}
+													>
+														<Ionicons
+															name="shield-checkmark"
+															size={20}
+															color={theme.error}
+														/>
+													</View>
+													<View style={styles.actionContent}>
+														<Text style={styles.actionTitle}>Admin Panel</Text>
+														<Text style={styles.actionDescription}>
+															Manage users & subscriptions
+														</Text>
+													</View>
+													<Ionicons
+														name="chevron-forward"
+														size={20}
+														color={theme.textMuted}
+													/>
+												</TouchableOpacity>
+											</>
+										)}
 									</View>
 								</View>
 							</>

@@ -1,30 +1,32 @@
 // Finance Analytics - Charts, spending breakdown, trends, insights
 // Redesigned with Statistics.tsx inspiration
 
-import React, { useState, useMemo } from "react";
-import {
-	View,
-	Text,
-	StyleSheet,
-	TouchableOpacity,
-	ScrollView,
-	Dimensions,
-} from "react-native";
-import Ionicons from "@expo/vector-icons/Ionicons";
-import Svg, { Circle } from "react-native-svg";
-import { Theme } from "@/src/context/themeContext";
+import { SubscriptionCheckResult } from "@/src/components/PremiumFeatureGate";
 import { useFinanceStore } from "@/src/context/financeStore";
+import { Theme } from "@/src/context/themeContext";
 import {
-	ExpenseCategory,
-	IncomeCategory,
 	EXPENSE_CATEGORIES,
+	ExpenseCategory,
 	INCOME_CATEGORIES,
+	IncomeCategory,
 } from "@/src/types/finance";
+import Ionicons from "@expo/vector-icons/Ionicons";
+import React, { useMemo, useState } from "react";
+import {
+	Dimensions,
+	ScrollView,
+	StyleSheet,
+	Text,
+	TouchableOpacity,
+	View,
+} from "react-native";
+import Svg, { Circle } from "react-native-svg";
 
 interface FinanceAnalyticsProps {
 	theme: Theme;
 	currency: string;
 	onOpenDrawer?: () => void;
+	subscriptionCheck?: SubscriptionCheckResult;
 }
 
 type TimeRange = "week" | "month" | "quarter" | "year" | "all";

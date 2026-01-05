@@ -1,40 +1,45 @@
 // Workout Plans - Create and manage workout routines
 
-import React, { useState } from "react";
-import {
-	View,
-	Text,
-	StyleSheet,
-	TouchableOpacity,
-	ScrollView,
-	TextInput,
-	Modal,
-	FlatList,
-	Alert,
-} from "react-native";
-import Ionicons from "@expo/vector-icons/Ionicons";
+import { SubscriptionCheckResult } from "@/src/components/PremiumFeatureGate";
 import { Theme } from "@/src/context/themeContext";
 import { useWorkoutStore } from "@/src/context/workoutStore";
-import {
-	WorkoutPlan,
-	WorkoutExercise,
-	MuscleGroup,
-	Exercise,
-} from "@/src/types/workout";
 import {
 	EXERCISE_DATABASE,
 	getExercisesByMuscle,
 	MUSCLE_GROUP_INFO,
 } from "@/src/data/exerciseDatabase";
+import {
+	Exercise,
+	MuscleGroup,
+	WorkoutExercise,
+	WorkoutPlan,
+} from "@/src/types/workout";
+import Ionicons from "@expo/vector-icons/Ionicons";
+import React, { useState } from "react";
+import {
+	Alert,
+	FlatList,
+	Modal,
+	ScrollView,
+	StyleSheet,
+	Text,
+	TextInput,
+	TouchableOpacity,
+	View,
+} from "react-native";
 
 interface WorkoutPlansProps {
 	theme: Theme;
 	onStartWorkout?: () => void;
+	subscriptionCheck?: SubscriptionCheckResult;
+	currentPlanCount?: number;
 }
 
 export default function WorkoutPlans({
 	theme,
 	onStartWorkout,
+	subscriptionCheck,
+	currentPlanCount = 0,
 }: WorkoutPlansProps) {
 	const {
 		workoutPlans,

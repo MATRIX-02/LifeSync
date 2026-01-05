@@ -1,5 +1,6 @@
 // Workout Tracker Main Screen - Tab-based navigation
 
+import { useSubscriptionCheck } from "@/src/components/PremiumFeatureGate";
 import { SharedDrawer } from "@/src/components/SharedDrawer";
 import {
 	ActiveWorkoutScreen,
@@ -42,9 +43,14 @@ export default function WorkoutTrackerScreen() {
 	const router = useRouter();
 	const { isDark, toggleTheme } = useTheme();
 	const theme = useColors();
-	const { fitnessProfile, currentSession } = useWorkoutStore();
+	const { fitnessProfile, currentSession, workoutPlans, workoutSessions } =
+		useWorkoutStore();
 	const { profile } = useHabitStore();
-	const { isModuleEnabled, getFirstEnabledModule } = useModuleStore();
+	const { isModuleEnabled, getFirstEnabledModule, _hasHydrated } =
+		useModuleStore();
+
+	// Subscription checks for workout limits
+	const subscriptionCheck = useSubscriptionCheck();
 
 	// Check if module is disabled
 	const isWorkoutEnabled = isModuleEnabled("workout");
@@ -59,16 +65,31 @@ export default function WorkoutTrackerScreen() {
 	const userName = profile?.name || "User";
 	const styles = createStyles(theme);
 
+	// Get current month workout count for limit checking
+	const getCurrentMonthWorkoutCount = () => {
+		const now = new Date();
+		const currentMonth = now.getMonth();
+		const currentYear = now.getFullYear();
+		return workoutSessions.filter((s) => {
+			const sessionDate = new Date(s.date);
+			return (
+				sessionDate.getMonth() === currentMonth &&
+				sessionDate.getFullYear() === currentYear
+			);
+		}).length;
+	};
+
 	// Redirect if module is disabled - MUST be a hook, cannot be conditional
 	useEffect(() => {
-		if (!isWorkoutEnabled) {
+		// Only redirect after store has hydrated to avoid false redirects
+		if (_hasHydrated && !isWorkoutEnabled) {
 			if (firstEnabledModule === "habits") {
 				router.replace("/(tabs)");
 			} else if (firstEnabledModule === "finance") {
 				router.replace("/(tabs)/finance");
 			}
 		}
-	}, [isWorkoutEnabled, firstEnabledModule, router]);
+	}, [isWorkoutEnabled, firstEnabledModule, router, _hasHydrated]);
 
 	// Animate drawer
 	useEffect(() => {
@@ -78,6 +99,11 @@ export default function WorkoutTrackerScreen() {
 			useNativeDriver: true,
 		}).start();
 	}, [drawerOpen]);
+
+	// Show nothing while store is hydrating to prevent flash
+	if (!_hasHydrated) {
+		return null;
+	}
 
 	if (!isWorkoutEnabled) {
 		return null;
@@ -94,6 +120,19 @@ export default function WorkoutTrackerScreen() {
 		setActiveTab(tab);
 	};
 
+	// Check if user can start a new workout based on subscription
+	const handleStartWorkout = () => {
+		const monthlyCount = getCurrentMonthWorkoutCount();
+		if (!subscriptionCheck.canLogWorkout(monthlyCount)) {
+			subscriptionCheck.showUpgradeAlert(
+				"Workout Limit Reached",
+				`Your plan allows ${subscriptionCheck.limits.maxWorkouts} workouts per month. Upgrade for unlimited workouts.`
+			);
+			return;
+		}
+		setShowActiveWorkout(true);
+	};
+
 	const renderTabContent = () => {
 		const gender = fitnessProfile?.gender || "male";
 		switch (activeTab) {
@@ -101,27 +140,39 @@ export default function WorkoutTrackerScreen() {
 				return (
 					<WorkoutDashboard
 						theme={theme}
-						onStartWorkout={() => setShowActiveWorkout(true)}
+						onStartWorkout={handleStartWorkout}
 						onNavigateToTab={handleTabChange}
+						subscriptionCheck={subscriptionCheck}
 					/>
 				);
 			case "statistics":
-				return <WorkoutStatistics theme={theme} gender={gender} />;
+				return (
+					<WorkoutStatistics
+						theme={theme}
+						gender={gender}
+						subscriptionCheck={subscriptionCheck}
+					/>
+				);
 			case "plans":
 				return (
 					<WorkoutPlans
 						theme={theme}
-						onStartWorkout={() => setShowActiveWorkout(true)}
+						onStartWorkout={handleStartWorkout}
+						subscriptionCheck={subscriptionCheck}
+						currentPlanCount={workoutPlans.length}
 					/>
 				);
 			case "history":
-				return <WorkoutHistory theme={theme} />;
+				return (
+					<WorkoutHistory theme={theme} subscriptionCheck={subscriptionCheck} />
+				);
 			default:
 				return (
 					<WorkoutDashboard
 						theme={theme}
-						onStartWorkout={() => setShowActiveWorkout(true)}
+						onStartWorkout={handleStartWorkout}
 						onNavigateToTab={handleTabChange}
+						subscriptionCheck={subscriptionCheck}
 					/>
 				);
 		}

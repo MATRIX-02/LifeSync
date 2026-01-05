@@ -1,4 +1,6 @@
 import axios from "axios";
+// @ts-ignore - crypto-js doesn't have types
+import { decode, encode } from "base-64";
 import CryptoJS from "crypto-js";
 
 /**
@@ -109,7 +111,7 @@ class PhonePeService {
 			const response = await axios.post(
 				`${this.apiEndpoint}/pg/v1/pay`,
 				{
-					request: Buffer.from(payloadString).toString("base64"),
+					request: encode(payloadString),
 				},
 				{
 					headers: {
@@ -177,9 +179,7 @@ class PhonePeService {
 				return { valid: false, data: null };
 			}
 
-			const decodedData = JSON.parse(
-				Buffer.from(responseBody, "base64").toString("utf-8")
-			);
+			const decodedData = JSON.parse(decode(responseBody));
 			return { valid: true, data: decodedData };
 		} catch (error) {
 			console.error("Error verifying PhonePe callback:", error);

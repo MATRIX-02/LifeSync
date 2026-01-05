@@ -224,15 +224,15 @@ export const useSubscriptionStore = create<SubscriptionStore>((set, get) => ({
 			}
 
 			// Deactivate existing subscription
-			await supabase
-				.from("user_subscriptions")
+			await (supabase.from("user_subscriptions") as any)
 				.update({ status: "cancelled", cancelled_at: now.toISOString() })
 				.eq("user_id", userId)
 				.eq("status", "active");
 
 			// Create new subscription
-			const { data: subscription, error } = await supabase
-				.from("user_subscriptions")
+			const { data: subscription, error } = await (
+				supabase.from("user_subscriptions") as any
+			)
 				.insert({
 					user_id: userId,
 					plan_id: planId,
@@ -262,12 +262,12 @@ export const useSubscriptionStore = create<SubscriptionStore>((set, get) => ({
 							billingCycle,
 							currentCoupon
 						);
-						await (supabase.from("coupon_redemptions").insert({
+						await (supabase.from("coupon_redemptions") as any).insert({
 							coupon_id: couponId,
 							user_id: userId,
 							subscription_id: (subscription as any).id,
 							discount_applied: discount,
-						}) as any);
+						});
 					}
 				}
 			}
@@ -285,13 +285,12 @@ export const useSubscriptionStore = create<SubscriptionStore>((set, get) => ({
 	cancelSubscription: async (subscriptionId: string) => {
 		set({ isLoading: true, error: null });
 		try {
-			const { error } = await (supabase
-				.from("user_subscriptions")
+			const { error } = await (supabase.from("user_subscriptions") as any)
 				.update({
 					cancel_at_period_end: true,
 					updated_at: new Date().toISOString(),
 				})
-				.eq("id", subscriptionId) as any);
+				.eq("id", subscriptionId);
 
 			if (error) throw error;
 

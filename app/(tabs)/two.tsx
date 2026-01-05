@@ -1,16 +1,30 @@
+import { useAuthStore } from "@/src/context/authStore";
 import { useFinanceStore } from "@/src/context/financeStore";
 import { useHabitStore } from "@/src/context/habitStore";
 import { ModuleType, useModuleStore } from "@/src/context/moduleContext";
 import { Theme, useColors, useTheme } from "@/src/context/themeContext";
 import { useWorkoutStore } from "@/src/context/workoutStore";
 import { NotificationService } from "@/src/services/notificationService";
+import {
+	deleteAllCloudData,
+	fetchFinanceFromCloud,
+	fetchHabitsFromCloud,
+	fetchWorkoutsFromCloud,
+	getSyncStatus,
+	syncFinanceToCloud,
+	syncHabitsToCloud,
+	SyncModule,
+	syncProfileToCloud,
+	syncWorkoutsToCloud,
+} from "@/src/services/syncService";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system/legacy";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import * as Sharing from "expo-sharing";
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
+	ActivityIndicator,
 	Alert,
 	Image,
 	Linking,
@@ -34,6 +48,7 @@ export default function SettingsScreen() {
 	const workoutStore = useWorkoutStore();
 	const financeStore = useFinanceStore();
 	const moduleStore = useModuleStore();
+	const { user } = useAuthStore();
 
 	const [notificationsEnabled, setNotificationsEnabled] = useState(true);
 	const [soundEnabled, setSoundEnabled] = useState(true);
@@ -45,7 +60,238 @@ export default function SettingsScreen() {
 		[]
 	);
 
+	// Cloud sync states
+	const [isSyncing, setIsSyncing] = useState<SyncModule | null>(null);
+	const [isRestoring, setIsRestoring] = useState<SyncModule | null>(null);
+	const [syncStatus, setSyncStatus] = useState<{
+		habits_synced_at?: string;
+		workouts_synced_at?: string;
+		finance_synced_at?: string;
+	}>({});
+
 	const styles = createStyles(theme);
+
+	// Fetch sync status on mount
+	useEffect(() => {
+		if (user?.id) {
+			getSyncStatus(user.id).then(setSyncStatus);
+		}
+	}, [user?.id]);
+
+	// Format last sync time
+	const formatSyncTime = (timestamp?: string) => {
+		if (!timestamp) return "Never synced";
+		const date = new Date(timestamp);
+		const now = new Date();
+		const diff = now.getTime() - date.getTime();
+		const minutes = Math.floor(diff / 60000);
+		const hours = Math.floor(diff / 3600000);
+		const days = Math.floor(diff / 86400000);
+
+		if (minutes < 1) return "Just now";
+		if (minutes < 60) return `${minutes}m ago`;
+		if (hours < 24) return `${hours}h ago`;
+		if (days < 7) return `${days}d ago`;
+		return date.toLocaleDateString();
+	};
+
+	// ============ CLOUD SYNC HANDLERS ============
+	const handleSyncToCloud = async (module: SyncModule) => {
+		if (!user?.id) {
+			Alert.alert(
+				"Sign In Required",
+				"Please sign in to sync your data to the cloud."
+			);
+			return;
+		}
+
+		setIsSyncing(module);
+		try {
+			let result;
+
+			if (module === "habits" || module === "all") {
+				result = await syncHabitsToCloud(user.id, {
+					habits: habitStore.habits,
+					logs: habitStore.logs,
+					settings: habitStore.settings,
+				});
+				if (!result.success) throw new Error(result.error);
+			}
+
+			if (module === "workouts" || module === "all") {
+				result = await syncWorkoutsToCloud(user.id, {
+					fitnessProfile: workoutStore.fitnessProfile,
+					workoutPlans: workoutStore.workoutPlans,
+					workoutSessions: workoutStore.workoutSessions,
+					personalRecords: workoutStore.personalRecords,
+					bodyMeasurements: workoutStore.bodyMeasurements,
+					bodyWeights: workoutStore.bodyWeights,
+					customExercises: workoutStore.customExercises,
+				});
+				if (!result.success) throw new Error(result.error);
+			}
+
+			if (module === "finance" || module === "all") {
+				result = await syncFinanceToCloud(user.id, {
+					accounts: financeStore.accounts,
+					transactions: financeStore.transactions,
+					recurringTransactions: financeStore.recurringTransactions,
+					budgets: financeStore.budgets,
+					savingsGoals: financeStore.savingsGoals,
+					billReminders: financeStore.billReminders,
+					debts: financeStore.debts,
+					splitGroups: financeStore.splitGroups,
+					currency: financeStore.currency,
+				});
+				if (!result.success) throw new Error(result.error);
+			}
+
+			if (module === "profile") {
+				result = await syncProfileToCloud(user.id, {
+					name: habitStore.profile?.name || "",
+					email: habitStore.profile?.email,
+					bio: habitStore.profile?.bio,
+					avatar: habitStore.profile?.avatar,
+				});
+				if (!result.success) throw new Error(result.error);
+			}
+
+			// Refresh sync status
+			const newStatus = await getSyncStatus(user.id);
+			setSyncStatus(newStatus);
+
+			Alert.alert(
+				"Success",
+				`${module === "all" ? "All data" : module} synced to cloud!`
+			);
+		} catch (error: any) {
+			Alert.alert(
+				"Sync Failed",
+				error.message || "Failed to sync data to cloud."
+			);
+		} finally {
+			setIsSyncing(null);
+		}
+	};
+
+	const handleRestoreFromCloud = async (module: SyncModule) => {
+		if (!user?.id) {
+			Alert.alert(
+				"Sign In Required",
+				"Please sign in to restore your data from the cloud."
+			);
+			return;
+		}
+
+		Alert.alert(
+			"Restore from Cloud",
+			`This will replace your local ${module} data with the cloud backup. Continue?`,
+			[
+				{ text: "Cancel", style: "cancel" },
+				{
+					text: "Restore",
+					onPress: async () => {
+						setIsRestoring(module);
+						try {
+							if (module === "habits" || module === "all") {
+								const { data, error } = await fetchHabitsFromCloud(user.id);
+								if (error) throw new Error(error);
+								if (data) {
+									habitStore.importData({
+										habits: data.habits,
+										logs: data.logs,
+									});
+								}
+							}
+
+							if (module === "workouts" || module === "all") {
+								const { data, error } = await fetchWorkoutsFromCloud(user.id);
+								if (error) throw new Error(error);
+								if (data) {
+									workoutStore.importData({
+										fitnessProfile: data.fitnessProfile,
+										workoutPlans: data.workoutPlans,
+										workoutSessions: data.workoutSessions,
+										personalRecords: data.personalRecords,
+										bodyMeasurements: data.bodyMeasurements,
+										bodyWeights: data.bodyWeights,
+										customExercises: data.customExercises,
+									});
+								}
+							}
+
+							if (module === "finance" || module === "all") {
+								const { data, error } = await fetchFinanceFromCloud(user.id);
+								if (error) throw new Error(error);
+								if (data) {
+									financeStore.importData({
+										accounts: data.accounts,
+										transactions: data.transactions,
+										recurringTransactions: data.recurringTransactions,
+										budgets: data.budgets,
+										savingsGoals: data.savingsGoals,
+										billReminders: data.billReminders,
+										debts: data.debts,
+										splitGroups: data.splitGroups,
+									});
+								}
+							}
+
+							Alert.alert(
+								"Success",
+								`${module === "all" ? "All data" : module} restored from cloud!`
+							);
+						} catch (error: any) {
+							Alert.alert(
+								"Restore Failed",
+								error.message || "Failed to restore data from cloud."
+							);
+						} finally {
+							setIsRestoring(null);
+						}
+					},
+				},
+			]
+		);
+	};
+
+	const handleDeleteCloudData = (module: SyncModule) => {
+		if (!user?.id) {
+			Alert.alert("Sign In Required", "Please sign in to manage cloud data.");
+			return;
+		}
+
+		Alert.alert(
+			"Delete Cloud Data",
+			`This will permanently delete your ${
+				module === "all" ? "ALL" : module
+			} data from the cloud. Your local data will remain. Continue?`,
+			[
+				{ text: "Cancel", style: "cancel" },
+				{
+					text: "Delete",
+					style: "destructive",
+					onPress: async () => {
+						try {
+							const result = await deleteAllCloudData(user.id, module);
+							if (!result.success) throw new Error(result.error);
+
+							// Refresh sync status
+							const newStatus = await getSyncStatus(user.id);
+							setSyncStatus(newStatus);
+
+							Alert.alert("Success", "Cloud data deleted successfully.");
+						} catch (error: any) {
+							Alert.alert(
+								"Delete Failed",
+								error.message || "Failed to delete cloud data."
+							);
+						}
+					},
+				},
+			]
+		);
+	};
 
 	const handleShowScheduledReminders = async () => {
 		try {
@@ -404,11 +650,18 @@ export default function SettingsScreen() {
 					style={styles.backButton}
 					onPress={() => {
 						if (from) {
-							router.replace(`/${from}` as any);
+							// Map module names to correct routes
+							const routeMap: Record<string, string> = {
+								habits: "/(tabs)/",
+								workout: "/(tabs)/workout",
+								finance: "/(tabs)/finance",
+							};
+							const route = routeMap[from] || `/(tabs)/${from}`;
+							router.replace(route as any);
 						} else if (router.canGoBack()) {
 							router.back();
 						} else {
-							router.replace("/");
+							router.replace("/(tabs)");
 						}
 					}}
 				>
@@ -631,14 +884,323 @@ export default function SettingsScreen() {
 					</View>
 				</View>
 
-				{/* Data Management Section */}
+				{/* Cloud Sync Section */}
 				<View style={styles.section}>
-					<Text style={styles.sectionTitle}>DATA MANAGEMENT</Text>
+					<Text style={styles.sectionTitle}>CLOUD SYNC</Text>
+
+					{user ? (
+						<>
+							{/* Sync All */}
+							<View style={styles.settingCard}>
+								<View style={styles.compactHeader}>
+									<View style={styles.cloudHeaderRow}>
+										<Text style={styles.compactHeaderText}>Sync to Cloud</Text>
+										<View style={styles.cloudBadge}>
+											<Ionicons name="cloud-done" size={12} color="#10B981" />
+											<Text style={styles.cloudBadgeText}>Connected</Text>
+										</View>
+									</View>
+								</View>
+								<View style={styles.compactActions}>
+									<TouchableOpacity
+										style={[
+											styles.compactButton,
+											isSyncing === "all" && { opacity: 0.5 },
+										]}
+										onPress={() => handleSyncToCloud("all")}
+										disabled={isSyncing !== null}
+									>
+										<View
+											style={[
+												styles.compactIcon,
+												{ backgroundColor: theme.success + "20" },
+											]}
+										>
+											{isSyncing === "all" ? (
+												<ActivityIndicator size="small" color={theme.success} />
+											) : (
+												<Ionicons
+													name="cloud-upload"
+													size={18}
+													color={theme.success}
+												/>
+											)}
+										</View>
+										<Text style={styles.compactButtonText}>Backup All</Text>
+									</TouchableOpacity>
+
+									<TouchableOpacity
+										style={[
+											styles.compactButton,
+											isRestoring === "all" && { opacity: 0.5 },
+										]}
+										onPress={() => handleRestoreFromCloud("all")}
+										disabled={isRestoring !== null}
+									>
+										<View
+											style={[
+												styles.compactIcon,
+												{ backgroundColor: theme.primary + "20" },
+											]}
+										>
+											{isRestoring === "all" ? (
+												<ActivityIndicator size="small" color={theme.primary} />
+											) : (
+												<Ionicons
+													name="cloud-download"
+													size={18}
+													color={theme.primary}
+												/>
+											)}
+										</View>
+										<Text style={styles.compactButtonText}>Restore All</Text>
+									</TouchableOpacity>
+
+									<TouchableOpacity
+										style={styles.compactButton}
+										onPress={() => handleDeleteCloudData("all")}
+									>
+										<View
+											style={[
+												styles.compactIcon,
+												{ backgroundColor: theme.error + "20" },
+											]}
+										>
+											<Ionicons
+												name="cloud-offline"
+												size={18}
+												color={theme.error}
+											/>
+										</View>
+										<Text
+											style={[styles.compactButtonText, { color: theme.error }]}
+										>
+											Delete Cloud
+										</Text>
+									</TouchableOpacity>
+								</View>
+							</View>
+
+							{/* Module-Specific Cloud Sync */}
+							<View style={[styles.settingCard, { marginTop: 12 }]}>
+								<View style={styles.compactHeader}>
+									<Text style={styles.compactHeaderText}>By Module</Text>
+								</View>
+
+								{/* Habits Cloud */}
+								{moduleStore.isModuleEnabled("habits") && (
+									<>
+										<View style={styles.moduleRow}>
+											<View style={styles.moduleInfo}>
+												<Ionicons
+													name="sparkles"
+													size={16}
+													color={theme.primary}
+												/>
+												<View>
+													<Text style={styles.moduleLabel}>Habits</Text>
+													<Text style={styles.syncTimeText}>
+														{formatSyncTime(syncStatus.habits_synced_at)}
+													</Text>
+												</View>
+											</View>
+											<View style={styles.moduleActions}>
+												<TouchableOpacity
+													style={styles.iconButton}
+													onPress={() => handleSyncToCloud("habits")}
+													disabled={isSyncing !== null}
+												>
+													{isSyncing === "habits" ? (
+														<ActivityIndicator
+															size="small"
+															color={theme.success}
+														/>
+													) : (
+														<Ionicons
+															name="cloud-upload"
+															size={18}
+															color={theme.success}
+														/>
+													)}
+												</TouchableOpacity>
+												<TouchableOpacity
+													style={styles.iconButton}
+													onPress={() => handleRestoreFromCloud("habits")}
+													disabled={isRestoring !== null}
+												>
+													{isRestoring === "habits" ? (
+														<ActivityIndicator
+															size="small"
+															color={theme.primary}
+														/>
+													) : (
+														<Ionicons
+															name="cloud-download"
+															size={18}
+															color={theme.primary}
+														/>
+													)}
+												</TouchableOpacity>
+											</View>
+										</View>
+										<View style={styles.thinDivider} />
+									</>
+								)}
+
+								{/* Workouts Cloud */}
+								{moduleStore.isModuleEnabled("workout") && (
+									<>
+										<View style={styles.moduleRow}>
+											<View style={styles.moduleInfo}>
+												<Ionicons
+													name="flame"
+													size={16}
+													color={theme.success}
+												/>
+												<View>
+													<Text style={styles.moduleLabel}>FitZone</Text>
+													<Text style={styles.syncTimeText}>
+														{formatSyncTime(syncStatus.workouts_synced_at)}
+													</Text>
+												</View>
+											</View>
+											<View style={styles.moduleActions}>
+												<TouchableOpacity
+													style={styles.iconButton}
+													onPress={() => handleSyncToCloud("workouts")}
+													disabled={isSyncing !== null}
+												>
+													{isSyncing === "workouts" ? (
+														<ActivityIndicator
+															size="small"
+															color={theme.success}
+														/>
+													) : (
+														<Ionicons
+															name="cloud-upload"
+															size={18}
+															color={theme.success}
+														/>
+													)}
+												</TouchableOpacity>
+												<TouchableOpacity
+													style={styles.iconButton}
+													onPress={() => handleRestoreFromCloud("workouts")}
+													disabled={isRestoring !== null}
+												>
+													{isRestoring === "workouts" ? (
+														<ActivityIndicator
+															size="small"
+															color={theme.primary}
+														/>
+													) : (
+														<Ionicons
+															name="cloud-download"
+															size={18}
+															color={theme.primary}
+														/>
+													)}
+												</TouchableOpacity>
+											</View>
+										</View>
+										<View style={styles.thinDivider} />
+									</>
+								)}
+
+								{/* Finance Cloud */}
+								{moduleStore.isModuleEnabled("finance") && (
+									<View style={styles.moduleRow}>
+										<View style={styles.moduleInfo}>
+											<Ionicons
+												name="trending-up"
+												size={16}
+												color={theme.warning}
+											/>
+											<View>
+												<Text style={styles.moduleLabel}>Finance</Text>
+												<Text style={styles.syncTimeText}>
+													{formatSyncTime(syncStatus.finance_synced_at)}
+												</Text>
+											</View>
+										</View>
+										<View style={styles.moduleActions}>
+											<TouchableOpacity
+												style={styles.iconButton}
+												onPress={() => handleSyncToCloud("finance")}
+												disabled={isSyncing !== null}
+											>
+												{isSyncing === "finance" ? (
+													<ActivityIndicator
+														size="small"
+														color={theme.success}
+													/>
+												) : (
+													<Ionicons
+														name="cloud-upload"
+														size={18}
+														color={theme.success}
+													/>
+												)}
+											</TouchableOpacity>
+											<TouchableOpacity
+												style={styles.iconButton}
+												onPress={() => handleRestoreFromCloud("finance")}
+												disabled={isRestoring !== null}
+											>
+												{isRestoring === "finance" ? (
+													<ActivityIndicator
+														size="small"
+														color={theme.primary}
+													/>
+												) : (
+													<Ionicons
+														name="cloud-download"
+														size={18}
+														color={theme.primary}
+													/>
+												)}
+											</TouchableOpacity>
+										</View>
+									</View>
+								)}
+							</View>
+						</>
+					) : (
+						<View style={styles.settingCard}>
+							<TouchableOpacity
+								style={styles.signInPrompt}
+								onPress={() => router.push("/auth/login")}
+							>
+								<Ionicons
+									name="cloud-offline-outline"
+									size={32}
+									color={theme.textMuted}
+								/>
+								<Text style={styles.signInPromptTitle}>
+									Sign In to Enable Cloud Sync
+								</Text>
+								<Text style={styles.signInPromptText}>
+									Your data is stored locally. Sign in to backup and sync across
+									devices.
+								</Text>
+								<View style={styles.signInButton}>
+									<Text style={styles.signInButtonText}>Sign In</Text>
+								</View>
+							</TouchableOpacity>
+						</View>
+					)}
+				</View>
+
+				{/* Local Data Management Section */}
+				<View style={styles.section}>
+					<Text style={styles.sectionTitle}>LOCAL DATA</Text>
 
 					{/* All Data - Compact Actions */}
 					<View style={styles.settingCard}>
 						<View style={styles.compactHeader}>
-							<Text style={styles.compactHeaderText}>Complete Backup</Text>
+							<Text style={styles.compactHeaderText}>
+								Export / Import (Local Files)
+							</Text>
 						</View>
 						<View style={styles.compactActions}>
 							<TouchableOpacity
@@ -679,12 +1241,12 @@ export default function SettingsScreen() {
 									]}
 								>
 									<Ionicons
-										name="cloud-upload-outline"
+										name="folder-open-outline"
 										size={18}
 										color={theme.accent}
 									/>
 								</View>
-								<Text style={styles.compactButtonText}>Import All</Text>
+								<Text style={styles.compactButtonText}>Import</Text>
 							</TouchableOpacity>
 
 							<TouchableOpacity
@@ -718,7 +1280,7 @@ export default function SettingsScreen() {
 						moduleStore.isModuleEnabled("finance")) && (
 						<View style={[styles.settingCard, { marginTop: 12 }]}>
 							<View style={styles.compactHeader}>
-								<Text style={styles.compactHeaderText}>By Module</Text>
+								<Text style={styles.compactHeaderText}>By Module (Local)</Text>
 							</View>
 
 							{/* Habits */}
@@ -1270,6 +1832,61 @@ const createStyles = (theme: Theme) =>
 		},
 		iconButton: {
 			padding: 4,
+		},
+
+		// Cloud Sync Styles
+		cloudHeaderRow: {
+			flexDirection: "row",
+			justifyContent: "space-between",
+			alignItems: "center",
+		},
+		cloudBadge: {
+			flexDirection: "row",
+			alignItems: "center",
+			backgroundColor: "#10B981" + "20",
+			paddingHorizontal: 8,
+			paddingVertical: 4,
+			borderRadius: 12,
+			gap: 4,
+		},
+		cloudBadgeText: {
+			fontSize: 11,
+			fontWeight: "600",
+			color: "#10B981",
+		},
+		syncTimeText: {
+			fontSize: 10,
+			color: theme.textMuted,
+			marginTop: 1,
+		},
+		signInPrompt: {
+			alignItems: "center",
+			padding: 24,
+		},
+		signInPromptTitle: {
+			fontSize: 16,
+			fontWeight: "600",
+			color: theme.text,
+			marginTop: 12,
+		},
+		signInPromptText: {
+			fontSize: 13,
+			color: theme.textMuted,
+			textAlign: "center",
+			marginTop: 8,
+			lineHeight: 18,
+		},
+		signInButton: {
+			backgroundColor: theme.primary,
+			paddingHorizontal: 24,
+			paddingVertical: 12,
+			borderRadius: 12,
+			marginTop: 16,
+		},
+		signInButtonText: {
+			fontSize: 14,
+			fontWeight: "600",
+			color: "#FFFFFF",
 		},
 
 		// Badge

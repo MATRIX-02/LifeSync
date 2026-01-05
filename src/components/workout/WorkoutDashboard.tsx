@@ -1,29 +1,29 @@
 // Workout Dashboard - Quick overview and start workout
 
-import React, { useState, useEffect, useCallback } from "react";
-import {
-	View,
-	Text,
-	StyleSheet,
-	TouchableOpacity,
-	ScrollView,
-	Dimensions,
-	Alert,
-	Modal,
-	TextInput,
-	FlatList,
-} from "react-native";
-import Ionicons from "@expo/vector-icons/Ionicons";
-import { useRouter } from "expo-router";
+import { SubscriptionCheckResult } from "@/src/components/PremiumFeatureGate";
+import { useHabitStore } from "@/src/context/habitStore";
 import { Theme } from "@/src/context/themeContext";
 import { useWorkoutStore } from "@/src/context/workoutStore";
-import { useHabitStore } from "@/src/context/habitStore";
 import {
 	EXERCISE_DATABASE,
-	getExercisesByMuscle,
 	MUSCLE_GROUP_INFO,
 } from "@/src/data/exerciseDatabase";
-import { MuscleGroup, Exercise, BodyWeight } from "@/src/types/workout";
+import { Exercise, MuscleGroup } from "@/src/types/workout";
+import Ionicons from "@expo/vector-icons/Ionicons";
+import { useRouter } from "expo-router";
+import React, { useCallback, useEffect, useState } from "react";
+import {
+	Alert,
+	Dimensions,
+	FlatList,
+	Modal,
+	ScrollView,
+	StyleSheet,
+	Text,
+	TextInput,
+	TouchableOpacity,
+	View,
+} from "react-native";
 
 const { width } = Dimensions.get("window");
 
@@ -33,12 +33,14 @@ interface WorkoutDashboardProps {
 	onNavigateToTab?: (
 		tab: "dashboard" | "statistics" | "plans" | "history"
 	) => void;
+	subscriptionCheck?: SubscriptionCheckResult;
 }
 
 export default function WorkoutDashboard({
 	theme,
 	onStartWorkout,
 	onNavigateToTab,
+	subscriptionCheck,
 }: WorkoutDashboardProps) {
 	const router = useRouter();
 	const { profile } = useHabitStore();

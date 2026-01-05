@@ -8,6 +8,8 @@ export type ModuleType = "habits" | "workout" | "finance";
 interface ModuleStore {
 	// Module states
 	enabledModules: ModuleType[];
+	_hasHydrated: boolean;
+	setHasHydrated: (state: boolean) => void;
 	isModuleEnabled: (module: ModuleType) => boolean;
 	toggleModule: (module: ModuleType, enabled: boolean) => Promise<void>;
 	getFirstEnabledModule: () => ModuleType;
@@ -15,14 +17,20 @@ interface ModuleStore {
 
 const defaultModules: ModuleType[] = ["habits", "workout", "finance"];
 
-export const useModuleStore = create<ModuleStore>()(
+// Create store with persist
+const useModuleStoreBase = create<ModuleStore>()(
 	persist(
 		(set, get) => ({
 			enabledModules: defaultModules,
+			_hasHydrated: false,
+
+			setHasHydrated: (state: boolean) => {
+				set({ _hasHydrated: state });
+			},
 
 			isModuleEnabled: (module: ModuleType) => {
 				const modules = get().enabledModules;
-				return modules ? modules.includes(module) : false;
+				return modules ? modules.includes(module) : true; // Default to true
 			},
 
 			toggleModule: async (module: ModuleType, enabled: boolean) => {
@@ -129,8 +137,8 @@ export const useModuleStore = create<ModuleStore>()(
 		{
 			name: "module-store",
 			storage: createJSONStorage(() => AsyncStorage),
-			// Ensure we always have valid data after rehydration
 			onRehydrateStorage: () => (state) => {
+				// Ensure we always have valid data after rehydration
 				if (
 					state &&
 					(!state.enabledModules || state.enabledModules.length === 0)
@@ -141,3 +149,26 @@ export const useModuleStore = create<ModuleStore>()(
 		}
 	)
 );
+
+// Export with hydration listener
+export const useModuleStore = Object.assign(useModuleStoreBase, {
+	// Subscribe to hydration
+	onFinishHydration: (callback: () => void) => {
+		// Check if already hydrated
+		if (useModuleStoreBase.persist.hasHydrated()) {
+			callback();
+			return () => {};
+		}
+		// Otherwise subscribe
+		return useModuleStoreBase.persist.onFinishHydration(callback);
+	},
+});
+
+// Initialize hydration state - check immediately and also on finish
+if (useModuleStoreBase.persist.hasHydrated()) {
+	useModuleStoreBase.getState().setHasHydrated(true);
+} else {
+	useModuleStoreBase.persist.onFinishHydration(() => {
+		useModuleStoreBase.getState().setHasHydrated(true);
+	});
+}

@@ -1,5 +1,6 @@
 // Finance Tracker - Main Screen
 
+import { useSubscriptionCheck } from "@/src/components/PremiumFeatureGate";
 import { SharedDrawer } from "@/src/components/SharedDrawer";
 import { useFinanceStore } from "@/src/context/financeStore";
 import { useHabitStore } from "@/src/context/habitStore";
@@ -40,8 +41,13 @@ export default function FinanceScreen() {
 	const { isDark, toggleTheme } = useTheme();
 	const theme = useColors();
 	const { profile } = useHabitStore();
-	const { currency } = useFinanceStore();
-	const { isModuleEnabled, getFirstEnabledModule } = useModuleStore();
+	const { currency, accounts, transactions, budgets, savingsGoals } =
+		useFinanceStore();
+	const { isModuleEnabled, getFirstEnabledModule, _hasHydrated } =
+		useModuleStore();
+
+	// Subscription checks for finance limits
+	const subscriptionCheck = useSubscriptionCheck();
 
 	// Check if module is disabled
 	const isFinanceEnabled = isModuleEnabled("finance");
@@ -57,14 +63,15 @@ export default function FinanceScreen() {
 
 	// Redirect if module is disabled - MUST be a hook, cannot be conditional
 	useEffect(() => {
-		if (!isFinanceEnabled) {
+		// Only redirect after store has hydrated to avoid false redirects
+		if (_hasHydrated && !isFinanceEnabled) {
 			if (firstEnabledModule === "habits") {
 				router.replace("/(tabs)");
 			} else if (firstEnabledModule === "workout") {
 				router.replace("/(tabs)/workout");
 			}
 		}
-	}, [isFinanceEnabled, firstEnabledModule, router]);
+	}, [isFinanceEnabled, firstEnabledModule, router, _hasHydrated]);
 
 	// Animate drawer
 	useEffect(() => {
@@ -75,6 +82,11 @@ export default function FinanceScreen() {
 		}).start();
 	}, [drawerOpen]);
 
+	// Show nothing while store is hydrating to prevent flash
+	if (!_hasHydrated) {
+		return null;
+	}
+
 	if (!isFinanceEnabled) {
 		return null;
 	}
@@ -84,6 +96,20 @@ export default function FinanceScreen() {
 		if (hour < 12) return "Good Morning";
 		if (hour < 17) return "Good Afternoon";
 		return "Good Evening";
+	};
+
+	// Get current month transactions count for limit checking
+	const getCurrentMonthTransactionCount = () => {
+		const now = new Date();
+		const currentMonth = now.getMonth();
+		const currentYear = now.getFullYear();
+		return transactions.filter((t) => {
+			const txDate = new Date(t.date);
+			return (
+				txDate.getMonth() === currentMonth &&
+				txDate.getFullYear() === currentYear
+			);
+		}).length;
 	};
 
 	const tabs: { id: FinanceTab; label: string; icon: string }[] = [
@@ -104,6 +130,7 @@ export default function FinanceScreen() {
 						theme={theme}
 						currency={currency}
 						onOpenDrawer={openDrawer}
+						subscriptionCheck={subscriptionCheck}
 					/>
 				);
 			case "transactions":
@@ -112,6 +139,8 @@ export default function FinanceScreen() {
 						theme={theme}
 						currency={currency}
 						onOpenDrawer={openDrawer}
+						subscriptionCheck={subscriptionCheck}
+						currentMonthTransactionCount={getCurrentMonthTransactionCount()}
 					/>
 				);
 			case "budgets":
@@ -120,6 +149,9 @@ export default function FinanceScreen() {
 						theme={theme}
 						currency={currency}
 						onOpenDrawer={openDrawer}
+						subscriptionCheck={subscriptionCheck}
+						currentBudgetCount={budgets.length}
+						currentGoalCount={savingsGoals.length}
 					/>
 				);
 			case "split":
@@ -136,6 +168,7 @@ export default function FinanceScreen() {
 						theme={theme}
 						currency={currency}
 						onOpenDrawer={openDrawer}
+						subscriptionCheck={subscriptionCheck}
 					/>
 				);
 			default:

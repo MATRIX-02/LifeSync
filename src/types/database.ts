@@ -62,8 +62,20 @@ export interface Database {
 					price_yearly: number;
 					currency: string;
 					features: Json;
+					// Habits limits
 					max_habits: number;
+					// Workout limits
 					max_workouts: number;
+					max_workout_plans: number;
+					max_history_days: number;
+					has_custom_exercises: boolean;
+					has_advanced_stats: boolean;
+					// Finance limits
+					max_accounts: number;
+					max_transactions_per_month: number;
+					max_budgets: number;
+					max_savings_goals: number;
+					// General features
 					has_analytics: boolean;
 					has_export: boolean;
 					has_sync: boolean;
@@ -83,8 +95,20 @@ export interface Database {
 					price_yearly: number;
 					currency?: string;
 					features?: Json;
+					// Habits limits
 					max_habits?: number;
+					// Workout limits
 					max_workouts?: number;
+					max_workout_plans?: number;
+					max_history_days?: number;
+					has_custom_exercises?: boolean;
+					has_advanced_stats?: boolean;
+					// Finance limits
+					max_accounts?: number;
+					max_transactions_per_month?: number;
+					max_budgets?: number;
+					max_savings_goals?: number;
+					// General features
 					has_analytics?: boolean;
 					has_export?: boolean;
 					has_sync?: boolean;
@@ -103,8 +127,20 @@ export interface Database {
 					price_yearly?: number;
 					currency?: string;
 					features?: Json;
+					// Habits limits
 					max_habits?: number;
+					// Workout limits
 					max_workouts?: number;
+					max_workout_plans?: number;
+					max_history_days?: number;
+					has_custom_exercises?: boolean;
+					has_advanced_stats?: boolean;
+					// Finance limits
+					max_accounts?: number;
+					max_transactions_per_month?: number;
+					max_budgets?: number;
+					max_savings_goals?: number;
+					// General features
 					has_analytics?: boolean;
 					has_export?: boolean;
 					has_sync?: boolean;

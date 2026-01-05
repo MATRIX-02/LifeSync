@@ -1,5 +1,6 @@
 // Transaction List - Full transaction history with filters
 
+import { SubscriptionCheckResult } from "@/src/components/PremiumFeatureGate";
 import { useFinanceStore } from "@/src/context/financeStore";
 import { Theme } from "@/src/context/themeContext";
 import {
@@ -27,6 +28,8 @@ interface TransactionListProps {
 	theme: Theme;
 	currency: string;
 	onOpenDrawer?: () => void;
+	subscriptionCheck?: SubscriptionCheckResult;
+	currentMonthTransactionCount?: number;
 }
 
 type FilterType = "all" | "income" | "expense" | "transfer";
@@ -45,6 +48,8 @@ export default function TransactionList({
 	theme,
 	currency,
 	onOpenDrawer,
+	subscriptionCheck,
+	currentMonthTransactionCount = 0,
 }: TransactionListProps) {
 	const { transactions, accounts, deleteTransaction, updateTransaction } =
 		useFinanceStore();

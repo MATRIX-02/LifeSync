@@ -1,34 +1,34 @@
 // Workout Statistics - Detailed analytics with muscle map visualization
 
-import React, { useState, useMemo } from "react";
-import {
-	View,
-	Text,
-	StyleSheet,
-	TouchableOpacity,
-	ScrollView,
-	Dimensions,
-} from "react-native";
-import Ionicons from "@expo/vector-icons/Ionicons";
+import { MuscleBodyMap } from "@/src/components/muscle-map";
+import { SubscriptionCheckResult } from "@/src/components/PremiumFeatureGate";
 import { Theme } from "@/src/context/themeContext";
 import { useWorkoutStore } from "@/src/context/workoutStore";
-import { MuscleBodyMap } from "@/src/components/muscle-map";
+import { MUSCLE_GROUP_INFO } from "@/src/data/exerciseDatabase";
 import { MuscleGroup } from "@/src/types/workout";
+import Ionicons from "@expo/vector-icons/Ionicons";
+import React, { useMemo, useState } from "react";
 import {
-	MUSCLE_GROUP_INFO,
-	EXERCISE_DATABASE,
-} from "@/src/data/exerciseDatabase";
+	Dimensions,
+	ScrollView,
+	StyleSheet,
+	Text,
+	TouchableOpacity,
+	View,
+} from "react-native";
 
 const { width } = Dimensions.get("window");
 
 interface WorkoutStatisticsProps {
 	theme: Theme;
 	gender: "male" | "female" | "other";
+	subscriptionCheck?: SubscriptionCheckResult;
 }
 
 export default function WorkoutStatistics({
 	theme,
 	gender,
+	subscriptionCheck,
 }: WorkoutStatisticsProps) {
 	const { getWorkoutStats, workoutSessions, personalRecords } =
 		useWorkoutStore();
