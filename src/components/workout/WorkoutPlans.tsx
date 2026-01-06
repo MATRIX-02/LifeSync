@@ -2,7 +2,7 @@
 
 import { SubscriptionCheckResult } from "@/src/components/PremiumFeatureGate";
 import { Theme } from "@/src/context/themeContext";
-import { useWorkoutStore } from "@/src/context/workoutStore";
+import { useWorkoutStore } from "@/src/context/workoutStoreDB";
 import {
 	EXERCISE_DATABASE,
 	getExercisesByMuscle,
@@ -51,11 +51,11 @@ export default function WorkoutPlans({
 		startWorkout,
 	} = useWorkoutStore();
 
-	const [isModalVisible, setIsModalVisible] = useState(false);
+	const [isEditing, setIsEditing] = useState(false);
+	const [showExerciseModal, setShowExerciseModal] = useState(false);
 	const [editingPlan, setEditingPlan] = useState<WorkoutPlan | null>(null);
-	const [step, setStep] = useState<"info" | "exercises">("info");
 
-	// New plan form state
+	// Plan form state
 	const [planName, setPlanName] = useState("");
 	const [planDescription, setPlanDescription] = useState("");
 	const [selectedExercises, setSelectedExercises] = useState<WorkoutExercise[]>(
@@ -65,36 +65,37 @@ export default function WorkoutPlans({
 		MuscleGroup | "all"
 	>("all");
 	const [searchQuery, setSearchQuery] = useState("");
+	const [expandedExercise, setExpandedExercise] = useState<string | null>(null);
 
 	const styles = createStyles(theme);
 
-	const openCreateModal = () => {
+	const openCreateEditor = () => {
 		setPlanName("");
 		setPlanDescription("");
 		setSelectedExercises([]);
 		setEditingPlan(null);
-		setStep("info");
-		setIsModalVisible(true);
+		setExpandedExercise(null);
+		setIsEditing(true);
 	};
 
-	const openEditModal = (plan: WorkoutPlan) => {
+	const openEditEditor = (plan: WorkoutPlan) => {
 		setPlanName(plan.name);
 		setPlanDescription(plan.description || "");
 		setSelectedExercises(plan.exercises);
 		setEditingPlan(plan);
-		setStep("info");
-		setIsModalVisible(true);
+		setExpandedExercise(null);
+		setIsEditing(true);
 	};
 
-	const closeModal = () => {
-		setIsModalVisible(false);
-		setStep("info");
+	const closeEditor = () => {
+		setIsEditing(false);
 		setPlanName("");
 		setPlanDescription("");
 		setSelectedExercises([]);
 		setEditingPlan(null);
 		setSearchQuery("");
 		setSelectedMuscleFilter("all");
+		setExpandedExercise(null);
 	};
 
 	const handleSavePlan = () => {
@@ -136,7 +137,7 @@ export default function WorkoutPlans({
 			});
 		}
 
-		closeModal();
+		closeEditor();
 	};
 
 	const handleDeletePlan = (plan: WorkoutPlan) => {
@@ -361,10 +362,479 @@ export default function WorkoutPlans({
 		return Array.from(muscles).slice(0, 4);
 	};
 
+	// Update set values in plan editor
+	const updateSetValue = (
+		exerciseId: string,
+		setId: string,
+		field: "reps" | "weight",
+		value: number
+	) => {
+		setSelectedExercises(
+			selectedExercises.map((ex) => {
+				if (ex.id === exerciseId) {
+					return {
+						...ex,
+						sets: ex.sets.map((s) =>
+							s.id === setId ? { ...s, [field]: value } : s
+						),
+					};
+				}
+				return ex;
+			})
+		);
+	};
+
+	const addSetToExerciseInPlan = (exerciseId: string) => {
+		setSelectedExercises(
+			selectedExercises.map((ex) => {
+				if (ex.id === exerciseId) {
+					const newSetNumber = ex.sets.length + 1;
+					return {
+						...ex,
+						sets: [
+							...ex.sets,
+							{
+								id: `${newSetNumber}`,
+								setNumber: newSetNumber,
+								reps: 10,
+								weight: 0,
+								completed: false,
+								isWarmup: false,
+								isDropset: false,
+							},
+						],
+						targetSets: newSetNumber,
+					};
+				}
+				return ex;
+			})
+		);
+	};
+
+	const removeSetFromExerciseInPlan = (exerciseId: string, setId: string) => {
+		setSelectedExercises(
+			selectedExercises.map((ex) => {
+				if (ex.id === exerciseId && ex.sets.length > 1) {
+					const newSets = ex.sets
+						.filter((s) => s.id !== setId)
+						.map((s, idx) => ({
+							...s,
+							id: `${idx + 1}`,
+							setNumber: idx + 1,
+						}));
+					return {
+						...ex,
+						sets: newSets,
+						targetSets: newSets.length,
+					};
+				}
+				return ex;
+			})
+		);
+	};
+
+	// Reorder exercises
+	const moveExerciseUp = (index: number) => {
+		if (index === 0) return;
+		const newExercises = [...selectedExercises];
+		[newExercises[index - 1], newExercises[index]] = [
+			newExercises[index],
+			newExercises[index - 1],
+		];
+		// Update order values
+		newExercises.forEach((ex, idx) => {
+			ex.order = idx;
+		});
+		setSelectedExercises(newExercises);
+	};
+
+	const moveExerciseDown = (index: number) => {
+		if (index === selectedExercises.length - 1) return;
+		const newExercises = [...selectedExercises];
+		[newExercises[index], newExercises[index + 1]] = [
+			newExercises[index + 1],
+			newExercises[index],
+		];
+		// Update order values
+		newExercises.forEach((ex, idx) => {
+			ex.order = idx;
+		});
+		setSelectedExercises(newExercises);
+	};
+
+	// If in editing mode, show the plan editor
+	if (isEditing) {
+		return (
+			<View style={styles.editorContainer}>
+				{/* Editor Header */}
+				<View style={styles.editorHeader}>
+					<TouchableOpacity onPress={closeEditor} style={styles.editorBackBtn}>
+						<Ionicons name="close" size={24} color={theme.text} />
+					</TouchableOpacity>
+					<Text style={styles.editorTitle}>
+						{editingPlan ? "Edit Plan" : "New Plan"}
+					</Text>
+					<TouchableOpacity
+						onPress={handleSavePlan}
+						style={styles.editorSaveBtn}
+					>
+						<Text style={styles.editorSaveText}>Save</Text>
+					</TouchableOpacity>
+				</View>
+
+				<ScrollView
+					style={styles.editorContent}
+					showsVerticalScrollIndicator={false}
+				>
+					{/* Plan Info Section */}
+					<View style={styles.editorSection}>
+						<TextInput
+							style={styles.editorPlanName}
+							placeholder="Plan Name"
+							placeholderTextColor={theme.textMuted}
+							value={planName}
+							onChangeText={setPlanName}
+						/>
+						<TextInput
+							style={styles.editorDescription}
+							placeholder="Description (optional)"
+							placeholderTextColor={theme.textMuted}
+							value={planDescription}
+							onChangeText={setPlanDescription}
+							multiline
+						/>
+					</View>
+
+					{/* Quick Templates */}
+					{selectedExercises.length === 0 && (
+						<View style={styles.editorSection}>
+							<Text style={styles.editorSectionTitle}>
+								Quick Start Templates
+							</Text>
+							<View style={styles.templateGrid}>
+								{[
+									{ name: "Push Day", icon: "arrow-forward-circle" },
+									{ name: "Pull Day", icon: "arrow-back-circle" },
+									{ name: "Leg Day", icon: "footsteps" },
+									{ name: "Full Body", icon: "body" },
+									{ name: "Upper Body", icon: "fitness" },
+									{ name: "Core Focus", icon: "shield" },
+								].map((template) => (
+									<TouchableOpacity
+										key={template.name}
+										style={styles.templateCard}
+										onPress={() => handleSelectTemplate(template.name)}
+									>
+										<Ionicons
+											name={template.icon as any}
+											size={18}
+											color={theme.textMuted}
+										/>
+										<Text style={styles.templateText}>{template.name}</Text>
+									</TouchableOpacity>
+								))}
+							</View>
+						</View>
+					)}
+
+					{/* Exercises List */}
+					<View style={styles.editorSection}>
+						<Text style={styles.editorSectionTitle}>
+							Exercises ({selectedExercises.length})
+						</Text>
+
+						{selectedExercises.map((exercise, index) => (
+							<View key={exercise.id} style={styles.exerciseCard}>
+								<View style={styles.exerciseCardHeader}>
+									{/* Reorder buttons */}
+									<View style={styles.reorderButtons}>
+										<TouchableOpacity
+											style={[
+												styles.reorderBtn,
+												index === 0 && styles.reorderBtnDisabled,
+											]}
+											onPress={() => moveExerciseUp(index)}
+											disabled={index === 0}
+										>
+											<Ionicons
+												name="chevron-up"
+												size={18}
+												color={index === 0 ? theme.border : theme.textMuted}
+											/>
+										</TouchableOpacity>
+										<TouchableOpacity
+											style={[
+												styles.reorderBtn,
+												index === selectedExercises.length - 1 &&
+													styles.reorderBtnDisabled,
+											]}
+											onPress={() => moveExerciseDown(index)}
+											disabled={index === selectedExercises.length - 1}
+										>
+											<Ionicons
+												name="chevron-down"
+												size={18}
+												color={
+													index === selectedExercises.length - 1
+														? theme.border
+														: theme.textMuted
+												}
+											/>
+										</TouchableOpacity>
+									</View>
+									<TouchableOpacity
+										style={styles.exerciseCardInfoTouch}
+										onPress={() =>
+											setExpandedExercise(
+												expandedExercise === exercise.id ? null : exercise.id
+											)
+										}
+									>
+										<View style={styles.exerciseCardInfo}>
+											<Text style={styles.exerciseCardName}>
+												{exercise.exerciseName}
+											</Text>
+											<Text style={styles.exerciseCardMuscles}>
+												{exercise.targetMuscles
+													.map((m) => MUSCLE_GROUP_INFO[m]?.name || m)
+													.join(", ")}
+											</Text>
+										</View>
+										<View style={styles.exerciseCardActions}>
+											<Text style={styles.exerciseSetsCount}>
+												{exercise.sets.length} sets
+											</Text>
+											<Ionicons
+												name={
+													expandedExercise === exercise.id
+														? "chevron-up"
+														: "chevron-down"
+												}
+												size={20}
+												color={theme.textMuted}
+											/>
+										</View>
+									</TouchableOpacity>
+								</View>
+
+								{expandedExercise === exercise.id && (
+									<View style={styles.exerciseCardBody}>
+										{/* Sets */}
+										<View style={styles.setsHeader}>
+											<Text style={styles.setsHeaderText}>Set</Text>
+											<Text style={styles.setsHeaderText}>Reps</Text>
+											<Text style={styles.setsHeaderText}>Weight</Text>
+											<View style={{ width: 24 }} />
+										</View>
+
+										{exercise.sets.map((set) => (
+											<View key={set.id} style={styles.setRow}>
+												<View style={styles.setNumberBadge}>
+													<Text style={styles.setNumberText}>
+														{set.setNumber}
+													</Text>
+												</View>
+												<TextInput
+													style={styles.setInput}
+													keyboardType="numeric"
+													value={set.reps?.toString() || ""}
+													onChangeText={(v) =>
+														updateSetValue(
+															exercise.id,
+															set.id,
+															"reps",
+															parseInt(v) || 0
+														)
+													}
+												/>
+												<TextInput
+													style={styles.setInput}
+													keyboardType="numeric"
+													value={set.weight?.toString() || "0"}
+													onChangeText={(v) =>
+														updateSetValue(
+															exercise.id,
+															set.id,
+															"weight",
+															parseFloat(v) || 0
+														)
+													}
+												/>
+												<TouchableOpacity
+													onPress={() =>
+														removeSetFromExerciseInPlan(exercise.id, set.id)
+													}
+													style={styles.removeSetBtn}
+												>
+													<Ionicons
+														name="close-circle"
+														size={20}
+														color={theme.error}
+													/>
+												</TouchableOpacity>
+											</View>
+										))}
+
+										{/* Add Set / Remove Exercise */}
+										<View style={styles.exerciseCardFooter}>
+											<TouchableOpacity
+												style={styles.addSetBtn}
+												onPress={() => addSetToExerciseInPlan(exercise.id)}
+											>
+												<Ionicons name="add" size={16} color={theme.primary} />
+												<Text style={styles.addSetText}>Add Set</Text>
+											</TouchableOpacity>
+											<TouchableOpacity
+												style={styles.removeExerciseBtn}
+												onPress={() => removeExerciseFromPlan(exercise.id)}
+											>
+												<Ionicons
+													name="trash-outline"
+													size={16}
+													color={theme.error}
+												/>
+												<Text style={styles.removeExerciseText}>Remove</Text>
+											</TouchableOpacity>
+										</View>
+									</View>
+								)}
+							</View>
+						))}
+
+						{/* Add Exercise Button */}
+						<TouchableOpacity
+							style={styles.addExerciseBtn}
+							onPress={() => setShowExerciseModal(true)}
+						>
+							<Ionicons name="add-circle" size={24} color={theme.primary} />
+							<Text style={styles.addExerciseText}>Add Exercise</Text>
+						</TouchableOpacity>
+					</View>
+
+					<View style={{ height: 100 }} />
+				</ScrollView>
+
+				{/* Add Exercise Modal */}
+				<Modal visible={showExerciseModal} animationType="slide" transparent>
+					<View style={styles.modalOverlay}>
+						<View style={styles.modalContent}>
+							<View style={styles.modalHeader}>
+								<TouchableOpacity onPress={() => setShowExerciseModal(false)}>
+									<Ionicons name="close" size={24} color={theme.text} />
+								</TouchableOpacity>
+								<Text style={styles.modalTitle}>Add Exercise</Text>
+								<View style={{ width: 24 }} />
+							</View>
+
+							{/* Search */}
+							<View style={styles.searchContainer}>
+								<Ionicons name="search" size={18} color={theme.textMuted} />
+								<TextInput
+									style={styles.searchInput}
+									placeholder="Search exercises..."
+									placeholderTextColor={theme.textMuted}
+									value={searchQuery}
+									onChangeText={setSearchQuery}
+								/>
+							</View>
+
+							{/* Muscle Filter */}
+							<ScrollView
+								horizontal
+								showsHorizontalScrollIndicator={false}
+								style={styles.filterScroll}
+							>
+								<TouchableOpacity
+									style={[
+										styles.filterChip,
+										selectedMuscleFilter === "all" && styles.filterChipActive,
+									]}
+									onPress={() => setSelectedMuscleFilter("all")}
+								>
+									<Text
+										style={[
+											styles.filterChipText,
+											selectedMuscleFilter === "all" &&
+												styles.filterChipTextActive,
+										]}
+									>
+										All
+									</Text>
+								</TouchableOpacity>
+								{Object.entries(MUSCLE_GROUP_INFO).map(([key, info]) => (
+									<TouchableOpacity
+										key={key}
+										style={[
+											styles.filterChip,
+											selectedMuscleFilter === key && styles.filterChipActive,
+										]}
+										onPress={() => setSelectedMuscleFilter(key as MuscleGroup)}
+									>
+										<Text
+											style={[
+												styles.filterChipText,
+												selectedMuscleFilter === key &&
+													styles.filterChipTextActive,
+											]}
+										>
+											{info.name}
+										</Text>
+									</TouchableOpacity>
+								))}
+							</ScrollView>
+
+							{/* Exercise List */}
+							<FlatList
+								data={searchedExercises}
+								keyExtractor={(item) => item.id}
+								renderItem={({ item }) => {
+									const isSelected = selectedExercises.some(
+										(e) => e.exerciseId === item.id
+									);
+									return (
+										<TouchableOpacity
+											style={[
+												styles.exerciseItem,
+												isSelected && styles.exerciseItemSelected,
+											]}
+											onPress={() => addExerciseToPlan(item)}
+										>
+											<View style={styles.exerciseInfo}>
+												<Text style={styles.exerciseName}>{item.name}</Text>
+												<View style={styles.exerciseMuscles}>
+													{item.targetMuscles
+														.slice(0, 2)
+														.map((m: MuscleGroup) => (
+															<Text key={m} style={styles.exerciseMuscle}>
+																{MUSCLE_GROUP_INFO[m]?.name || m}
+															</Text>
+														))}
+												</View>
+											</View>
+											<Ionicons
+												name={
+													isSelected ? "checkmark-circle" : "add-circle-outline"
+												}
+												size={24}
+												color={isSelected ? theme.success : theme.primary}
+											/>
+										</TouchableOpacity>
+									);
+								}}
+								style={styles.exerciseList}
+								showsVerticalScrollIndicator={false}
+							/>
+						</View>
+					</View>
+				</Modal>
+			</View>
+		);
+	}
+
 	return (
 		<ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
 			{/* Header Actions */}
-			<TouchableOpacity style={styles.createButton} onPress={openCreateModal}>
+			<TouchableOpacity style={styles.createButton} onPress={openCreateEditor}>
 				<View style={styles.createIconContainer}>
 					<Ionicons name="add" size={24} color="#FFFFFF" />
 				</View>
@@ -430,7 +900,7 @@ export default function WorkoutPlans({
 							<View style={styles.planActions}>
 								<TouchableOpacity
 									style={styles.actionButton}
-									onPress={() => openEditModal(plan)}
+									onPress={() => openEditEditor(plan)}
 								>
 									<Ionicons name="pencil" size={16} color={theme.textMuted} />
 								</TouchableOpacity>
@@ -543,304 +1013,6 @@ export default function WorkoutPlans({
 					</View>
 				))
 			)}
-
-			{/* Create/Edit Modal */}
-			<Modal visible={isModalVisible} animationType="slide" transparent>
-				<View style={styles.modalOverlay}>
-					<View style={styles.modalContent}>
-						{/* Modal Header */}
-						<View style={styles.modalHeader}>
-							{step === "exercises" ? (
-								<TouchableOpacity onPress={() => setStep("info")}>
-									<Ionicons name="arrow-back" size={24} color={theme.text} />
-								</TouchableOpacity>
-							) : (
-								<TouchableOpacity onPress={closeModal}>
-									<Ionicons name="close" size={24} color={theme.text} />
-								</TouchableOpacity>
-							)}
-							<Text style={styles.modalTitle}>
-								{editingPlan ? "Edit Plan" : "New Plan"}
-							</Text>
-							<TouchableOpacity
-								onPress={
-									step === "info" ? () => setStep("exercises") : handleSavePlan
-								}
-							>
-								<Text style={styles.modalAction}>
-									{step === "info" ? "Next" : "Save"}
-								</Text>
-							</TouchableOpacity>
-						</View>
-
-						{/* Step Indicator */}
-						<View style={styles.stepIndicator}>
-							<TouchableOpacity
-								style={[
-									styles.stepDot,
-									step === "info" && styles.stepDotActive,
-								]}
-								onPress={() => setStep("info")}
-							/>
-							<View style={styles.stepLine} />
-							<TouchableOpacity
-								style={[
-									styles.stepDot,
-									step === "exercises" && styles.stepDotActive,
-								]}
-								onPress={() => setStep("exercises")}
-							/>
-						</View>
-
-						{step === "info" ? (
-							// Step 1: Plan Info
-							<View style={styles.stepContent}>
-								<View style={styles.inputGroup}>
-									<Text style={styles.inputLabel}>Plan Name</Text>
-									<TextInput
-										style={styles.textInput}
-										placeholder="e.g., Push Day, Full Body"
-										placeholderTextColor={theme.textMuted}
-										value={planName}
-										onChangeText={setPlanName}
-									/>
-								</View>
-
-								<View style={styles.inputGroup}>
-									<Text style={styles.inputLabel}>Description (Optional)</Text>
-									<TextInput
-										style={[styles.textInput, styles.textArea]}
-										placeholder="What's this workout plan for?"
-										placeholderTextColor={theme.textMuted}
-										value={planDescription}
-										onChangeText={setPlanDescription}
-										multiline
-										numberOfLines={3}
-									/>
-								</View>
-
-								{/* Quick Templates */}
-								<Text style={styles.inputLabel}>Quick Templates</Text>
-								<View style={styles.templateGrid}>
-									{[
-										{ name: "Push Day", icon: "arrow-forward-circle" },
-										{ name: "Pull Day", icon: "arrow-back-circle" },
-										{ name: "Leg Day", icon: "footsteps" },
-										{ name: "Full Body", icon: "body" },
-										{ name: "Upper Body", icon: "fitness" },
-										{ name: "Core Focus", icon: "shield" },
-									].map((template) => (
-										<TouchableOpacity
-											key={template.name}
-											style={[
-												styles.templateCard,
-												planName === template.name && styles.templateCardActive,
-											]}
-											onPress={() => handleSelectTemplate(template.name)}
-										>
-											<Ionicons
-												name={template.icon as any}
-												size={20}
-												color={
-													planName === template.name
-														? "#FFFFFF"
-														: theme.textMuted
-												}
-											/>
-											<Text
-												style={[
-													styles.templateText,
-													planName === template.name &&
-														styles.templateTextActive,
-												]}
-											>
-												{template.name}
-											</Text>
-										</TouchableOpacity>
-									))}
-								</View>
-							</View>
-						) : (
-							// Step 2: Select Exercises
-							<View style={styles.stepContent}>
-								{/* Selected Exercises */}
-								{selectedExercises.length > 0 && (
-									<View style={styles.selectedSection}>
-										<Text style={styles.selectedTitle}>
-											Selected ({selectedExercises.length})
-										</Text>
-										<ScrollView
-											horizontal
-											showsHorizontalScrollIndicator={false}
-											style={styles.selectedScroll}
-										>
-											{selectedExercises.map((ex) => (
-												<View key={ex.id} style={styles.selectedChip}>
-													<Text style={styles.selectedChipText}>
-														{ex.exerciseName}
-													</Text>
-													<View style={styles.setsControl}>
-														<TouchableOpacity
-															onPress={() =>
-																updateExerciseSets(
-																	ex.id,
-																	Math.max(1, ex.sets.length - 1)
-																)
-															}
-														>
-															<Ionicons
-																name="remove-circle"
-																size={16}
-																color={theme.textMuted}
-															/>
-														</TouchableOpacity>
-														<Text style={styles.setsText}>
-															{ex.sets.length}
-														</Text>
-														<TouchableOpacity
-															onPress={() =>
-																updateExerciseSets(ex.id, ex.sets.length + 1)
-															}
-														>
-															<Ionicons
-																name="add-circle"
-																size={16}
-																color={theme.primary}
-															/>
-														</TouchableOpacity>
-													</View>
-													<TouchableOpacity
-														onPress={() => removeExerciseFromPlan(ex.id)}
-														style={styles.removeExercise}
-													>
-														<Ionicons name="close" size={14} color="#FFF" />
-													</TouchableOpacity>
-												</View>
-											))}
-										</ScrollView>
-									</View>
-								)}
-
-								{/* Search */}
-								<View style={styles.searchContainer}>
-									<Ionicons name="search" size={18} color={theme.textMuted} />
-									<TextInput
-										style={styles.searchInput}
-										placeholder="Search exercises..."
-										placeholderTextColor={theme.textMuted}
-										value={searchQuery}
-										onChangeText={setSearchQuery}
-									/>
-								</View>
-
-								{/* Muscle Filter */}
-								<ScrollView
-									horizontal
-									showsHorizontalScrollIndicator={false}
-									style={styles.filterScroll}
-								>
-									<TouchableOpacity
-										style={[
-											styles.filterChip,
-											selectedMuscleFilter === "all" && styles.filterChipActive,
-										]}
-										onPress={() => setSelectedMuscleFilter("all")}
-									>
-										<Text
-											style={[
-												styles.filterChipText,
-												selectedMuscleFilter === "all" &&
-													styles.filterChipTextActive,
-											]}
-										>
-											All
-										</Text>
-									</TouchableOpacity>
-									{Object.entries(MUSCLE_GROUP_INFO).map(([key, info]) => (
-										<TouchableOpacity
-											key={key}
-											style={[
-												styles.filterChip,
-												selectedMuscleFilter === key && styles.filterChipActive,
-											]}
-											onPress={() =>
-												setSelectedMuscleFilter(key as MuscleGroup)
-											}
-										>
-											<Text
-												style={[
-													styles.filterChipText,
-													selectedMuscleFilter === key &&
-														styles.filterChipTextActive,
-												]}
-											>
-												{info.name}
-											</Text>
-										</TouchableOpacity>
-									))}
-								</ScrollView>
-
-								{/* Exercise List */}
-								<FlatList
-									data={searchedExercises}
-									keyExtractor={(item) => item.id}
-									renderItem={({ item }) => {
-										const isSelected = selectedExercises.some(
-											(e) => e.exerciseId === item.id
-										);
-										return (
-											<TouchableOpacity
-												style={[
-													styles.exerciseItem,
-													isSelected && styles.exerciseItemSelected,
-												]}
-												onPress={() =>
-													isSelected
-														? removeExerciseFromPlan(
-																selectedExercises.find(
-																	(e) => e.exerciseId === item.id
-																)?.id || ""
-														  )
-														: addExerciseToPlan(item)
-												}
-											>
-												<View style={styles.exerciseInfo}>
-													<Text style={styles.exerciseName}>{item.name}</Text>
-													<View style={styles.exerciseMuscles}>
-														{item.targetMuscles
-															.slice(0, 2)
-															.map((m: MuscleGroup) => (
-																<Text key={m} style={styles.exerciseMuscle}>
-																	{MUSCLE_GROUP_INFO[m]?.name || m}
-																</Text>
-															))}
-													</View>
-												</View>
-												<View
-													style={[
-														styles.exerciseCheck,
-														isSelected && styles.exerciseCheckSelected,
-													]}
-												>
-													{isSelected && (
-														<Ionicons
-															name="checkmark"
-															size={14}
-															color="#FFFFFF"
-														/>
-													)}
-												</View>
-											</TouchableOpacity>
-										);
-									}}
-									style={styles.exerciseList}
-									showsVerticalScrollIndicator={false}
-								/>
-							</View>
-						)}
-					</View>
-				</View>
-			</Modal>
 
 			<View style={{ height: 40 }} />
 		</ScrollView>
@@ -1290,5 +1462,227 @@ const createStyles = (theme: Theme) =>
 		exerciseCheckSelected: {
 			backgroundColor: theme.primary,
 			borderColor: theme.primary,
+		},
+		// Editor styles
+		editorContainer: {
+			flex: 1,
+			backgroundColor: theme.background,
+		},
+		editorHeader: {
+			flexDirection: "row",
+			alignItems: "center",
+			justifyContent: "space-between",
+			paddingHorizontal: 16,
+			paddingVertical: 12,
+			borderBottomWidth: 1,
+			borderBottomColor: theme.border,
+			backgroundColor: theme.surface,
+		},
+		editorBackBtn: {
+			padding: 4,
+		},
+		editorTitle: {
+			fontSize: 17,
+			fontWeight: "600",
+			color: theme.text,
+		},
+		editorSaveBtn: {
+			paddingVertical: 6,
+			paddingHorizontal: 12,
+			backgroundColor: theme.primary,
+			borderRadius: 8,
+		},
+		editorSaveText: {
+			fontSize: 14,
+			fontWeight: "600",
+			color: "#FFFFFF",
+		},
+		editorContent: {
+			flex: 1,
+			paddingHorizontal: 16,
+		},
+		editorSection: {
+			marginTop: 16,
+		},
+		editorSectionTitle: {
+			fontSize: 14,
+			fontWeight: "600",
+			color: theme.textSecondary,
+			marginBottom: 12,
+		},
+		editorPlanName: {
+			fontSize: 20,
+			fontWeight: "700",
+			color: theme.text,
+			paddingVertical: 12,
+			borderBottomWidth: 1,
+			borderBottomColor: theme.border,
+		},
+		editorDescription: {
+			fontSize: 14,
+			color: theme.textMuted,
+			paddingVertical: 12,
+			minHeight: 60,
+		},
+		exerciseCard: {
+			backgroundColor: theme.surface,
+			borderRadius: 12,
+			marginBottom: 12,
+			overflow: "hidden",
+		},
+		exerciseCardHeader: {
+			flexDirection: "row",
+			alignItems: "center",
+			padding: 14,
+		},
+		reorderButtons: {
+			flexDirection: "column",
+			marginRight: 8,
+		},
+		reorderBtn: {
+			padding: 2,
+		},
+		reorderBtnDisabled: {
+			opacity: 0.3,
+		},
+		exerciseCardInfoTouch: {
+			flex: 1,
+			flexDirection: "row",
+			alignItems: "center",
+		},
+		exerciseOrderBadge: {
+			width: 28,
+			height: 28,
+			borderRadius: 14,
+			backgroundColor: theme.primary + "20",
+			justifyContent: "center",
+			alignItems: "center",
+			marginRight: 12,
+		},
+		exerciseOrderText: {
+			fontSize: 13,
+			fontWeight: "700",
+			color: theme.primary,
+		},
+		exerciseCardInfo: {
+			flex: 1,
+		},
+		exerciseCardName: {
+			fontSize: 15,
+			fontWeight: "600",
+			color: theme.text,
+		},
+		exerciseCardMuscles: {
+			fontSize: 12,
+			color: theme.textMuted,
+			marginTop: 2,
+		},
+		exerciseCardActions: {
+			flexDirection: "row",
+			alignItems: "center",
+			gap: 8,
+		},
+		exerciseSetsCount: {
+			fontSize: 12,
+			color: theme.textMuted,
+			fontWeight: "500",
+		},
+		exerciseCardBody: {
+			paddingHorizontal: 14,
+			paddingBottom: 14,
+			borderTopWidth: 1,
+			borderTopColor: theme.border,
+		},
+		setsHeader: {
+			flexDirection: "row",
+			alignItems: "center",
+			paddingVertical: 10,
+			gap: 12,
+		},
+		setsHeaderText: {
+			fontSize: 11,
+			fontWeight: "600",
+			color: theme.textMuted,
+			textTransform: "uppercase",
+			flex: 1,
+			textAlign: "center",
+		},
+		setRow: {
+			flexDirection: "row",
+			alignItems: "center",
+			marginBottom: 8,
+			gap: 12,
+		},
+		setNumberBadge: {
+			width: 28,
+			height: 28,
+			borderRadius: 14,
+			backgroundColor: theme.surfaceLight,
+			justifyContent: "center",
+			alignItems: "center",
+			flex: 1,
+		},
+		setNumberText: {
+			fontSize: 13,
+			fontWeight: "600",
+			color: theme.text,
+		},
+		setInput: {
+			flex: 1,
+			backgroundColor: theme.surfaceLight,
+			borderRadius: 8,
+			paddingHorizontal: 12,
+			paddingVertical: 8,
+			fontSize: 14,
+			fontWeight: "500",
+			color: theme.text,
+			textAlign: "center",
+		},
+		removeSetBtn: {
+			padding: 4,
+		},
+		exerciseCardFooter: {
+			flexDirection: "row",
+			justifyContent: "space-between",
+			marginTop: 8,
+			paddingTop: 8,
+			borderTopWidth: 1,
+			borderTopColor: theme.border,
+		},
+		addSetBtn: {
+			flexDirection: "row",
+			alignItems: "center",
+			gap: 4,
+		},
+		addSetText: {
+			fontSize: 13,
+			fontWeight: "500",
+			color: theme.primary,
+		},
+		removeExerciseBtn: {
+			flexDirection: "row",
+			alignItems: "center",
+			gap: 4,
+		},
+		removeExerciseText: {
+			fontSize: 13,
+			fontWeight: "500",
+			color: theme.error,
+		},
+		addExerciseBtn: {
+			flexDirection: "row",
+			alignItems: "center",
+			justifyContent: "center",
+			gap: 8,
+			padding: 16,
+			borderRadius: 12,
+			borderWidth: 2,
+			borderStyle: "dashed",
+			borderColor: theme.border,
+		},
+		addExerciseText: {
+			fontSize: 15,
+			fontWeight: "600",
+			color: theme.primary,
 		},
 	});

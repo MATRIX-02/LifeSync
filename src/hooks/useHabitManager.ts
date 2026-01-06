@@ -1,6 +1,6 @@
 import { useCallback } from "react";
 
-import { useHabitStore } from "../context/habitStore";
+import { useHabitStore } from "../context/habitStoreDB";
 import { NotificationService } from "../services/notificationService";
 import { Habit, HabitStats } from "../types";
 import { generateId } from "../utils/helpers";
@@ -17,7 +17,7 @@ export const useHabitManager = () => {
 				updatedAt: new Date(),
 			};
 
-			store.addHabit(habit);
+			await store.addHabit(habit);
 
 			// Schedule notification if enabled
 			if (habit.notificationEnabled && habit.notificationTime) {
@@ -29,7 +29,7 @@ export const useHabitManager = () => {
 							habit.notificationTime
 						);
 					// Store the notification ID for later cancellation
-					store.updateHabit(habit.id, { notificationId });
+					await store.updateHabit(habit.id, { notificationId });
 				} catch (error) {
 					console.error("Failed to schedule notification:", error);
 				}
@@ -88,14 +88,14 @@ export const useHabitManager = () => {
 				updates.notificationId = undefined;
 			}
 
-			store.updateHabit(habitId, updates);
+			await store.updateHabit(habitId, updates);
 		},
 		[store]
 	);
 
 	const completeHabit = useCallback(
-		(habitId: string, value?: number, notes?: string) => {
-			store.logHabitCompletion(habitId, value, notes);
+		async (habitId: string, value?: number, notes?: string) => {
+			await store.logHabitCompletion(habitId, value, notes);
 			store.calculateStats(habitId);
 		},
 		[store]
@@ -112,7 +112,7 @@ export const useHabitManager = () => {
 					console.error("Failed to cancel notification:", error);
 				}
 			}
-			store.deleteHabit(habitId);
+			await store.deleteHabit(habitId);
 		},
 		[store]
 	);

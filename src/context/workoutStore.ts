@@ -1,22 +1,22 @@
 // Workout Store - Zustand state management for workout tracker
 
-import { create } from "zustand";
-import { persist, createJSONStorage } from "zustand/middleware";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { create } from "zustand";
+import { createJSONStorage, persist } from "zustand/middleware";
 import {
-	FitnessProfile,
 	BodyMeasurements,
 	BodyWeight,
-	WorkoutPlan,
-	WorkoutSession,
-	WorkoutExercise,
-	WorkoutSet,
-	PersonalRecord,
+	Exercise,
+	FitnessProfile,
 	MuscleGroup,
 	MuscleProgress,
-	WorkoutStats,
+	PersonalRecord,
 	WeightUnit,
-	Exercise,
+	WorkoutExercise,
+	WorkoutPlan,
+	WorkoutSession,
+	WorkoutSet,
+	WorkoutStats,
 } from "../types/workout";
 
 interface WorkoutStore {
@@ -59,6 +59,7 @@ interface WorkoutStore {
 	startWorkout: (planId?: string, planName?: string) => void;
 	addExerciseToSession: (exercise: WorkoutExercise) => void;
 	removeExerciseFromSession: (exerciseId: string) => void;
+	reorderExercisesInSession: (fromIndex: number, toIndex: number) => void;
 	updateSetInSession: (
 		exerciseId: string,
 		setId: string,
@@ -277,6 +278,24 @@ export const useWorkoutStore = create<WorkoutStore>()(
 							exercises: state.currentSession.exercises.filter(
 								(ex) => ex.id !== exerciseId
 							),
+						},
+					};
+				}),
+
+			reorderExercisesInSession: (fromIndex, toIndex) =>
+				set((state) => {
+					if (!state.currentSession) return state;
+					const exercises = [...state.currentSession.exercises];
+					const [removed] = exercises.splice(fromIndex, 1);
+					exercises.splice(toIndex, 0, removed);
+					// Update order values
+					exercises.forEach((ex, idx) => {
+						ex.order = idx;
+					});
+					return {
+						currentSession: {
+							...state.currentSession,
+							exercises,
 						},
 					};
 				}),

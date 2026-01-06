@@ -1,14 +1,14 @@
 // Workout Dashboard - Quick overview and start workout
 
 import { SubscriptionCheckResult } from "@/src/components/PremiumFeatureGate";
-import { useHabitStore } from "@/src/context/habitStore";
+import { useHabitStore } from "@/src/context/habitStoreDB";
 import { Theme } from "@/src/context/themeContext";
-import { useWorkoutStore } from "@/src/context/workoutStore";
+import { useWorkoutStore } from "@/src/context/workoutStoreDB";
 import {
 	EXERCISE_DATABASE,
 	MUSCLE_GROUP_INFO,
 } from "@/src/data/exerciseDatabase";
-import { Exercise, MuscleGroup } from "@/src/types/workout";
+import { MuscleGroup } from "@/src/types/workout";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useRouter } from "expo-router";
 import React, { useCallback, useEffect, useState } from "react";
@@ -24,6 +24,7 @@ import {
 	TouchableOpacity,
 	View,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 
 const { width } = Dimensions.get("window");
 
@@ -236,7 +237,7 @@ export default function WorkoutDashboard({
 			return;
 		}
 
-		const newExercise: Exercise = {
+		const newExercise: any = {
 			id: `custom_${Date.now()}`,
 			name: customExerciseName.trim(),
 			category: "strength",
@@ -248,6 +249,9 @@ export default function WorkoutDashboard({
 			description: customExerciseDescription.trim() || "Custom exercise",
 			instructions: [],
 			isCustom: true,
+			muscleGroup: customExerciseMuscles[0] || "chest",
+			isCompound: customExerciseMuscles.length > 1,
+			createdAt: new Date().toISOString(),
 		};
 
 		addCustomExercise(newExercise);
@@ -297,8 +301,20 @@ export default function WorkoutDashboard({
 						>
 							<Ionicons name={stat.icon as any} size={18} color={stat.color} />
 						</View>
-						<Text style={styles.statValue}>{stat.value}</Text>
-						<Text style={styles.statLabel}>{stat.label}</Text>
+						<Text
+							style={styles.statValue}
+							numberOfLines={1}
+							adjustsFontSizeToFit
+						>
+							{stat.value}
+						</Text>
+						<Text
+							style={styles.statLabel}
+							numberOfLines={2}
+							adjustsFontSizeToFit
+						>
+							{stat.label}
+						</Text>
 					</View>
 				))}
 			</View>
@@ -325,18 +341,7 @@ export default function WorkoutDashboard({
 			<View style={styles.section}>
 				<Text style={styles.sectionTitle}>Quick Start</Text>
 				<View style={styles.quickStartGrid}>
-					<TouchableOpacity
-						style={[styles.quickStartCard, { backgroundColor: theme.primary }]}
-						onPress={handleQuickWorkout}
-					>
-						<Ionicons name="flash" size={32} color="#FFFFFF" />
-						<Text style={styles.quickStartText}>Quick Workout</Text>
-					</TouchableOpacity>
-
-					<TouchableOpacity
-						style={[styles.quickStartCard, { backgroundColor: theme.success }]}
-						onPress={handleBrowseExercises}
-					>
+					<TouchableOpacity onPress={handleBrowseExercises}>
 						<Ionicons name="search" size={32} color="#FFFFFF" />
 						<Text style={styles.quickStartText}>Browse Exercises</Text>
 					</TouchableOpacity>
@@ -520,7 +525,7 @@ export default function WorkoutDashboard({
 				animationType="slide"
 				presentationStyle="pageSheet"
 			>
-				<View style={styles.modalContainer}>
+				<SafeAreaView style={styles.modalContainer}>
 					<View style={styles.modalHeader}>
 						<Text style={styles.modalTitle}>Browse Exercises</Text>
 						<View style={styles.modalHeaderActions}>
@@ -651,7 +656,7 @@ export default function WorkoutDashboard({
 							</View>
 						}
 					/>
-				</View>
+				</SafeAreaView>
 			</Modal>
 
 			{/* Create Exercise Modal */}
@@ -660,7 +665,7 @@ export default function WorkoutDashboard({
 				animationType="slide"
 				presentationStyle="pageSheet"
 			>
-				<View style={styles.modalContainer}>
+				<SafeAreaView style={styles.modalContainer}>
 					<View style={styles.modalHeader}>
 						<TouchableOpacity onPress={() => setShowCreateExercise(false)}>
 							<Ionicons name="arrow-back" size={24} color={theme.text} />
@@ -726,7 +731,7 @@ export default function WorkoutDashboard({
 							/>
 						</View>
 					</ScrollView>
-				</View>
+				</SafeAreaView>
 			</Modal>
 
 			{/* Rest Timer Modal */}
@@ -813,7 +818,7 @@ export default function WorkoutDashboard({
 				animationType="slide"
 				presentationStyle="pageSheet"
 			>
-				<View style={styles.modalContainer}>
+				<SafeAreaView style={styles.modalContainer}>
 					<View style={styles.modalHeader}>
 						<Text style={styles.modalTitle}>Log Body Weight</Text>
 						<TouchableOpacity onPress={() => setShowWeightLogger(false)}>
@@ -903,7 +908,7 @@ export default function WorkoutDashboard({
 							))
 						)}
 					</View>
-				</View>
+				</SafeAreaView>
 			</Modal>
 		</ScrollView>
 	);
@@ -940,6 +945,7 @@ const createStyles = (theme: Theme) =>
 			padding: 10,
 			alignItems: "center",
 			marginHorizontal: 4,
+			minWidth: 70,
 		},
 		statIcon: {
 			width: 32,
@@ -953,12 +959,14 @@ const createStyles = (theme: Theme) =>
 			fontSize: 14,
 			fontWeight: "700",
 			color: theme.text,
+			textAlign: "center",
 		},
 		statLabel: {
 			fontSize: 9,
 			color: theme.textMuted,
 			marginTop: 2,
 			textAlign: "center",
+			flexShrink: 1,
 		},
 		activeWorkoutBanner: {
 			flexDirection: "row",

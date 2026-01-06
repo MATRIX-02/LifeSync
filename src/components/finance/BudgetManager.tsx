@@ -1,17 +1,16 @@
 // Budget Manager - Create and manage budgets with progress tracking
 
 import { SubscriptionCheckResult } from "@/src/components/PremiumFeatureGate";
-import { useFinanceStore } from "@/src/context/financeStore";
+import { useFinanceStore } from "@/src/context/financeStoreDB";
+import {
+	BillReminder as DBBillReminder,
+	Debt as DBDebt,
+	ExpenseCategory as DBExpenseCategory,
+	SavingsGoal as DBSavingsGoal,
+} from "@/src/context/financeStoreDB/types";
 import { Theme } from "@/src/context/themeContext";
 import { NotificationService } from "@/src/services/notificationService";
-import {
-	BillReminder,
-	COLORS,
-	Debt,
-	EXPENSE_CATEGORIES,
-	ExpenseCategory,
-	SavingsGoal,
-} from "@/src/types/finance";
+import { COLORS, EXPENSE_CATEGORIES } from "@/src/types/finance";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import React, { useMemo, useState } from "react";
@@ -78,16 +77,16 @@ export default function BudgetManager({
 	const [showAddSavings, setShowAddSavings] = useState(false);
 	const [showAddBill, setShowAddBill] = useState(false);
 	const [showAddDebt, setShowAddDebt] = useState(false);
-	const [showContribute, setShowContribute] = useState<SavingsGoal | null>(
+	const [showContribute, setShowContribute] = useState<DBSavingsGoal | null>(
 		null
 	);
-	const [showWithdraw, setShowWithdraw] = useState<SavingsGoal | null>(null);
-	const [showPayDebt, setShowPayDebt] = useState<Debt | null>(null);
-	const [showEditBill, setShowEditBill] = useState<BillReminder | null>(null);
-	const [showPayBill, setShowPayBill] = useState<BillReminder | null>(null);
-	const [showDebtDetails, setShowDebtDetails] = useState<Debt | null>(null);
+	const [showWithdraw, setShowWithdraw] = useState<DBSavingsGoal | null>(null);
+	const [showPayDebt, setShowPayDebt] = useState<DBDebt | null>(null);
+	const [showEditBill, setShowEditBill] = useState<DBBillReminder | null>(null);
+	const [showPayBill, setShowPayBill] = useState<DBBillReminder | null>(null);
+	const [showDebtDetails, setShowDebtDetails] = useState<DBDebt | null>(null);
 	const [showSavingsDetails, setShowSavingsDetails] =
-		useState<SavingsGoal | null>(null);
+		useState<DBSavingsGoal | null>(null);
 
 	// Account selection
 	const [selectedAccountId, setSelectedAccountId] = useState<string>("");
@@ -102,7 +101,7 @@ export default function BudgetManager({
 
 	// Form states
 	const [budgetForm, setBudgetForm] = useState({
-		category: "" as ExpenseCategory | "",
+		category: "" as DBExpenseCategory | "",
 		amount: "",
 	});
 	const [savingsForm, setSavingsForm] = useState({
@@ -163,10 +162,7 @@ export default function BudgetManager({
 
 	const formatAmount = (value: number | undefined | null) => {
 		const num = value ?? 0;
-		if (num >= 10000000) return `${(num / 10000000).toFixed(2)}Cr`;
-		if (num >= 100000) return `${(num / 100000).toFixed(2)}L`;
-		if (num >= 1000) return `${(num / 1000).toFixed(1)}K`;
-		return num.toFixed(0);
+		return num.toLocaleString("en-IN", { maximumFractionDigits: 0 });
 	};
 
 	const handleAddBudget = () => {
@@ -183,7 +179,6 @@ export default function BudgetManager({
 				.toISOString()
 				.split("T")[0],
 			alertThreshold: 80,
-			isActive: true,
 		});
 		setBudgetForm({ category: "", amount: "" });
 		setShowAddBudget(false);
@@ -197,10 +192,9 @@ export default function BudgetManager({
 		addSavingsGoal({
 			name: savingsForm.name,
 			targetAmount: parseFloat(savingsForm.targetAmount),
-			deadline: savingsForm.deadline || undefined,
+			targetDate: savingsForm.deadline || undefined,
 			icon: savingsForm.icon,
 			color: COLORS[Math.floor(Math.random() * COLORS.length)],
-			priority: "medium",
 		});
 		setSavingsForm({
 			name: "",
@@ -238,7 +232,6 @@ export default function BudgetManager({
 			category: "bills",
 			frequency: billForm.isRecurring ? "monthly" : "once",
 			reminderDays: 3,
-			isAutoDeduct: false,
 			notes: billForm.notes || undefined,
 		});
 		setBillForm({
@@ -310,8 +303,6 @@ export default function BudgetManager({
 				debtForm.type === "owe"
 					? `Debt to ${debtForm.name}`
 					: `${debtForm.name} owes me`,
-			interestRate: parseFloat(debtForm.interestRate) || 0,
-			minimumPayment: parseFloat(debtForm.minimumPayment) || undefined,
 			dueDate: debtForm.dueDate || undefined,
 		});
 		setDebtForm({
@@ -384,7 +375,7 @@ export default function BudgetManager({
 				<ScrollView
 					horizontal
 					showsHorizontalScrollIndicator={false}
-					style={styles.accountScroll}
+					style={{ ...styles.accountScroll }}
 				>
 					<TouchableOpacity
 						style={[
@@ -538,7 +529,7 @@ export default function BudgetManager({
 			) : (
 				budgetData.map((budget) => {
 					const catInfo =
-						EXPENSE_CATEGORIES[budget.category as ExpenseCategory];
+						EXPENSE_CATEGORIES[budget.category as DBExpenseCategory];
 					return (
 						<View key={budget.id} style={styles.budgetItem}>
 							<View style={styles.budgetHeader}>
@@ -719,9 +710,9 @@ export default function BudgetManager({
 								</View>
 								<View style={styles.savingsInfo}>
 									<Text style={styles.savingsName}>{goal.name}</Text>
-									{goal.deadline && (
+									{goal.targetDate && (
 										<Text style={styles.savingsDeadline}>
-											Due: {new Date(goal.deadline).toLocaleDateString()}
+											Due: {new Date(goal.targetDate).toLocaleDateString()}
 										</Text>
 									)}
 								</View>
@@ -1124,11 +1115,6 @@ export default function BudgetManager({
 													</Text>
 												</View>
 											</View>
-											<Text style={styles.debtRate}>
-												{(debt.interestRate ?? 0) > 0
-													? `${debt.interestRate}% APR`
-													: "0% Interest"}
-											</Text>
 										</View>
 										<View style={styles.debtAmounts}>
 											<Text
@@ -1351,7 +1337,7 @@ export default function BudgetManager({
 									onPress={() =>
 										setBudgetForm({
 											...budgetForm,
-											category: cat.key as ExpenseCategory,
+											category: cat.key as DBExpenseCategory,
 										})
 									}
 								>
@@ -2055,11 +2041,7 @@ export default function BudgetManager({
 											style={styles.input}
 											value={debtPaymentAmount}
 											onChangeText={setDebtPaymentAmount}
-											placeholder={
-												showPayDebt.minimumPayment
-													? `Min: ${currency}${showPayDebt.minimumPayment}`
-													: "0"
-											}
+											placeholder="0"
 											placeholderTextColor={theme.textMuted}
 											keyboardType="numeric"
 										/>
@@ -3084,11 +3066,6 @@ const createStyles = (theme: Theme) =>
 			color: theme.textSecondary,
 			marginBottom: 8,
 		},
-		accountOptions: {
-			flexDirection: "row",
-			flexWrap: "wrap",
-			gap: 8,
-		},
 		accountOption: {
 			paddingHorizontal: 14,
 			paddingVertical: 10,
@@ -3096,6 +3073,10 @@ const createStyles = (theme: Theme) =>
 			backgroundColor: theme.surface,
 			borderWidth: 1,
 			borderColor: theme.border,
+			marginRight: 8,
+			flexDirection: "row",
+			alignItems: "center",
+			gap: 6,
 		},
 		accountOptionSelected: {
 			backgroundColor: theme.primary + "20",
@@ -3138,6 +3119,15 @@ const createStyles = (theme: Theme) =>
 		},
 		accountScroll: {
 			maxHeight: 100,
+			gap: 8,
+		},
+		accountItem: {
+			paddingHorizontal: 12,
+			paddingVertical: 8,
+			borderRadius: 10,
+			backgroundColor: theme.surface,
+			borderWidth: 1,
+			borderColor: theme.border,
 		},
 		accountBalance: {
 			fontSize: 11,

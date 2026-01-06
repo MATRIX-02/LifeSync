@@ -3,7 +3,7 @@
 import { MuscleBodyMap } from "@/src/components/muscle-map";
 import { SubscriptionCheckResult } from "@/src/components/PremiumFeatureGate";
 import { Theme } from "@/src/context/themeContext";
-import { useWorkoutStore } from "@/src/context/workoutStore";
+import { useWorkoutStore } from "@/src/context/workoutStoreDB";
 import { MUSCLE_GROUP_INFO } from "@/src/data/exerciseDatabase";
 import { MuscleGroup } from "@/src/types/workout";
 import Ionicons from "@expo/vector-icons/Ionicons";
@@ -62,6 +62,7 @@ export default function WorkoutStatistics({
 			traps: 0,
 			lats: 0,
 			lower_back: 0,
+			legs: 0,
 		};
 
 		// Get date range based on selected timeRange
@@ -108,9 +109,40 @@ export default function WorkoutStatistics({
 		return activity;
 	}, [workoutSessions, timeRange]);
 
-	const handleMusclePress = (muscle: MuscleGroup) => {
-		setSelectedMuscle(muscle === selectedMuscle ? null : muscle);
+	const handleMusclePress = (muscle: { slug: string } | string) => {
+		const muscleSlug = (
+			typeof muscle === "string" ? muscle : muscle.slug
+		) as MuscleGroup;
+		setSelectedMuscle(muscleSlug === selectedMuscle ? null : muscleSlug);
 	};
+
+	// Get highlighted muscles - if a muscle is selected, only show that one
+	const displayedMuscleActivity = useMemo((): Record<MuscleGroup, number> => {
+		if (!selectedMuscle) {
+			return muscleActivity;
+		}
+		// Only show the selected muscle, rest are 0
+		const filtered: Record<MuscleGroup, number> = {
+			chest: 0,
+			back: 0,
+			shoulders: 0,
+			biceps: 0,
+			triceps: 0,
+			forearms: 0,
+			abs: 0,
+			obliques: 0,
+			quadriceps: 0,
+			hamstrings: 0,
+			glutes: 0,
+			calves: 0,
+			traps: 0,
+			lats: 0,
+			lower_back: 0,
+			legs: 0,
+		};
+		filtered[selectedMuscle] = muscleActivity[selectedMuscle];
+		return filtered;
+	}, [muscleActivity, selectedMuscle]);
 
 	// Get top exercises for selected muscle from real data
 	const getTopExercisesForMuscle = (muscle: MuscleGroup) => {
@@ -274,7 +306,7 @@ export default function WorkoutStatistics({
 				<View style={styles.muscleMapContainer}>
 					<MuscleBodyMap
 						gender={gender === "other" ? "male" : gender}
-						highlightedMuscles={muscleActivity}
+						highlightedMuscles={displayedMuscleActivity}
 						onMusclePress={handleMusclePress}
 						width={width * 0.55}
 						height={400}
@@ -289,28 +321,25 @@ export default function WorkoutStatistics({
 						<View style={styles.legendItems}>
 							<View style={styles.legendItem}>
 								<View
-									style={[
-										styles.legendColor,
-										{ backgroundColor: theme.surface },
-									]}
+									style={[styles.legendColor, { backgroundColor: "#4A4A4A" }]}
 								/>
 								<Text style={styles.legendText}>0%</Text>
 							</View>
 							<View style={styles.legendItem}>
 								<View
-									style={[
-										styles.legendColor,
-										{ backgroundColor: theme.success + "60" },
-									]}
+									style={[styles.legendColor, { backgroundColor: "#4CAF50" }]}
+								/>
+								<Text style={styles.legendText}>25%</Text>
+							</View>
+							<View style={styles.legendItem}>
+								<View
+									style={[styles.legendColor, { backgroundColor: "#FF9800" }]}
 								/>
 								<Text style={styles.legendText}>50%</Text>
 							</View>
 							<View style={styles.legendItem}>
 								<View
-									style={[
-										styles.legendColor,
-										{ backgroundColor: theme.success },
-									]}
+									style={[styles.legendColor, { backgroundColor: "#9C27B0" }]}
 								/>
 								<Text style={styles.legendText}>100%</Text>
 							</View>
@@ -331,15 +360,6 @@ export default function WorkoutStatistics({
 										]}
 										onPress={() => handleMusclePress(muscle as MuscleGroup)}
 									>
-										<View
-											style={[
-												styles.muscleStatDot,
-												{
-													backgroundColor:
-														MUSCLE_GROUP_INFO[muscle as MuscleGroup]?.color,
-												},
-											]}
-										/>
 										<Text style={styles.muscleStatName} numberOfLines={1}>
 											{MUSCLE_GROUP_INFO[muscle as MuscleGroup]?.name}
 										</Text>
@@ -666,12 +686,6 @@ const createStyles = (theme: Theme) =>
 		},
 		muscleStatItemSelected: {
 			backgroundColor: theme.primary + "20",
-		},
-		muscleStatDot: {
-			width: 8,
-			height: 8,
-			borderRadius: 4,
-			marginRight: 8,
 		},
 		muscleStatName: {
 			flex: 1,

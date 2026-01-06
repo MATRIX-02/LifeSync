@@ -1,18 +1,16 @@
 import { useAuthStore } from "@/src/context/authStore";
-import { useFinanceStore } from "@/src/context/financeStore";
-import { useHabitStore } from "@/src/context/habitStore";
+import { useFinanceStore } from "@/src/context/financeStoreDB";
+import { useHabitStore } from "@/src/context/habitStoreDB";
 import { ModuleType, useModuleStore } from "@/src/context/moduleContext";
 import { Theme, useColors, useTheme } from "@/src/context/themeContext";
-import { useWorkoutStore } from "@/src/context/workoutStore";
+import { useWorkoutStore } from "@/src/context/workoutStoreDB";
 import { NotificationService } from "@/src/services/notificationService";
 import {
 	deleteAllCloudData,
 	fetchFinanceFromCloud,
-	fetchHabitsFromCloud,
 	fetchWorkoutsFromCloud,
 	getSyncStatus,
 	syncFinanceToCloud,
-	syncHabitsToCloud,
 	SyncModule,
 	syncProfileToCloud,
 	syncWorkoutsToCloud,
@@ -105,18 +103,18 @@ export default function SettingsScreen() {
 			return;
 		}
 
+		// Habits are database-first - no sync needed
+		if (module === "habits") {
+			Alert.alert(
+				"Database-First",
+				"Habits are automatically saved to the database. No manual sync needed!"
+			);
+			return;
+		}
+
 		setIsSyncing(module);
 		try {
 			let result;
-
-			if (module === "habits" || module === "all") {
-				result = await syncHabitsToCloud(user.id, {
-					habits: habitStore.habits,
-					logs: habitStore.logs,
-					settings: habitStore.settings,
-				});
-				if (!result.success) throw new Error(result.error);
-			}
 
 			if (module === "workouts" || module === "all") {
 				result = await syncWorkoutsToCloud(user.id, {
@@ -183,6 +181,35 @@ export default function SettingsScreen() {
 			return;
 		}
 
+		// Habits are database-first - just refresh from DB
+		if (module === "habits") {
+			Alert.alert(
+				"Refresh Habits",
+				"This will refresh your habits from the database.",
+				[
+					{ text: "Cancel", style: "cancel" },
+					{
+						text: "Refresh",
+						onPress: async () => {
+							setIsRestoring(module);
+							try {
+								await habitStore.refreshFromDatabase();
+								Alert.alert("Success", "Habits refreshed from database!");
+							} catch (error: any) {
+								Alert.alert(
+									"Refresh Failed",
+									error.message || "Failed to refresh habits."
+								);
+							} finally {
+								setIsRestoring(null);
+							}
+						},
+					},
+				]
+			);
+			return;
+		}
+
 		Alert.alert(
 			"Restore from Cloud",
 			`This will replace your local ${module} data with the cloud backup. Continue?`,
@@ -193,15 +220,9 @@ export default function SettingsScreen() {
 					onPress: async () => {
 						setIsRestoring(module);
 						try {
-							if (module === "habits" || module === "all") {
-								const { data, error } = await fetchHabitsFromCloud(user.id);
-								if (error) throw new Error(error);
-								if (data) {
-									habitStore.importData({
-										habits: data.habits,
-										logs: data.logs,
-									});
-								}
+							if (module === "all") {
+								// Refresh habits from database
+								await habitStore.refreshFromDatabase();
 							}
 
 							if (module === "workouts" || module === "all") {

@@ -2,16 +2,17 @@
 
 import { useSubscriptionCheck } from "@/src/components/PremiumFeatureGate";
 import { SharedDrawer } from "@/src/components/SharedDrawer";
-import { useFinanceStore } from "@/src/context/financeStore";
-import { useHabitStore } from "@/src/context/habitStore";
+import { useFinanceStore } from "@/src/context/financeStoreDB";
 import { useModuleStore } from "@/src/context/moduleContext";
 import { Theme, useColors, useTheme } from "@/src/context/themeContext";
+import { useTabPersistence } from "@/src/hooks/useNavigationPersistence";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
 	Animated,
 	Dimensions,
+	Image,
 	StatusBar,
 	StyleSheet,
 	Text,
@@ -24,8 +25,9 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import BudgetManager from "@/src/components/finance/BudgetManager";
 import FinanceAnalytics from "@/src/components/finance/FinanceAnalytics";
 import FinanceDashboard from "@/src/components/finance/FinanceDashboard";
-import SplitWise from "@/src/components/finance/SplitWise";
+import SplitWise from "@/src/components/finance/SplitWiseNew";
 import TransactionList from "@/src/components/finance/TransactionList";
+import { useAuthStore } from "@/src/context/authStore";
 
 const { width, height } = Dimensions.get("window");
 
@@ -40,7 +42,7 @@ export default function FinanceScreen() {
 	const router = useRouter();
 	const { isDark, toggleTheme } = useTheme();
 	const theme = useColors();
-	const { profile } = useHabitStore();
+	const { profile: authProfile, user } = useAuthStore();
 	const { currency, accounts, transactions, budgets, savingsGoals } =
 		useFinanceStore();
 	const { isModuleEnabled, getFirstEnabledModule, _hasHydrated } =
@@ -55,11 +57,16 @@ export default function FinanceScreen() {
 
 	const styles = createStyles(theme);
 
-	const [activeTab, setActiveTab] = useState<FinanceTab>("dashboard");
+	// Persist active tab locally
+	const [activeTab, setActiveTab, tabLoaded] = useTabPersistence<FinanceTab>(
+		"finance",
+		"dashboard"
+	);
 	const [drawerOpen, setDrawerOpen] = useState(false);
 	const [drawerAnim] = useState(new Animated.Value(-width * 0.8));
 
-	const userName = profile?.name || "User";
+	const userName =
+		authProfile?.full_name || user?.email?.split("@")[0] || "User";
 
 	// Redirect if module is disabled - MUST be a hook, cannot be conditional
 	useEffect(() => {
@@ -82,8 +89,8 @@ export default function FinanceScreen() {
 		}).start();
 	}, [drawerOpen]);
 
-	// Show nothing while store is hydrating to prevent flash
-	if (!_hasHydrated) {
+	// Show nothing while store is hydrating or tab state is loading
+	if (!_hasHydrated || !tabLoaded) {
 		return null;
 	}
 
@@ -210,9 +217,32 @@ export default function FinanceScreen() {
 			/>
 			<View style={styles.header}>
 				<Text style={styles.headerTitle}>Finance Tracker</Text>
-				<TouchableOpacity onPress={() => setDrawerOpen(true)}>
-					<Ionicons name="ellipsis-vertical" size={22} color={theme.text} />
-				</TouchableOpacity>
+				<View style={styles.headerActions}>
+					<TouchableOpacity
+						onPress={() =>
+							router.push({
+								pathname: "/(tabs)/profile",
+								params: { from: "finance" },
+							})
+						}
+					>
+						{authProfile?.avatar_url ? (
+							<Image
+								source={{ uri: authProfile.avatar_url }}
+								style={styles.headerAvatar}
+							/>
+						) : (
+							<Ionicons
+								name="person-circle-outline"
+								size={28}
+								color={theme.text}
+							/>
+						)}
+					</TouchableOpacity>
+					<TouchableOpacity onPress={() => setDrawerOpen(true)}>
+						<Ionicons name="ellipsis-vertical" size={22} color={theme.text} />
+					</TouchableOpacity>
+				</View>
 			</View>
 
 			{/* Bottom Tab Bar */}
@@ -270,6 +300,16 @@ const createStyles = (theme: Theme) =>
 			fontSize: 22,
 			fontWeight: "700",
 			color: theme.text,
+		},
+		headerActions: {
+			flexDirection: "row",
+			alignItems: "center",
+			gap: 12,
+		},
+		headerAvatar: {
+			width: 28,
+			height: 28,
+			borderRadius: 14,
 		},
 		content: {
 			flex: 1,

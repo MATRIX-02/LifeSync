@@ -642,4 +642,5 @@ export const MUSCLE_GROUP_INFO: Record<
 	traps: { name: "Traps", color: "#F43F5E" },
 	lats: { name: "Lats", color: "#FB7185" },
 	lower_back: { name: "Lower Back", color: "#FBBF24" },
+	legs: { name: "Legs", color: "#34D399" },
 };

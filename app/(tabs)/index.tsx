@@ -1,4 +1,5 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import React, {
 	useCallback,
@@ -11,6 +12,7 @@ import {
 	Alert,
 	Animated,
 	Dimensions,
+	Image,
 	Modal,
 	PanResponder,
 	Platform,
@@ -28,10 +30,11 @@ import Svg, { Circle } from "react-native-svg";
 
 import { useSubscriptionCheck } from "@/src/components/PremiumFeatureGate";
 import { SharedDrawer } from "@/src/components/SharedDrawer";
-import { useHabitStore } from "@/src/context/habitStore";
+import { useAuthStore } from "@/src/context/authStore";
+import { useHabitStore } from "@/src/context/habitStoreDB";
 import { useModuleStore } from "@/src/context/moduleContext";
 import { Theme, useColors, useTheme } from "@/src/context/themeContext";
-import { useWorkoutStore } from "@/src/context/workoutStore";
+import { useWorkoutStore } from "@/src/context/workoutStoreDB";
 import { NotificationService } from "@/src/services/notificationService";
 import {
 	FrequencyType,
@@ -127,9 +130,9 @@ export default function DashboardScreen() {
 		logs,
 		getActiveHabits,
 		searchHabits,
-		profile,
 		isHabitCompletedOnDate,
 	} = useHabitStore();
+	const { profile: authProfile, user } = useAuthStore();
 	const [drawerOpen, setDrawerOpen] = useState(false);
 	const [modalVisible, setModalVisible] = useState(false);
 	const [selectedDate, setSelectedDate] = useState(new Date());
@@ -140,6 +143,23 @@ export default function DashboardScreen() {
 	>("manual");
 	const [drawerAnim] = useState(new Animated.Value(-width * 0.8));
 	const [daysOffset, setDaysOffset] = useState(0); // For scrollable date navigation
+	const [viewMode, setViewMode] = useState<"week" | "grid">("week"); // Habit view mode
+
+	// Load view mode preference on mount
+	useEffect(() => {
+		AsyncStorage.getItem("habit_view_mode").then((mode) => {
+			if (mode === "week" || mode === "grid") {
+				setViewMode(mode);
+			}
+		});
+	}, []);
+
+	// Save view mode preference when changed
+	const toggleViewMode = useCallback(() => {
+		const newMode = viewMode === "week" ? "grid" : "week";
+		setViewMode(newMode);
+		AsyncStorage.setItem("habit_view_mode", newMode);
+	}, [viewMode]);
 
 	const activeHabits = getActiveHabits();
 
@@ -180,7 +200,8 @@ export default function DashboardScreen() {
 
 	const displayedHabits = sortedHabits;
 	const today = new Date();
-	const userName = profile?.name || "User";
+	const userName =
+		authProfile?.full_name || user?.email?.split("@")[0] || "User";
 
 	// Get workout stats
 	const { getWorkoutStats, workoutPlans, activePlanId } = useWorkoutStore();
@@ -375,6 +396,13 @@ export default function DashboardScreen() {
 						<Text style={styles.habitsTitle}>Habits Tracker</Text>
 						{/* Header Actions */}
 						<View style={styles.headerActions}>
+							<TouchableOpacity onPress={toggleViewMode}>
+								<Ionicons
+									name={viewMode === "week" ? "grid-outline" : "list-outline"}
+									size={22}
+									color={theme.text}
+								/>
+							</TouchableOpacity>
 							<TouchableOpacity onPress={() => setModalVisible(true)}>
 								<Ionicons name="add" size={24} color={theme.text} />
 							</TouchableOpacity>
@@ -389,6 +417,27 @@ export default function DashboardScreen() {
 									/>
 								</TouchableOpacity>
 							</View>
+							<TouchableOpacity
+								onPress={() =>
+									router.push({
+										pathname: "/(tabs)/profile",
+										params: { from: "habits" },
+									})
+								}
+							>
+								{authProfile?.avatar_url ? (
+									<Image
+										source={{ uri: authProfile.avatar_url }}
+										style={styles.headerAvatar}
+									/>
+								) : (
+									<Ionicons
+										name="person-circle-outline"
+										size={28}
+										color={theme.text}
+									/>
+								)}
+							</TouchableOpacity>
 							<TouchableOpacity onPress={() => setDrawerOpen(true)}>
 								<Ionicons
 									name="ellipsis-vertical"
@@ -399,80 +448,82 @@ export default function DashboardScreen() {
 						</View>
 					</View>
 
-					{/* Day Headers Row - aligned to right like habit checkboxes */}
-					<View style={styles.dayHeaders}>
-						{/* Left side: navigation arrows and back to today */}
-						<View style={styles.dateNavLeft}>
-							<TouchableOpacity
-								style={styles.dateNavButton}
-								onPress={goToPreviousDays}
-							>
-								<Ionicons
-									name="chevron-back"
-									size={18}
-									color={theme.textSecondary}
-								/>
-							</TouchableOpacity>
-							<TouchableOpacity
-								style={[
-									styles.dateNavButton,
-									daysOffset === 0 && styles.dateNavButtonDisabled,
-								]}
-								onPress={goToNextDays}
-								disabled={daysOffset === 0}
-							>
-								<Ionicons
-									name="chevron-forward"
-									size={18}
-									color={
-										daysOffset === 0 ? theme.textMuted : theme.textSecondary
-									}
-								/>
-							</TouchableOpacity>
-							{daysOffset > 0 && (
+					{/* Day Headers Row - only shown in week view */}
+					{viewMode === "week" && (
+						<View style={styles.dayHeaders}>
+							{/* Left side: navigation arrows and back to today */}
+							<View style={styles.dateNavLeft}>
 								<TouchableOpacity
-									style={styles.backToTodayButton}
-									onPress={goToToday}
+									style={styles.dateNavButton}
+									onPress={goToPreviousDays}
 								>
-									<Text style={styles.backToTodayText}>Today</Text>
+									<Ionicons
+										name="chevron-back"
+										size={18}
+										color={theme.textSecondary}
+									/>
 								</TouchableOpacity>
-							)}
-						</View>
-
-						{/* Right side: day columns matching habit checkboxes */}
-						<View style={styles.dayHeadersRight}>
-							{getLast5Days().map((date, index) => {
-								const isTodayDate =
-									date.toDateString() === today.toDateString();
-								return (
-									<View
-										key={index}
-										style={[
-											styles.dayHeader,
-											isTodayDate && styles.dayHeaderToday,
-										]}
+								<TouchableOpacity
+									style={[
+										styles.dateNavButton,
+										daysOffset === 0 && styles.dateNavButtonDisabled,
+									]}
+									onPress={goToNextDays}
+									disabled={daysOffset === 0}
+								>
+									<Ionicons
+										name="chevron-forward"
+										size={18}
+										color={
+											daysOffset === 0 ? theme.textMuted : theme.textSecondary
+										}
+									/>
+								</TouchableOpacity>
+								{daysOffset > 0 && (
+									<TouchableOpacity
+										style={styles.backToTodayButton}
+										onPress={goToToday}
 									>
-										<Text
+										<Text style={styles.backToTodayText}>Today</Text>
+									</TouchableOpacity>
+								)}
+							</View>
+
+							{/* Right side: day columns matching habit checkboxes */}
+							<View style={styles.dayHeadersRight}>
+								{getLast5Days().map((date, index) => {
+									const isTodayDate =
+										date.toDateString() === today.toDateString();
+									return (
+										<View
+											key={index}
 											style={[
-												styles.dayHeaderText,
-												isTodayDate && styles.dayHeaderTextToday,
+												styles.dayHeader,
+												isTodayDate && styles.dayHeaderToday,
 											]}
 										>
-											{DAYS[date.getDay()].substring(0, 3).toUpperCase()}
-										</Text>
-										<Text
-											style={[
-												styles.dayHeaderNumber,
-												isTodayDate && styles.dayHeaderNumberToday,
-											]}
-										>
-											{date.getDate()}
-										</Text>
-									</View>
-								);
-							})}
+											<Text
+												style={[
+													styles.dayHeaderText,
+													isTodayDate && styles.dayHeaderTextToday,
+												]}
+											>
+												{DAYS[date.getDay()].substring(0, 3).toUpperCase()}
+											</Text>
+											<Text
+												style={[
+													styles.dayHeaderNumber,
+													isTodayDate && styles.dayHeaderNumberToday,
+												]}
+											>
+												{date.getDate()}
+											</Text>
+										</View>
+									);
+								})}
+							</View>
 						</View>
-					</View>
+					)}
 
 					{displayedHabits.length === 0 ? (
 						<TouchableOpacity
@@ -491,7 +542,7 @@ export default function DashboardScreen() {
 								Tap + to create your first habit
 							</Text>
 						</TouchableOpacity>
-					) : (
+					) : viewMode === "week" ? (
 						<ScrollView
 							style={styles.habitsList}
 							nestedScrollEnabled={true}
@@ -503,7 +554,7 @@ export default function DashboardScreen() {
 									habit={habit}
 									last5Days={getLast5Days()}
 									isHabitCompletedOnDate={isHabitCompletedOnDate}
-									monthlyProgress={getMonthlyProgress(habit.id)}
+									logsLength={logs.length}
 									onToggleDate={(date) => toggleHabitForDate(habit.id, date)}
 									onHabitPress={() =>
 										router.push({
@@ -513,6 +564,31 @@ export default function DashboardScreen() {
 									}
 									onLongPress={() => handleHabitLongPress(habit)}
 									theme={theme}
+								/>
+							))}
+						</ScrollView>
+					) : (
+						<ScrollView
+							style={styles.habitsList}
+							nestedScrollEnabled={true}
+							showsVerticalScrollIndicator={false}
+						>
+							{displayedHabits.map((habit: Habit) => (
+								<HabitGridItem
+									key={habit.id}
+									habit={habit}
+									isHabitCompletedOnDate={isHabitCompletedOnDate}
+									logsLength={logs.length}
+									onToggleDate={(date) => toggleHabitForDate(habit.id, date)}
+									onHabitPress={() =>
+										router.push({
+											pathname: "/(tabs)/statistics",
+											params: { habitId: habit.id },
+										} as any)
+									}
+									onLongPress={() => handleHabitLongPress(habit)}
+									theme={theme}
+									isDark={isDark}
 								/>
 							))}
 						</ScrollView>
@@ -606,7 +682,7 @@ export default function DashboardScreen() {
 						return;
 					}
 
-					addHabit(habit);
+					await addHabit(habit);
 					// Schedule notification if enabled
 					if (habit.notificationEnabled && habit.notificationTime) {
 						try {
@@ -653,7 +729,7 @@ interface HabitRowItemProps {
 	habit: Habit;
 	last5Days: Date[];
 	isHabitCompletedOnDate: (habitId: string, date: Date) => boolean;
-	monthlyProgress: number; // 0-100 percentage
+	logsLength: number; // Used to trigger re-render when logs change
 	onToggleDate: (date: Date) => void;
 	onHabitPress: () => void;
 	onLongPress: () => void;
@@ -664,14 +740,26 @@ const HabitRowItem: React.FC<HabitRowItemProps> = ({
 	habit,
 	last5Days,
 	isHabitCompletedOnDate,
-	monthlyProgress,
+	logsLength,
 	onToggleDate,
 	onHabitPress,
 	onLongPress,
 	theme,
 }) => {
 	const today = new Date();
-	today.setHours(0, 0, 0, 0);
+	today.setHours(23, 59, 59, 999); // End of day to include today in progress
+
+	// Calculate 5-day progress
+	const fiveDayProgress = useMemo(() => {
+		const validDates = last5Days.filter((d) => d <= today);
+		if (validDates.length === 0) return 0;
+
+		const completedCount = validDates.filter((date) =>
+			isHabitCompletedOnDate(habit.id, date)
+		).length;
+
+		return Math.round((completedCount / validDates.length) * 100);
+	}, [last5Days, today, habit.id, isHabitCompletedOnDate, logsLength]);
 
 	return (
 		<View
@@ -686,7 +774,7 @@ const HabitRowItem: React.FC<HabitRowItemProps> = ({
 		>
 			{/* Habit icon with progress ring - NOT clickable */}
 			<ProgressRing
-				progress={monthlyProgress}
+				progress={fiveDayProgress}
 				size={32}
 				strokeWidth={3}
 				color={habit.color}
@@ -758,6 +846,400 @@ const HabitRowItem: React.FC<HabitRowItemProps> = ({
 						</TouchableOpacity>
 					);
 				})}
+			</View>
+		</View>
+	);
+};
+
+// GitHub-style grid view for habits
+interface HabitGridItemProps {
+	habit: Habit;
+	isHabitCompletedOnDate: (habitId: string, date: Date) => boolean;
+	logsLength: number; // Used to trigger re-render when logs change
+	onToggleDate: (date: Date) => void;
+	onHabitPress: () => void;
+	onLongPress: () => void;
+	theme: Theme;
+	isDark: boolean;
+}
+
+const MONTHS_SHORT = [
+	"Jan",
+	"Feb",
+	"Mar",
+	"Apr",
+	"May",
+	"Jun",
+	"Jul",
+	"Aug",
+	"Sep",
+	"Oct",
+	"Nov",
+	"Dec",
+];
+
+type GridPeriod = "30d" | "60d" | "90d" | "1y";
+
+const GRID_PERIODS: { key: GridPeriod; label: string; days: number }[] = [
+	{ key: "30d", label: "30D", days: 30 },
+	{ key: "60d", label: "60D", days: 60 },
+	{ key: "90d", label: "90D", days: 90 },
+	{ key: "1y", label: "1Y", days: 365 },
+];
+
+const HabitGridItem: React.FC<HabitGridItemProps> = ({
+	habit,
+	isHabitCompletedOnDate,
+	logsLength,
+	onToggleDate,
+	onHabitPress,
+	onLongPress,
+	theme,
+	isDark,
+}) => {
+	const [selectedPeriod, setSelectedPeriod] = useState<GridPeriod>("30d");
+
+	const today = useMemo(() => {
+		const d = new Date();
+		d.setHours(0, 0, 0, 0);
+		return d;
+	}, []);
+
+	const horizontalPadding = 16;
+	const availableWidth = width - horizontalPadding;
+	const cellGap = 2;
+	// Get the number of days based on selected period
+	const periodConfig = GRID_PERIODS.find((p) => p.key === selectedPeriod)!;
+	const totalDays = periodConfig.days;
+
+	// Calculate number of weeks needed
+	const numWeeks = Math.ceil(totalDays / 7);
+
+	// Period-specific cell sizes that balance grid width and height
+	// Shorter periods get larger cells but we cap to prevent excessive height
+	const getCellSizeForPeriod = (): number => {
+		const maxGridHeight = 90; // Maximum grid height in pixels (7 rows)
+		const maxCellFromHeight = Math.floor((maxGridHeight - cellGap * 6) / 7);
+
+		switch (selectedPeriod) {
+			case "30d":
+				// 5 weeks - use larger cells but respect height limit
+				return Math.min(
+					maxCellFromHeight,
+					Math.floor((availableWidth - cellGap * (numWeeks - 1)) / numWeeks)
+				);
+			case "60d":
+				// 9 weeks - medium cells
+				return Math.min(
+					maxCellFromHeight,
+					Math.floor((availableWidth - cellGap * (numWeeks - 1)) / numWeeks)
+				);
+			case "90d":
+				// 13 weeks - smaller cells to fit width
+				return Math.min(
+					11,
+					Math.floor((availableWidth - cellGap * (numWeeks - 1)) / numWeeks)
+				);
+			case "1y":
+				// 52 weeks - smallest cells to fit all
+				return Math.floor(
+					(availableWidth - cellGap * (numWeeks - 1)) / numWeeks
+				);
+		}
+	};
+
+	const cellSize = getCellSizeForPeriod();
+	const weekWidth = cellSize + cellGap;
+
+	// Calculate the actual grid width
+	const gridWidth = numWeeks * cellSize + (numWeeks - 1) * cellGap;
+
+	// Generate dates going back to fill the grid, ending on today's day of week position
+	const { weeks, monthLabels, allDates } = useMemo(() => {
+		const result: Date[] = [];
+		const todayDayOfWeek = today.getDay(); // 0 = Sunday
+
+		// Calculate how many days back we need to go
+		// We want complete weeks, ending on today's position
+		const completeWeeks = numWeeks - 1;
+		const daysToGoBack = completeWeeks * 7 + todayDayOfWeek;
+
+		for (let i = daysToGoBack; i >= 0; i--) {
+			const date = new Date(today);
+			date.setDate(date.getDate() - i);
+			result.push(date);
+		}
+
+		// Organize into weeks (columns of 7, starting from Sunday)
+		const weeks: (Date | null)[][] = [];
+		let currentWeek: (Date | null)[] = [];
+
+		for (let i = 0; i < result.length; i++) {
+			currentWeek.push(result[i]);
+			if (currentWeek.length === 7) {
+				weeks.push(currentWeek);
+				currentWeek = [];
+			}
+		}
+
+		// Add any remaining days in the last partial week
+		if (currentWeek.length > 0) {
+			// Fill remaining slots with null (future days)
+			while (currentWeek.length < 7) {
+				currentWeek.push(null);
+			}
+			weeks.push(currentWeek);
+		}
+
+		// Get month labels with positions
+		const monthLabels: { month: string; weekIdx: number }[] = [];
+		let lastMonth = -1;
+
+		weeks.forEach((week, weekIdx) => {
+			// Find the first valid day in the week to determine month
+			const firstDay = week.find((d) => d !== null);
+			if (firstDay) {
+				const month = firstDay.getMonth();
+				if (month !== lastMonth) {
+					monthLabels.push({
+						month: MONTHS_SHORT[month],
+						weekIdx,
+					});
+					lastMonth = month;
+				}
+			}
+		});
+
+		return { weeks, monthLabels, allDates: result };
+	}, [today, numWeeks]);
+
+	// Calculate progress for the selected period
+	const periodProgress = useMemo(() => {
+		const validDates = allDates.filter((d) => d <= today);
+		if (validDates.length === 0) return 0;
+
+		const completedCount = validDates.filter((date) =>
+			isHabitCompletedOnDate(habit.id, date)
+		).length;
+
+		return Math.round((completedCount / validDates.length) * 100);
+	}, [allDates, today, habit.id, isHabitCompletedOnDate, logsLength]);
+
+	// Get color for a date cell
+	const getCellColor = (date: Date | null): string => {
+		if (!date || date > today) return "transparent";
+		const isCompleted = isHabitCompletedOnDate(habit.id, date);
+		if (isCompleted) return habit.color;
+		return isDark ? "#2d333b" : "#ebedf0";
+	};
+
+	// Check if date is today
+	const isToday = (date: Date | null): boolean => {
+		if (!date) return false;
+		return date.toDateString() === today.toDateString();
+	};
+
+	// Get period label for display
+	const getPeriodLabel = () => {
+		switch (selectedPeriod) {
+			case "30d":
+				return "last 30 days";
+			case "60d":
+				return "last 60 days";
+			case "90d":
+				return "last 90 days";
+			case "1y":
+				return "this year";
+		}
+	};
+
+	return (
+		<View
+			style={{
+				paddingVertical: 12,
+				paddingHorizontal: 8,
+				borderBottomWidth: 0.5,
+				borderBottomColor: theme.border,
+			}}
+		>
+			{/* Header row with habit info */}
+			<View
+				style={{ flexDirection: "row", alignItems: "center", marginBottom: 8 }}
+			>
+				{/* Habit icon with progress ring - now shows period progress */}
+				<ProgressRing
+					progress={periodProgress}
+					size={32}
+					strokeWidth={3}
+					color={habit.color}
+					backgroundColor={theme.surfaceLight}
+				>
+					<View
+						style={{
+							width: 22,
+							height: 22,
+							borderRadius: 11,
+							backgroundColor: theme.surface,
+							justifyContent: "center",
+							alignItems: "center",
+						}}
+					>
+						<Ionicons
+							name={(habit.icon || "checkmark-circle-outline") as any}
+							size={14}
+							color={habit.color}
+						/>
+					</View>
+				</ProgressRing>
+
+				{/* Habit name */}
+				<TouchableOpacity
+					style={{ flex: 1, marginLeft: 12 }}
+					onPress={onHabitPress}
+					onLongPress={onLongPress}
+				>
+					<Text
+						style={{
+							fontSize: 15,
+							color: habit.color,
+							fontWeight: "500",
+						}}
+						numberOfLines={1}
+					>
+						{habit.name}
+					</Text>
+				</TouchableOpacity>
+
+				{/* Period selector */}
+				<View style={{ flexDirection: "row", gap: 4 }}>
+					{GRID_PERIODS.map((period) => (
+						<TouchableOpacity
+							key={period.key}
+							onPress={() => setSelectedPeriod(period.key)}
+							style={{
+								paddingHorizontal: 6,
+								paddingVertical: 2,
+								borderRadius: 4,
+								backgroundColor:
+									selectedPeriod === period.key
+										? habit.color
+										: theme.surfaceLight,
+							}}
+						>
+							<Text
+								style={{
+									fontSize: 9,
+									fontWeight: "600",
+									color:
+										selectedPeriod === period.key ? "#fff" : theme.textMuted,
+								}}
+							>
+								{period.label}
+							</Text>
+						</TouchableOpacity>
+					))}
+				</View>
+			</View>
+
+			{/* Month labels positioned above grid */}
+			<View style={{ flexDirection: "row", marginBottom: 4, height: 12 }}>
+				{monthLabels.map((label, idx) => (
+					<Text
+						key={idx}
+						style={{
+							fontSize: 9,
+							color: theme.textMuted,
+							position: "absolute",
+							left: label.weekIdx * weekWidth,
+						}}
+					>
+						{label.month}
+					</Text>
+				))}
+			</View>
+
+			{/* Contribution grid - centered if smaller than available width */}
+			<View
+				style={{
+					alignItems: gridWidth < availableWidth ? "flex-start" : "center",
+				}}
+			>
+				<View style={{ flexDirection: "row", gap: cellGap }}>
+					{weeks.map((week, weekIdx) => (
+						<View
+							key={weekIdx}
+							style={{ flexDirection: "column", gap: cellGap }}
+						>
+							{week.map((date, dayIdx) => (
+								<TouchableOpacity
+									key={dayIdx}
+									onPress={() => date && date <= today && onToggleDate(date)}
+									disabled={!date || date > today}
+									style={{
+										width: cellSize,
+										height: cellSize,
+										backgroundColor: getCellColor(date),
+										borderRadius: cellSize > 6 ? 2 : 1,
+										borderWidth: isToday(date) ? 1 : 0,
+										borderColor: isToday(date) ? habit.color : "transparent",
+									}}
+								/>
+							))}
+						</View>
+					))}
+				</View>
+			</View>
+
+			{/* Legend and progress */}
+			<View
+				style={{
+					flexDirection: "row",
+					alignItems: "center",
+					justifyContent: "space-between",
+					marginTop: 6,
+				}}
+			>
+				<Text style={{ fontSize: 10, color: theme.textMuted }}>
+					{periodProgress}% {getPeriodLabel()}
+				</Text>
+				<View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+					<Text style={{ fontSize: 9, color: theme.textMuted }}>Less</Text>
+					<View
+						style={{
+							width: 8,
+							height: 8,
+							backgroundColor: isDark ? "#2d333b" : "#ebedf0",
+							borderRadius: 1,
+						}}
+					/>
+					<View
+						style={{
+							width: 8,
+							height: 8,
+							backgroundColor: habit.color,
+							opacity: 0.4,
+							borderRadius: 1,
+						}}
+					/>
+					<View
+						style={{
+							width: 8,
+							height: 8,
+							backgroundColor: habit.color,
+							opacity: 0.7,
+							borderRadius: 1,
+						}}
+					/>
+					<View
+						style={{
+							width: 8,
+							height: 8,
+							backgroundColor: habit.color,
+							borderRadius: 1,
+						}}
+					/>
+					<Text style={{ fontSize: 9, color: theme.textMuted }}>More</Text>
+				</View>
 			</View>
 		</View>
 	);
@@ -3306,6 +3788,11 @@ const createStyles = (theme: Theme) =>
 			justifyContent: "flex-end",
 			gap: 20,
 			paddingBottom: 12,
+		},
+		headerAvatar: {
+			width: 28,
+			height: 28,
+			borderRadius: 14,
 		},
 		habitsList: {
 			paddingHorizontal: 16,

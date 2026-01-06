@@ -2,7 +2,7 @@
 
 import { SubscriptionCheckResult } from "@/src/components/PremiumFeatureGate";
 import { Theme } from "@/src/context/themeContext";
-import { useWorkoutStore } from "@/src/context/workoutStore";
+import { useWorkoutStore } from "@/src/context/workoutStoreDB";
 import { MUSCLE_GROUP_INFO } from "@/src/data/exerciseDatabase";
 import { MuscleGroup, WorkoutSession } from "@/src/types/workout";
 import Ionicons from "@expo/vector-icons/Ionicons";

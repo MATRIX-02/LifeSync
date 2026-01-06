@@ -1,31 +1,31 @@
 // Active Workout Screen - In-progress workout UI
 
-import React, { useState, useEffect, useCallback } from "react";
-import {
-	View,
-	Text,
-	StyleSheet,
-	TouchableOpacity,
-	ScrollView,
-	TextInput,
-	Alert,
-	Modal,
-	FlatList,
-} from "react-native";
-import Ionicons from "@expo/vector-icons/Ionicons";
 import { Theme } from "@/src/context/themeContext";
-import { useWorkoutStore } from "@/src/context/workoutStore";
-import {
-	WorkoutExercise,
-	WorkoutSet,
-	MuscleGroup,
-	Exercise,
-} from "@/src/types/workout";
+import { useWorkoutStore } from "@/src/context/workoutStoreDB";
 import {
 	EXERCISE_DATABASE,
 	getExercisesByMuscle,
 	MUSCLE_GROUP_INFO,
 } from "@/src/data/exerciseDatabase";
+import {
+	Exercise,
+	MuscleGroup,
+	WorkoutExercise,
+	WorkoutSet,
+} from "@/src/types/workout";
+import Ionicons from "@expo/vector-icons/Ionicons";
+import React, { useEffect, useState } from "react";
+import {
+	Alert,
+	FlatList,
+	Modal,
+	ScrollView,
+	StyleSheet,
+	Text,
+	TextInput,
+	TouchableOpacity,
+	View,
+} from "react-native";
 
 interface ActiveWorkoutScreenProps {
 	theme: Theme;
@@ -42,6 +42,7 @@ export default function ActiveWorkoutScreen({
 		currentSession,
 		addExerciseToSession,
 		removeExerciseFromSession,
+		reorderExercisesInSession,
 		updateSetInSession,
 		addSetToExercise,
 		removeSetFromExercise,
@@ -228,6 +229,7 @@ export default function ActiveWorkoutScreen({
 		const updates: Partial<WorkoutSet> = {
 			isWarmup: setType === "warmup",
 			isDropset: setType === "dropset",
+			isSuperset: setType === "superset",
 		};
 		updateSetInSession(exerciseId, setId, updates);
 	};
@@ -254,6 +256,17 @@ export default function ActiveWorkoutScreen({
 				},
 			]
 		);
+	};
+
+	const moveExerciseUp = (index: number) => {
+		if (index === 0) return;
+		reorderExercisesInSession(index, index - 1);
+	};
+
+	const moveExerciseDown = (index: number) => {
+		if (!currentSession || index === currentSession.exercises.length - 1)
+			return;
+		reorderExercisesInSession(index, index + 1);
 	};
 
 	const getTotalVolume = () => {
@@ -370,6 +383,42 @@ export default function ActiveWorkoutScreen({
 				{currentSession.exercises.map((exercise, exIndex) => (
 					<View key={exercise.id} style={styles.exerciseCard}>
 						<View style={styles.exerciseHeader}>
+							{/* Reorder Buttons */}
+							<View style={styles.reorderButtons}>
+								<TouchableOpacity
+									style={[
+										styles.reorderBtn,
+										exIndex === 0 && styles.reorderBtnDisabled,
+									]}
+									onPress={() => moveExerciseUp(exIndex)}
+									disabled={exIndex === 0}
+								>
+									<Ionicons
+										name="chevron-up"
+										size={16}
+										color={exIndex === 0 ? theme.border : theme.textMuted}
+									/>
+								</TouchableOpacity>
+								<TouchableOpacity
+									style={[
+										styles.reorderBtn,
+										exIndex === currentSession.exercises.length - 1 &&
+											styles.reorderBtnDisabled,
+									]}
+									onPress={() => moveExerciseDown(exIndex)}
+									disabled={exIndex === currentSession.exercises.length - 1}
+								>
+									<Ionicons
+										name="chevron-down"
+										size={16}
+										color={
+											exIndex === currentSession.exercises.length - 1
+												? theme.border
+												: theme.textMuted
+										}
+									/>
+								</TouchableOpacity>
+							</View>
 							<View style={styles.exerciseInfo}>
 								<Text style={styles.exerciseOrder}>#{exIndex + 1}</Text>
 								<Text style={styles.exerciseName}>{exercise.exerciseName}</Text>
@@ -464,11 +513,18 @@ export default function ActiveWorkoutScreen({
 								<TouchableOpacity
 									style={[styles.typeCol, styles.typeButton]}
 									onPress={() => {
-										const types: SetType[] = ["normal", "warmup", "dropset"];
+										const types: SetType[] = [
+											"normal",
+											"warmup",
+											"dropset",
+											"superset",
+										];
 										const currentType = set.isWarmup
 											? "warmup"
 											: set.isDropset
 											? "dropset"
+											: set.isSuperset
+											? "superset"
 											: "normal";
 										const nextIndex =
 											(types.indexOf(currentType) + 1) % types.length;
@@ -477,7 +533,7 @@ export default function ActiveWorkoutScreen({
 									onLongPress={() => {
 										Alert.alert(
 											"Set Types",
-											"• Normal: Regular working set\n• Warm-up: Lighter weight to prepare muscles\n• Drop: Reduce weight immediately after a set\n\nTap to cycle through types."
+											"• Normal: Regular working set\n• Warm-up: Lighter weight to prepare muscles\n• Drop: Reduce weight immediately after a set\n• Superset: Paired with next exercise\n\nTap to cycle through types."
 										);
 									}}
 								>
@@ -486,12 +542,15 @@ export default function ActiveWorkoutScreen({
 											styles.typeText,
 											set.isWarmup && styles.typeTextWarmup,
 											set.isDropset && styles.typeTextDropset,
+											set.isSuperset && styles.typeTextSuperset,
 										]}
 									>
 										{set.isWarmup
 											? "Warmup"
 											: set.isDropset
 											? "Dropset"
+											: set.isSuperset
+											? "Superset"
 											: "Normal"}
 									</Text>
 								</TouchableOpacity>
@@ -835,11 +894,11 @@ export default function ActiveWorkoutScreen({
 										onPress={() => setWorkoutEnergy(energy)}
 									>
 										<Ionicons
-											name="battery-full"
+											name={workoutEnergy >= energy ? "flash" : "flash-outline"}
 											size={24}
 											color={
 												workoutEnergy >= energy
-													? theme.success
+													? theme.warning
 													: theme.textMuted
 											}
 										/>
@@ -1010,6 +1069,16 @@ const createStyles = (theme: Theme) =>
 			alignItems: "center",
 			justifyContent: "space-between",
 		},
+		reorderButtons: {
+			flexDirection: "column",
+			marginRight: 8,
+		},
+		reorderBtn: {
+			padding: 2,
+		},
+		reorderBtnDisabled: {
+			opacity: 0.3,
+		},
 		exerciseInfo: {
 			flexDirection: "row",
 			alignItems: "center",
@@ -1118,6 +1187,9 @@ const createStyles = (theme: Theme) =>
 		},
 		typeTextDropset: {
 			color: theme.error,
+		},
+		typeTextSuperset: {
+			color: theme.info || "#3B82F6",
 		},
 		setInput: {
 			fontSize: 14,

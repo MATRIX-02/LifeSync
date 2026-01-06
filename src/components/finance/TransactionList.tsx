@@ -1,15 +1,14 @@
 // Transaction List - Full transaction history with filters
 
 import { SubscriptionCheckResult } from "@/src/components/PremiumFeatureGate";
-import { useFinanceStore } from "@/src/context/financeStore";
-import { Theme } from "@/src/context/themeContext";
+import { useFinanceStore } from "@/src/context/financeStoreDB";
 import {
-	EXPENSE_CATEGORIES,
 	ExpenseCategory,
-	INCOME_CATEGORIES,
 	IncomeCategory,
 	Transaction,
-} from "@/src/types/finance";
+} from "@/src/context/financeStoreDB/types";
+import { Theme } from "@/src/context/themeContext";
+import { EXPENSE_CATEGORIES, INCOME_CATEGORIES } from "@/src/types/finance";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import React, { useMemo, useState } from "react";
 import {
@@ -116,13 +115,16 @@ export default function TransactionList({
 		// Apply search filter (description, category, and amount)
 		if (searchQuery.trim()) {
 			const query = searchQuery.toLowerCase();
-			const searchAmount = parseFloat(searchQuery);
-			const isNumericSearch = !isNaN(searchAmount);
+			const searchAmount = searchQuery.replace(/[^0-9.]/g, ""); // Extract numeric part
+			const isNumericSearch = searchAmount.length > 0;
 
 			filtered = filtered.filter((t) => {
-				// If search is a number, check if it matches the amount
-				if (isNumericSearch && t.amount === searchAmount) {
-					return true;
+				// If search contains numbers, check if amount includes those digits
+				if (isNumericSearch) {
+					const amountStr = t.amount.toString();
+					if (amountStr.includes(searchAmount)) {
+						return true;
+					}
 				}
 				// Otherwise, check description and category
 				return (
@@ -204,7 +206,7 @@ export default function TransactionList({
 			amount: transaction.amount.toString(),
 			description: transaction.description || "",
 			category: transaction.category as ExpenseCategory | IncomeCategory,
-			note: transaction.note || "",
+			note: transaction.notes || "",
 		});
 		setShowEditModal(true);
 	};
@@ -222,7 +224,7 @@ export default function TransactionList({
 			amount,
 			description: editForm.description || undefined,
 			category: editForm.category,
-			note: editForm.note || undefined,
+			notes: editForm.note || undefined,
 		});
 
 		setShowEditModal(false);
@@ -231,10 +233,7 @@ export default function TransactionList({
 	};
 
 	const formatAmount = (value: number) => {
-		if (value >= 10000000) return `${(value / 10000000).toFixed(2)}Cr`;
-		if (value >= 100000) return `${(value / 100000).toFixed(2)}L`;
-		if (value >= 1000) return `${(value / 1000).toFixed(1)}K`;
-		return value.toFixed(0);
+		return value.toLocaleString("en-IN", { maximumFractionDigits: 0 });
 	};
 
 	const getAccountName = (accountId: string) => {
@@ -297,6 +296,8 @@ export default function TransactionList({
 				? INCOME_CATEGORIES[transaction.category as IncomeCategory]
 				: EXPENSE_CATEGORIES[transaction.category as ExpenseCategory];
 
+		const closingBalance = getClosingBalance(transaction);
+
 		return (
 			<TouchableOpacity
 				key={transaction.id}
@@ -323,6 +324,10 @@ export default function TransactionList({
 					<Text style={styles.transactionMeta}>
 						{catInfo?.name || transaction.category} •{" "}
 						{getAccountName(transaction.accountId)}
+					</Text>
+					<Text style={styles.transactionBalance} numberOfLines={1}>
+						Closing Balance: {currency}
+						{formatAmount(closingBalance)}
 					</Text>
 				</View>
 				<View style={styles.transactionAmountContainer}>
@@ -717,11 +722,11 @@ export default function TransactionList({
 												{formatAmount(getClosingBalance(selectedTransaction))}
 											</Text>
 										</View>
-										{selectedTransaction.note && (
+										{selectedTransaction.notes && (
 											<View style={styles.detailRow}>
 												<Text style={styles.detailLabel}>Note</Text>
 												<Text style={styles.detailValue}>
-													{selectedTransaction.note}
+													{selectedTransaction.notes}
 												</Text>
 											</View>
 										)}
@@ -1054,6 +1059,12 @@ const createStyles = (theme: Theme) =>
 		transactionMeta: {
 			fontSize: 12,
 			color: theme.textMuted,
+			marginBottom: 2,
+		},
+		transactionBalance: {
+			fontSize: 11,
+			color: theme.textSecondary,
+			fontWeight: "500",
 		},
 		transactionAmountContainer: {
 			alignItems: "flex-end",

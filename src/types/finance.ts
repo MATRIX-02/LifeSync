@@ -188,7 +188,13 @@ export interface DebtPayment {
 
 // ============== SPLITWISE FEATURES ==============
 
-// Split Group
+// Invitation status
+export type InvitationStatus = "pending" | "accepted" | "declined" | "expired";
+
+// Group Member Role
+export type GroupMemberRole = "admin" | "member";
+
+// Split Group - Enhanced for real users
 export interface SplitGroup {
 	id: string;
 	name: string;
@@ -199,11 +205,13 @@ export interface SplitGroup {
 	color: string;
 	icon: string;
 	totalExpenses: number;
+	createdBy: string; // User ID of creator
 	createdAt: string;
 	updatedAt: string;
 	isArchived: boolean;
 }
 
+// Group Member - Enhanced with user linking
 export interface GroupMember {
 	id: string;
 	name: string;
@@ -211,6 +219,27 @@ export interface GroupMember {
 	phone?: string;
 	avatar?: string;
 	isCurrentUser: boolean;
+	// New fields for real user linking
+	userId?: string; // Linked LifeSync user ID (null if not a registered user)
+	role: GroupMemberRole;
+	joinedAt: string;
+	invitedBy?: string; // Member ID who invited this person
+}
+
+// Group Invitation - For inviting real users
+export interface GroupInvitation {
+	id: string;
+	groupId: string;
+	groupName: string;
+	invitedBy: string; // User ID
+	invitedByName: string;
+	inviteeEmail?: string;
+	inviteeUserId?: string; // If inviting existing user
+	status: InvitationStatus;
+	message?: string;
+	createdAt: string;
+	expiresAt: string;
+	respondedAt?: string;
 }
 
 // Split Expense

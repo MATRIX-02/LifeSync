@@ -1,10 +1,10 @@
-import MuscleBodyMap from "@/src/components/MuscleBodyMap";
+import { MuscleBodyMap } from "@/src/components/muscle-map";
 import { useAuthStore } from "@/src/context/authStore";
-import { useHabitStore } from "@/src/context/habitStore";
+import { useHabitStore } from "@/src/context/habitStoreDB";
 import { Theme, useColors, useTheme } from "@/src/context/themeContext";
-import { useWorkoutStore } from "@/src/context/workoutStore";
+import { useWorkoutStore } from "@/src/context/workoutStoreDB";
 import { MUSCLE_GROUP_INFO } from "@/src/data/exerciseDatabase";
-import { UserProfile } from "@/src/types";
+import { uploadAvatar } from "@/src/services/syncService";
 import {
 	FitnessGoal,
 	FitnessLevel,
@@ -39,14 +39,14 @@ export default function ProfileScreen() {
 	const params = useLocalSearchParams<{ from?: string }>();
 	const { isDark } = useTheme();
 	const theme = useColors();
-	const { isAdmin } = useAuthStore();
 	const {
-		profile,
-		setProfile,
-		updateProfile,
-		getActiveHabits,
-		getOverallStats,
-	} = useHabitStore();
+		isAdmin,
+		profile: authProfile,
+		updateProfile: updateAuthProfile,
+		signOut,
+		user,
+	} = useAuthStore();
+	const { getActiveHabits, getOverallStats } = useHabitStore();
 	const {
 		fitnessProfile,
 		setFitnessProfile,
@@ -54,14 +54,15 @@ export default function ProfileScreen() {
 		getWorkoutStats,
 		workoutSessions,
 	} = useWorkoutStore();
-	const { signOut } = useAuthStore();
 	const styles = createStyles(theme);
 
 	const [isEditing, setIsEditing] = useState(false);
-	const [name, setName] = useState(profile?.name || "");
-	const [email, setEmail] = useState(profile?.email || "");
-	const [bio, setBio] = useState(profile?.bio || "");
-	const [avatar, setAvatar] = useState<string | undefined>(profile?.avatar);
+	const [name, setName] = useState(authProfile?.full_name || "");
+	const [email, setEmail] = useState(authProfile?.email || user?.email || "");
+	const [bio, setBio] = useState(authProfile?.bio || "");
+	const [avatar, setAvatar] = useState<string | undefined>(
+		authProfile?.avatar_url || undefined
+	);
 	const [activeTab, setActiveTab] = useState<"profile" | "fitness">("profile");
 
 	// Fitness profile state
@@ -112,6 +113,7 @@ export default function ProfileScreen() {
 			traps: 0,
 			lats: 0,
 			lower_back: 0,
+			legs: 0,
 		};
 
 		// Get all completed sessions
@@ -143,18 +145,21 @@ export default function ProfileScreen() {
 		return activity;
 	}, [workoutSessions]);
 
-	const handleMusclePress = (muscle: MuscleGroup) => {
-		setSelectedMuscle(muscle === selectedMuscle ? null : muscle);
+	const handleMusclePress = (muscle: { slug: string } | string) => {
+		const muscleSlug = (
+			typeof muscle === "string" ? muscle : muscle.slug
+		) as MuscleGroup;
+		setSelectedMuscle(muscleSlug === selectedMuscle ? null : muscleSlug);
 	};
 
 	useEffect(() => {
-		if (profile) {
-			setName(profile.name);
-			setEmail(profile.email || "");
-			setBio(profile.bio || "");
-			setAvatar(profile.avatar);
+		if (authProfile) {
+			setName(authProfile.full_name || "");
+			setEmail(authProfile.email || "");
+			setBio(authProfile.bio || "");
+			setAvatar(authProfile.avatar_url || undefined);
 		}
-	}, [profile]);
+	}, [authProfile]);
 
 	useEffect(() => {
 		if (fitnessProfile) {
@@ -247,30 +252,65 @@ export default function ProfileScreen() {
 		}
 	};
 
-	const handleSave = () => {
+	const handleSave = async () => {
 		if (!name.trim()) {
 			Alert.alert("Error", "Please enter your name");
 			return;
 		}
 
-		const updatedProfile: UserProfile = {
-			id: profile?.id || `profile_${Date.now()}`,
-			name: name.trim(),
-			email: email.trim() || undefined,
-			bio: bio.trim() || undefined,
-			avatar: avatar,
-			createdAt: profile?.createdAt || new Date(),
-			updatedAt: new Date(),
-		};
+		try {
+			let avatarUrl = avatar;
 
-		if (profile) {
-			updateProfile(updatedProfile);
-		} else {
-			setProfile(updatedProfile);
+			// If avatar is a local file path (starts with file://), upload it
+			if (avatar && avatar.startsWith("file://")) {
+				if (!user?.id) {
+					Alert.alert("Error", "User not authenticated");
+					return;
+				}
+
+				console.log("Uploading avatar to Supabase Storage...");
+				const uploadedUrl = await uploadAvatar(user.id, avatar);
+
+				if (!uploadedUrl) {
+					Alert.alert("Error", "Failed to upload profile image");
+					return;
+				}
+
+				avatarUrl = uploadedUrl;
+				console.log("Avatar uploaded successfully:", uploadedUrl);
+			}
+
+			console.log("Updating profile with:", {
+				full_name: name.trim(),
+				bio: bio.trim() || null,
+				avatar_url: avatarUrl || null,
+			});
+
+			const { error } = await updateAuthProfile({
+				full_name: name.trim(),
+				bio: bio.trim() || null,
+				avatar_url: avatarUrl || null,
+			});
+
+			if (error) {
+				console.error("Profile update error:", error);
+				Alert.alert("Error", error.message || "Failed to update profile");
+				return;
+			}
+
+			console.log("Profile updated successfully");
+
+			// Update local avatar state with the uploaded URL
+			if (avatarUrl && avatarUrl !== avatar) {
+				setAvatar(avatarUrl);
+			}
+
+			setIsEditing(false);
+			Alert.alert("Success", "Profile updated successfully!");
+		} catch (err: any) {
+			console.error("Profile save error:", err);
+			Alert.alert("Error", err.message || "Failed to update profile");
 		}
-
-		setIsEditing(false);
-		Alert.alert("Success", "Profile updated successfully!");
 	};
 
 	const handleSaveFitness = () => {
@@ -327,8 +367,8 @@ export default function ProfileScreen() {
 	};
 
 	const getMemberSince = () => {
-		if (profile?.createdAt) {
-			return new Date(profile.createdAt).toLocaleDateString("en-US", {
+		if (authProfile?.created_at) {
+			return new Date(authProfile.created_at).toLocaleDateString("en-US", {
 				month: "long",
 				year: "numeric",
 			});
@@ -352,8 +392,11 @@ export default function ProfileScreen() {
 							router.replace("/(tabs)/workout" as any);
 						} else if (params.from === "finance") {
 							router.replace("/(tabs)/finance" as any);
-						} else {
+						} else if (params.from === "habits") {
 							router.replace("/(tabs)/" as any);
+						} else {
+							// Default: go back or to habits
+							router.back();
 						}
 					}}
 				>
@@ -458,10 +501,12 @@ export default function ProfileScreen() {
 							{!isEditing && (
 								<>
 									<Text style={styles.profileName}>
-										{profile?.name || "Set up your profile"}
+										{authProfile?.full_name || "Set up your profile"}
 									</Text>
-									{profile?.email && (
-										<Text style={styles.profileEmail}>{profile.email}</Text>
+									{(authProfile?.email || user?.email) && (
+										<Text style={styles.profileEmail}>
+											{authProfile?.email || user?.email}
+										</Text>
 									)}
 								</>
 							)}
@@ -510,9 +555,9 @@ export default function ProfileScreen() {
 									style={styles.cancelButton}
 									onPress={() => {
 										setIsEditing(false);
-										setName(profile?.name || "");
-										setEmail(profile?.email || "");
-										setBio(profile?.bio || "");
+										setName(authProfile?.full_name || "");
+										setEmail(authProfile?.email || "");
+										setBio(authProfile?.bio || "");
 									}}
 								>
 									<Text style={styles.cancelButtonText}>Cancel</Text>
@@ -595,11 +640,11 @@ export default function ProfileScreen() {
 								</View>
 
 								{/* Bio Section */}
-								{profile?.bio && (
+								{authProfile?.bio && (
 									<View style={styles.bioSection}>
 										<Text style={styles.sectionTitle}>ABOUT</Text>
 										<View style={styles.bioCard}>
-											<Text style={styles.bioText}>{profile.bio}</Text>
+											<Text style={styles.bioText}>{authProfile.bio}</Text>
 										</View>
 									</View>
 								)}

@@ -1,4 +1,4 @@
-import { useHabitStore } from "@/src/context/habitStore";
+import { useAuthStore } from "@/src/context/authStore";
 import { ModuleType, useModuleStore } from "@/src/context/moduleContext";
 import { Theme } from "@/src/context/themeContext";
 import Ionicons from "@expo/vector-icons/Ionicons";
@@ -67,10 +67,11 @@ export const SharedDrawer: React.FC<SharedDrawerProps> = ({
 	onCloseDrawer,
 }) => {
 	const router = useRouter();
-	const { profile } = useHabitStore();
+	const { profile: authProfile, user } = useAuthStore();
 	const { enabledModules } = useModuleStore();
 
-	const userName = profile?.name || "User";
+	const userName =
+		authProfile?.full_name || user?.email?.split("@")[0] || "User";
 	const styles = createStyles(theme);
 
 	const navigateToModule = (route: string) => {
@@ -156,9 +157,9 @@ export const SharedDrawer: React.FC<SharedDrawerProps> = ({
 				}}
 				activeOpacity={0.7}
 			>
-				{profile?.avatar ? (
+				{authProfile?.avatar_url ? (
 					<Image
-						source={{ uri: profile.avatar }}
+						source={{ uri: authProfile.avatar_url }}
 						style={styles.drawerAvatarImage}
 					/>
 				) : (
@@ -168,7 +169,7 @@ export const SharedDrawer: React.FC<SharedDrawerProps> = ({
 				)}
 				<Text style={styles.drawerName}>{userName}</Text>
 				<Text style={styles.drawerEmail}>
-					{profile?.email || "Tap to set up profile"}
+					{authProfile?.email || user?.email || "Tap to set up profile"}
 				</Text>
 			</TouchableOpacity>
 

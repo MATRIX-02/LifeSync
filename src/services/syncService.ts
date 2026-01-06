@@ -1,6 +1,6 @@
 // Cloud Sync Service - Syncs all user data to Supabase
 import { decode } from "base64-arraybuffer";
-import * as FileSystem from "expo-file-system";
+import * as FileSystem from "expo-file-system/legacy";
 import * as ImageManipulator from "expo-image-manipulator";
 import { supabase } from "../config/supabase";
 
@@ -92,9 +92,9 @@ export const uploadAvatar = async (
 		// Compress the image first
 		const compressedUri = await compressImage(imageUri, 300, 0.6);
 
-		// Read file as base64
+		// Read file as base64 using legacy API
 		const base64 = await FileSystem.readAsStringAsync(compressedUri, {
-			encoding: "base64" as any,
+			encoding: FileSystem.EncodingType.Base64,
 		});
 
 		const fileName = `${userId}/avatar_${Date.now()}.jpg`;
@@ -198,6 +198,20 @@ export const syncHabitsToCloud = async (
 	}
 ): Promise<SyncResult> => {
 	try {
+		// Verify user is authenticated
+		const {
+			data: { user },
+			error: authError,
+		} = await supabase.auth.getUser();
+
+		if (authError || !user) {
+			throw new Error("User not authenticated. Please log in again.");
+		}
+
+		if (user.id !== userId) {
+			throw new Error("User ID mismatch. Security check failed.");
+		}
+
 		// Upsert habits
 		if (habitsData.habits.length > 0) {
 			const habitsWithUser = habitsData.habits.map((habit) => {
@@ -219,11 +233,20 @@ export const syncHabitsToCloud = async (
 				return objectToSnakeCase(flattenedHabit);
 			});
 
+			console.log(
+				`🔄 Syncing ${habitsWithUser.length} habits for user: ${userId}`
+			);
+
 			const { error: habitsError } = await (
 				supabase.from("user_habits") as any
 			).upsert(habitsWithUser, { onConflict: "id" });
 
-			if (habitsError) throw habitsError;
+			if (habitsError) {
+				console.error("Habits upsert error:", habitsError);
+				console.error("Failed data sample:", habitsWithUser[0]);
+				console.error("Authenticated user:", user.id);
+				throw habitsError;
+			}
 		}
 
 		// Upsert logs (batch in chunks to avoid payload limits)

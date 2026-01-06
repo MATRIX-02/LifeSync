@@ -1,7 +1,7 @@
 // Finance Dashboard - Main overview with quick actions
 
 import { SubscriptionCheckResult } from "@/src/components/PremiumFeatureGate";
-import { useFinanceStore } from "@/src/context/financeStore";
+import { useFinanceStore } from "@/src/context/financeStoreDB";
 import { Theme } from "@/src/context/themeContext";
 import {
 	Account,
@@ -200,10 +200,7 @@ export default function FinanceDashboard({
 	};
 
 	const formatAmount = (value: number) => {
-		if (value >= 10000000) return `${(value / 10000000).toFixed(2)}Cr`;
-		if (value >= 100000) return `${(value / 100000).toFixed(2)}L`;
-		if (value >= 1000) return `${(value / 1000).toFixed(1)}K`;
-		return value.toFixed(0);
+		return value.toLocaleString("en-IN", { maximumFractionDigits: 0 });
 	};
 
 	const accountTypes: Account["type"][] = [
@@ -1598,6 +1595,7 @@ const createStyles = (theme: Theme) =>
 			flexDirection: "row",
 			flexWrap: "wrap",
 			gap: 10,
+			marginTop: 12,
 		},
 		colorOption: {
 			width: 36,

@@ -9,16 +9,18 @@ import {
 	WorkoutPlans,
 	WorkoutStatistics,
 } from "@/src/components/workout";
-import { useHabitStore } from "@/src/context/habitStore";
+import { useAuthStore } from "@/src/context/authStore";
 import { useModuleStore } from "@/src/context/moduleContext";
 import { Theme, useColors, useTheme } from "@/src/context/themeContext";
-import { useWorkoutStore } from "@/src/context/workoutStore";
+import { useWorkoutStore } from "@/src/context/workoutStoreDB";
+import { useTabPersistence } from "@/src/hooks/useNavigationPersistence";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
 	Animated,
 	Dimensions,
+	Image,
 	Modal,
 	StatusBar,
 	StyleSheet,
@@ -45,7 +47,7 @@ export default function WorkoutTrackerScreen() {
 	const theme = useColors();
 	const { fitnessProfile, currentSession, workoutPlans, workoutSessions } =
 		useWorkoutStore();
-	const { profile } = useHabitStore();
+	const { profile: authProfile, user } = useAuthStore();
 	const { isModuleEnabled, getFirstEnabledModule, _hasHydrated } =
 		useModuleStore();
 
@@ -56,13 +58,18 @@ export default function WorkoutTrackerScreen() {
 	const isWorkoutEnabled = isModuleEnabled("workout");
 	const firstEnabledModule = getFirstEnabledModule();
 
-	const [activeTab, setActiveTab] = useState<TabType>("dashboard");
+	// Persist active tab locally
+	const [activeTab, setActiveTab, tabLoaded] = useTabPersistence<TabType>(
+		"workout",
+		"dashboard"
+	);
 	const [tabIndicatorAnim] = useState(new Animated.Value(0));
 	const [showActiveWorkout, setShowActiveWorkout] = useState(false);
 	const [drawerOpen, setDrawerOpen] = useState(false);
 	const [drawerAnim] = useState(new Animated.Value(-width * 0.8));
 
-	const userName = profile?.name || "User";
+	const userName =
+		authProfile?.full_name || user?.email?.split("@")[0] || "User";
 	const styles = createStyles(theme);
 
 	// Get current month workout count for limit checking
@@ -100,8 +107,8 @@ export default function WorkoutTrackerScreen() {
 		}).start();
 	}, [drawerOpen]);
 
-	// Show nothing while store is hydrating to prevent flash
-	if (!_hasHydrated) {
+	// Show nothing while store is hydrating or tab state is loading
+	if (!_hasHydrated || !tabLoaded) {
 		return null;
 	}
 
@@ -213,9 +220,32 @@ export default function WorkoutTrackerScreen() {
 			{/* Header - Same style as Habits page */}
 			<View style={styles.header}>
 				<Text style={styles.headerTitle}>Workout Tracker</Text>
-				<TouchableOpacity onPress={() => setDrawerOpen(true)}>
-					<Ionicons name="ellipsis-vertical" size={22} color={theme.text} />
-				</TouchableOpacity>
+				<View style={styles.headerActions}>
+					<TouchableOpacity
+						onPress={() =>
+							router.push({
+								pathname: "/(tabs)/profile",
+								params: { from: "workout" },
+							})
+						}
+					>
+						{authProfile?.avatar_url ? (
+							<Image
+								source={{ uri: authProfile.avatar_url }}
+								style={styles.headerAvatar}
+							/>
+						) : (
+							<Ionicons
+								name="person-circle-outline"
+								size={28}
+								color={theme.text}
+							/>
+						)}
+					</TouchableOpacity>
+					<TouchableOpacity onPress={() => setDrawerOpen(true)}>
+						<Ionicons name="ellipsis-vertical" size={22} color={theme.text} />
+					</TouchableOpacity>
+				</View>
 			</View>
 
 			{/* Tab Bar */}
@@ -289,6 +319,16 @@ const createStyles = (theme: Theme) =>
 			fontSize: 22,
 			fontWeight: "700",
 			color: theme.text,
+		},
+		headerActions: {
+			flexDirection: "row",
+			alignItems: "center",
+			gap: 12,
+		},
+		headerAvatar: {
+			width: 28,
+			height: 28,
+			borderRadius: 14,
 		},
 		tabBar: {
 			flexDirection: "row",

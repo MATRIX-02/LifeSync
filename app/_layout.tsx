@@ -8,13 +8,16 @@ import { useFonts } from "expo-font";
 import { Stack, useRouter, useSegments } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import { useEffect, useState } from "react";
-import { ActivityIndicator, View } from "react-native";
+import { ActivityIndicator, StatusBar, View } from "react-native";
 import "react-native-reanimated";
+import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { isSupabaseConfigured } from "@/src/config/supabase";
 import { useAuthStore } from "@/src/context/authStore";
-import { useHabitStore } from "@/src/context/habitStore";
+import { useHabitStore } from "@/src/context/habitStoreDB";
 import { ThemeProvider, useTheme } from "@/src/context/themeContext";
+import { useNavigationPersistence } from "@/src/hooks/useNavigationPersistence";
+import { useSyncManager } from "@/src/hooks/useSyncManager";
 import { AudioService } from "@/src/services/audioService";
 import { NotificationService } from "@/src/services/notificationService";
 
@@ -109,9 +112,12 @@ export default function RootLayout() {
 	}
 
 	return (
-		<ThemeProvider>
-			<RootLayoutNav />
-		</ThemeProvider>
+		<SafeAreaProvider>
+			<ThemeProvider>
+				<StatusBar translucent={false} />
+				<RootLayoutNav />
+			</ThemeProvider>
+		</SafeAreaProvider>
 	);
 }
 
@@ -125,6 +131,12 @@ function RootLayoutNav() {
 	const segments = useSegments();
 	const router = useRouter();
 	const [isInitialized, setIsInitialized] = useState(false);
+
+	// Persist and restore navigation state
+	useNavigationPersistence();
+
+	// Initialize sync manager - handles fetching/syncing data with Supabase
+	const { syncState, isFetching } = useSyncManager();
 
 	// Initialize auth on mount
 	useEffect(() => {

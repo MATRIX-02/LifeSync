@@ -89,14 +89,26 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
 			supabase.auth.onAuthStateChange(
 				async (_event: string, session: Session | null) => {
 					console.log("Auth state changed:", _event);
+
+					// Only fetch profile/subscription if session changed and not already loaded
+					const currentSession = get().session;
+					const shouldFetch =
+						session?.user &&
+						(!currentSession ||
+							currentSession.user.id !== session.user.id ||
+							_event === "SIGNED_IN");
+
 					set({ session, user: session?.user || null });
 
-					if (session?.user) {
-						await Promise.all([
-							get().fetchProfile(),
-							get().fetchSubscription(),
-						]);
-					} else {
+					if (shouldFetch) {
+						// Only fetch if we don't already have profile data for this user
+						if (!get().profile || get().profile?.id !== session.user.id) {
+							await Promise.all([
+								get().fetchProfile(),
+								get().fetchSubscription(),
+							]);
+						}
+					} else if (!session) {
 						set({ profile: null, subscription: null });
 					}
 				}
@@ -210,7 +222,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
 				provider: "google",
 				options: {
 					redirectTo: redirectUrl,
-					skipBrowserRedirect: true,
+					skipBrowserRedirect: false, // Let Supabase handle redirect
 				},
 			});
 
@@ -220,58 +232,158 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
 			}
 
 			if (data?.url) {
-				console.log("Full OAuth URL:", data.url);
+				console.log("Opening OAuth URL:", data.url);
 
-				// Parse the Supabase authorize URL
-				const supabaseUrl = new URL(data.url);
-				console.log("Supabase authorize URL:", supabaseUrl.href);
-
-				// Open the OAuth URL in the browser
-				const result = await WebBrowser.openAuthSessionAsync(
-					data.url,
-					redirectUrl
-				);
-
-				console.log("WebBrowser result:", JSON.stringify(result, null, 2));
-
-				if (result.type === "success" && result.url) {
-					console.log("Success! Result URL:", result.url);
-					// Extract the tokens from the URL
-					const url = new URL(result.url);
-
-					// Tokens can be in hash or query params
-					let params = new URLSearchParams(url.hash.substring(1));
-					if (!params.has("access_token")) {
-						params = new URLSearchParams(url.search);
-					}
-
-					const accessToken = params.get("access_token");
-					const refreshToken = params.get("refresh_token");
-
-					console.log("Access token found:", !!accessToken);
-					console.log("Refresh token found:", !!refreshToken);
-
-					if (accessToken && refreshToken) {
-						// Set the session manually
-						const { error: sessionError } = await supabase.auth.setSession({
-							access_token: accessToken,
-							refresh_token: refreshToken,
-						});
-
-						if (sessionError) {
-							set({ error: sessionError.message });
-							return { error: sessionError };
+				// In production with custom schemes, we need to handle the deep link
+				// Set up a promise that resolves when we get the deep link callback
+				let linkingListener: any = null;
+				const authPromise = new Promise<{ error: Error | null }>((resolve) => {
+					// Timeout after 60 seconds
+					const timeout = setTimeout(() => {
+						if (linkingListener) {
+							linkingListener.remove();
 						}
-					}
-				} else if (result.type === "cancel") {
-					set({ error: "Sign in cancelled" });
-					return { error: new Error("Sign in cancelled") };
+						set({ isLoading: false });
+						resolve({ error: new Error("Authentication timeout") });
+					}, 60000);
+
+					// Listen for deep link
+					linkingListener = Linking.addEventListener("url", async (event) => {
+						clearTimeout(timeout);
+						if (linkingListener) {
+							linkingListener.remove();
+						}
+
+						console.log("Deep link received:", event.url);
+
+						try {
+							const url = new URL(event.url);
+
+							// Tokens can be in hash or query params
+							let params = new URLSearchParams(url.hash.substring(1));
+							if (!params.has("access_token")) {
+								params = new URLSearchParams(url.search);
+							}
+
+							const accessToken = params.get("access_token");
+							const refreshToken = params.get("refresh_token");
+
+							console.log("Access token found:", !!accessToken);
+							console.log("Refresh token found:", !!refreshToken);
+
+							if (accessToken && refreshToken) {
+								// Set the session manually
+								const { data: sessionData, error: sessionError } =
+									await supabase.auth.setSession({
+										access_token: accessToken,
+										refresh_token: refreshToken,
+									});
+
+								if (sessionError) {
+									resolve({ error: sessionError });
+								} else {
+									// Update state immediately with session
+									if (sessionData.session) {
+										set({
+											session: sessionData.session,
+											user: sessionData.session.user,
+										});
+										// Fetch profile immediately to avoid delay
+										await Promise.all([
+											get().fetchProfile(),
+											get().fetchSubscription(),
+										]);
+									}
+									resolve({ error: null });
+								}
+							} else {
+								resolve({ error: new Error("No tokens in redirect URL") });
+							}
+						} catch (err) {
+							resolve({ error: err as Error });
+						}
+					});
+
+					// Open the browser
+					WebBrowser.openAuthSessionAsync(data.url, redirectUrl)
+						.then((result) => {
+							console.log("WebBrowser result:", result.type);
+
+							// If WebBrowser returns success (happens on some devices/configs)
+							if (result.type === "success" && result.url) {
+								clearTimeout(timeout);
+								if (linkingListener) {
+									linkingListener.remove();
+								}
+
+								const url = new URL(result.url);
+								let params = new URLSearchParams(url.hash.substring(1));
+								if (!params.has("access_token")) {
+									params = new URLSearchParams(url.search);
+								}
+
+								const accessToken = params.get("access_token");
+								const refreshToken = params.get("refresh_token");
+
+								if (accessToken && refreshToken) {
+									supabase.auth
+										.setSession({
+											access_token: accessToken,
+											refresh_token: refreshToken,
+										})
+										.then(
+											async ({ data: sessionData, error: sessionError }) => {
+												if (sessionError) {
+													resolve({ error: sessionError });
+												} else {
+													// Update state immediately
+													if (sessionData.session) {
+														set({
+															session: sessionData.session,
+															user: sessionData.session.user,
+														});
+														// Fetch profile immediately
+														await Promise.all([
+															get().fetchProfile(),
+															get().fetchSubscription(),
+														]);
+													}
+													resolve({ error: null });
+												}
+											}
+										);
+								} else {
+									resolve({ error: new Error("No tokens in redirect URL") });
+								}
+							} else if (result.type === "cancel") {
+								clearTimeout(timeout);
+								if (linkingListener) {
+									linkingListener.remove();
+								}
+								resolve({ error: new Error("Authentication cancelled") });
+							}
+							// If result.type is "dismiss", we'll wait for the deep link
+						})
+						.catch((err) => {
+							clearTimeout(timeout);
+							if (linkingListener) {
+								linkingListener.remove();
+							}
+							resolve({ error: err });
+						});
+				});
+
+				const result = await authPromise;
+				if (result.error) {
+					set({ error: result.error.message });
+					return { error: result.error };
 				}
 			}
 
 			return { error: null };
 		} catch (error) {
 			const err = error as Error;
+			console.error("Google sign-in error:", err);
 			set({ error: err.message });
 			return { error: err };
 		} finally {
@@ -337,18 +449,29 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
 		}
 
 		try {
+			console.log("Updating profile in Supabase for user:", user.id);
+			console.log("Updates:", updates);
+
 			const { error } = await (supabase.from("profiles") as any)
 				.update({ ...updates, updated_at: new Date().toISOString() } as any)
 				.eq("id", user.id);
 
 			if (error) {
+				console.error("Supabase update error:", error);
 				set({ error: error.message });
 				return { error };
 			}
 
+			console.log("Profile updated successfully in Supabase");
+
 			// Refresh profile
 			await get().fetchProfile();
 			return { error: null };
+		} catch (err) {
+			console.error("Update profile exception:", err);
+			const error = err as Error;
+			set({ error: error.message });
+			return { error };
 		} finally {
 			set({ isLoading: false });
 		}
@@ -370,9 +493,54 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
 			if (data) {
 				set({ profile: data });
 			} else {
-				console.log("Profile not found for user:", user.id);
-				// Profile might not exist yet (email not verified or trigger pending)
-				set({ profile: null });
+				console.log(
+					"Profile not found for user:",
+					user.id,
+					"- Creating one automatically"
+				);
+				// Profile doesn't exist - create one automatically
+				const newProfile = {
+					id: user.id,
+					email: user.email || "",
+					full_name:
+						user.user_metadata?.full_name || user.user_metadata?.name || null,
+					avatar_url: user.user_metadata?.avatar_url || null,
+					role: "user" as const,
+					is_active: true,
+				};
+
+				const { data: createdProfile, error: createError } = await (
+					supabase.from("profiles") as any
+				)
+					.insert(newProfile)
+					.select()
+					.single();
+
+				if (createError) {
+					// If it's a duplicate key error, profile was created by database trigger - fetch it
+					if (createError.code === "23505") {
+						console.log(
+							"Profile already exists (created by database trigger), fetching..."
+						);
+						const { data: existingProfile } = await supabase
+							.from("profiles")
+							.select("*")
+							.eq("id", user.id)
+							.single();
+						if (existingProfile) {
+							console.log("✅ Profile fetched successfully");
+							set({ profile: existingProfile });
+							return;
+						}
+					} else {
+						// Only log as error if it's NOT a duplicate key error
+						console.error("Error creating profile:", createError);
+					}
+					set({ profile: null });
+				} else if (createdProfile) {
+					console.log("✅ Profile created successfully for user:", user.id);
+					set({ profile: createdProfile });
+				}
 			}
 		} catch (error) {
 			console.error("Error fetching profile:", error);

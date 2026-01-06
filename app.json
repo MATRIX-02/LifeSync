@@ -36,7 +36,7 @@
 				"foregroundImage": "./assets/images/adaptive-icon.png",
 				"backgroundColor": "#ffffff"
 			},
-			"edgeToEdgeEnabled": true,
+			"edgeToEdgeEnabled": false,
 			"predictiveBackGestureEnabled": false,
 			"package": "com.matrix122001.HabitTrackerApp",
 			"permissions": [
@@ -44,7 +44,9 @@
 				"android.permission.SCHEDULE_EXACT_ALARM",
 				"android.permission.USE_EXACT_ALARM",
 				"android.permission.VIBRATE",
-				"android.permission.POST_NOTIFICATIONS"
+				"android.permission.POST_NOTIFICATIONS",
+				"android.permission.READ_SMS",
+				"android.permission.RECEIVE_SMS"
 			]
 		},
 		"web": {
@@ -64,7 +66,15 @@
 				}
 			],
 			"expo-web-browser",
-			"expo-secure-store"
+			"expo-secure-store",
+			"./plugins/withSmsPermission",
+			[
+				"./plugins/withNotificationListener",
+				{
+					"notificationListenerName": "LifeSync Transaction Listener",
+					"notificationListenerDescription": "Listens for UPI payment notifications to help track expenses"
+				}
+			]
 		],
 		"experiments": {
 			"typedRoutes": true

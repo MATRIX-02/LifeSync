@@ -1,26 +1,22 @@
 // SplitWise - Group expense splitting
 // Redesigned with cleaner, more intuitive UI
 
-import React, { useState, useMemo } from "react";
-import {
-	View,
-	Text,
-	StyleSheet,
-	TouchableOpacity,
-	ScrollView,
-	Modal,
-	TextInput,
-	Alert,
-} from "react-native";
-import Ionicons from "@expo/vector-icons/Ionicons";
+import { useAuthStore } from "@/src/context/authStore";
+import { useFinanceStore } from "@/src/context/financeStoreDB";
 import { Theme } from "@/src/context/themeContext";
-import { useFinanceStore } from "@/src/context/financeStore";
+import { GroupMember, SplitGroup } from "@/src/types/finance";
+import Ionicons from "@expo/vector-icons/Ionicons";
+import React, { useState } from "react";
 import {
-	SplitGroup,
-	GroupMember,
-	SplitExpense,
-	Settlement,
-} from "@/src/types/finance";
+	Alert,
+	Modal,
+	ScrollView,
+	StyleSheet,
+	Text,
+	TextInput,
+	TouchableOpacity,
+	View,
+} from "react-native";
 
 type SplitMethod = "equal" | "exact" | "percentage" | "shares";
 
@@ -63,6 +59,7 @@ export default function SplitWise({
 	currency,
 	onOpenDrawer,
 }: SplitWiseProps) {
+	const { profile } = useAuthStore();
 	const {
 		splitGroups,
 		addSplitGroup,
@@ -109,9 +106,7 @@ export default function SplitWise({
 	});
 
 	const formatAmount = (value: number) => {
-		if (value >= 100000) return `${(value / 100000).toFixed(1)}L`;
-		if (value >= 1000) return `${(value / 1000).toFixed(1)}K`;
-		return value.toFixed(0);
+		return value.toLocaleString("en-IN", { maximumFractionDigits: 0 });
 	};
 
 	// Handlers
@@ -125,6 +120,8 @@ export default function SplitWise({
 			icon: groupForm.icon,
 			color: groupForm.color,
 			members: [],
+			createdBy: profile?.id || "",
+			description: "",
 		});
 		setGroupForm({ name: "", icon: "people", color: COLORS[0] });
 		setShowCreateGroup(false);

@@ -28,7 +28,8 @@ export type MuscleGroup =
 	| "calves"
 	| "traps"
 	| "lats"
-	| "lower_back";
+	| "lower_back"
+	| "legs";
 
 export type ExerciseCategory =
 	| "strength"
@@ -113,6 +114,7 @@ export interface WorkoutSet {
 	restTime?: number; // seconds
 	isWarmup: boolean;
 	isDropset: boolean;
+	isSuperset?: boolean; // Whether this set is part of a superset
 	rpe?: number; // Rate of Perceived Exertion (1-10)
 	completed: boolean;
 	notes?: string;
