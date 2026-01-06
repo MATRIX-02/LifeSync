@@ -107,6 +107,16 @@ export default function WorkoutTrackerScreen() {
 		}).start();
 	}, [drawerOpen]);
 
+	// Initialize tab indicator position only once when tab is loaded
+	useEffect(() => {
+		if (tabLoaded && activeTab) {
+			const tabIndex = tabs.findIndex((t) => t.key === activeTab);
+			if (tabIndex >= 0) {
+				tabIndicatorAnim.setValue(tabIndex);
+			}
+		}
+	}, [tabLoaded]); // Only run once when tabLoaded changes
+
 	// Show nothing while store is hydrating or tab state is loading
 	if (!_hasHydrated || !tabLoaded) {
 		return null;
@@ -118,11 +128,10 @@ export default function WorkoutTrackerScreen() {
 
 	const handleTabChange = (tab: TabType) => {
 		const tabIndex = tabs.findIndex((t) => t.key === tab);
-		Animated.spring(tabIndicatorAnim, {
+		Animated.timing(tabIndicatorAnim, {
 			toValue: tabIndex,
+			duration: 200,
 			useNativeDriver: true,
-			tension: 100,
-			friction: 10,
 		}).start();
 		setActiveTab(tab);
 	};
