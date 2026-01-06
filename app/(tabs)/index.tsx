@@ -897,7 +897,8 @@ const HabitGridItem: React.FC<HabitGridItemProps> = ({
 	theme,
 	isDark,
 }) => {
-	const [selectedPeriod, setSelectedPeriod] = useState<GridPeriod>("30d");
+	// Fixed to 30 days view
+	const selectedPeriod = "30d";
 
 	const today = useMemo(() => {
 		const d = new Date();
@@ -905,50 +906,36 @@ const HabitGridItem: React.FC<HabitGridItemProps> = ({
 		return d;
 	}, []);
 
-	const horizontalPadding = 16;
+	const horizontalPadding = 32; // 16px left + 16px right
 	const availableWidth = width - horizontalPadding;
 	const cellGap = 2;
-	// Get the number of days based on selected period
-	const periodConfig = GRID_PERIODS.find((p) => p.key === selectedPeriod)!;
-	const totalDays = periodConfig.days;
 
-	// Calculate number of weeks needed
-	const numWeeks = Math.ceil(totalDays / 7);
+	// Calculate optimal cell size and maximum weeks that fit
+	const minCellSize = 6; // Minimum readable cell size
+	const maxCellSize = 12; // Maximum cell size for good aesthetics
 
-	// Period-specific cell sizes that balance grid width and height
-	// Shorter periods get larger cells but we cap to prevent excessive height
-	const getCellSizeForPeriod = (): number => {
-		const maxGridHeight = 90; // Maximum grid height in pixels (7 rows)
-		const maxCellFromHeight = Math.floor((maxGridHeight - cellGap * 6) / 7);
-
-		switch (selectedPeriod) {
-			case "30d":
-				// 5 weeks - use larger cells but respect height limit
-				return Math.min(
-					maxCellFromHeight,
-					Math.floor((availableWidth - cellGap * (numWeeks - 1)) / numWeeks)
-				);
-			case "60d":
-				// 9 weeks - medium cells
-				return Math.min(
-					maxCellFromHeight,
-					Math.floor((availableWidth - cellGap * (numWeeks - 1)) / numWeeks)
-				);
-			case "90d":
-				// 13 weeks - smaller cells to fit width
-				return Math.min(
-					11,
-					Math.floor((availableWidth - cellGap * (numWeeks - 1)) / numWeeks)
-				);
-			case "1y":
-				// 52 weeks - smallest cells to fit all
-				return Math.floor(
-					(availableWidth - cellGap * (numWeeks - 1)) / numWeeks
-				);
+	// Calculate how many weeks we can fit with different cell sizes
+	const calculateOptimalWeeks = () => {
+		for (let cellSize = maxCellSize; cellSize >= minCellSize; cellSize--) {
+			const numWeeks = Math.floor(
+				(availableWidth + cellGap) / (cellSize + cellGap)
+			);
+			if (numWeeks >= 8) {
+				// At least ~2 months
+				return { numWeeks, cellSize };
+			}
 		}
+		// Fallback: maximize weeks with minimum cell size
+		const numWeeks = Math.floor(
+			(availableWidth + cellGap) / (minCellSize + cellGap)
+		);
+		return { numWeeks, cellSize: minCellSize };
 	};
 
-	const cellSize = getCellSizeForPeriod();
+	const { numWeeks, cellSize: calculatedCellSize } = calculateOptimalWeeks();
+	const totalDays = numWeeks * 7;
+
+	const cellSize = calculatedCellSize;
 	const weekWidth = cellSize + cellGap;
 
 	// Calculate the actual grid width
@@ -1041,16 +1028,7 @@ const HabitGridItem: React.FC<HabitGridItemProps> = ({
 
 	// Get period label for display
 	const getPeriodLabel = () => {
-		switch (selectedPeriod) {
-			case "30d":
-				return "last 30 days";
-			case "60d":
-				return "last 60 days";
-			case "90d":
-				return "last 90 days";
-			case "1y":
-				return "this year";
-		}
+		return `last ${totalDays} days`;
 	};
 
 	return (
@@ -1109,36 +1087,6 @@ const HabitGridItem: React.FC<HabitGridItemProps> = ({
 						{habit.name}
 					</Text>
 				</TouchableOpacity>
-
-				{/* Period selector */}
-				<View style={{ flexDirection: "row", gap: 4 }}>
-					{GRID_PERIODS.map((period) => (
-						<TouchableOpacity
-							key={period.key}
-							onPress={() => setSelectedPeriod(period.key)}
-							style={{
-								paddingHorizontal: 6,
-								paddingVertical: 2,
-								borderRadius: 4,
-								backgroundColor:
-									selectedPeriod === period.key
-										? habit.color
-										: theme.surfaceLight,
-							}}
-						>
-							<Text
-								style={{
-									fontSize: 9,
-									fontWeight: "600",
-									color:
-										selectedPeriod === period.key ? "#fff" : theme.textMuted,
-								}}
-							>
-								{period.label}
-							</Text>
-						</TouchableOpacity>
-					))}
-				</View>
 			</View>
 
 			{/* Month labels positioned above grid */}
@@ -1190,56 +1138,11 @@ const HabitGridItem: React.FC<HabitGridItemProps> = ({
 				</View>
 			</View>
 
-			{/* Legend and progress */}
-			<View
-				style={{
-					flexDirection: "row",
-					alignItems: "center",
-					justifyContent: "space-between",
-					marginTop: 6,
-				}}
-			>
+			{/* Progress text */}
+			<View style={{ marginTop: 6 }}>
 				<Text style={{ fontSize: 10, color: theme.textMuted }}>
 					{periodProgress}% {getPeriodLabel()}
 				</Text>
-				<View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
-					<Text style={{ fontSize: 9, color: theme.textMuted }}>Less</Text>
-					<View
-						style={{
-							width: 8,
-							height: 8,
-							backgroundColor: isDark ? "#2d333b" : "#ebedf0",
-							borderRadius: 1,
-						}}
-					/>
-					<View
-						style={{
-							width: 8,
-							height: 8,
-							backgroundColor: habit.color,
-							opacity: 0.4,
-							borderRadius: 1,
-						}}
-					/>
-					<View
-						style={{
-							width: 8,
-							height: 8,
-							backgroundColor: habit.color,
-							opacity: 0.7,
-							borderRadius: 1,
-						}}
-					/>
-					<View
-						style={{
-							width: 8,
-							height: 8,
-							backgroundColor: habit.color,
-							borderRadius: 1,
-						}}
-					/>
-					<Text style={{ fontSize: 9, color: theme.textMuted }}>More</Text>
-				</View>
 			</View>
 		</View>
 	);
@@ -3794,7 +3697,6 @@ const createStyles = (theme: Theme) =>
 		},
 		habitsList: {
 			paddingHorizontal: 16,
-			maxHeight: height * 0.5, // Make scrollable if many habits
 		},
 		sectionHeader: {
 			flexDirection: "row",

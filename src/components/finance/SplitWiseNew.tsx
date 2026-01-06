@@ -1529,7 +1529,7 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
 	theme,
 	styles,
 }) => (
-	<SafeAreaView style={styles.container}>
+	<SafeAreaView>
 		<Modal
 			visible={visible}
 			animationType="slide"
@@ -1546,7 +1546,10 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
 					</TouchableOpacity>
 				</View>
 
-				<ScrollView style={styles.modalContent}>
+				<ScrollView
+					style={styles.modalContent}
+					showsVerticalScrollIndicator={false}
+				>
 					<View style={styles.formGroup}>
 						<Text style={styles.formLabel}>Group Name</Text>
 						<TextInput
