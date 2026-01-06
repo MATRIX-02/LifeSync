@@ -1,7 +1,7 @@
 // Workout Dashboard - Quick overview and start workout
 
 import { SubscriptionCheckResult } from "@/src/components/PremiumFeatureGate";
-import { useHabitStore } from "@/src/context/habitStoreDB";
+import { useAuthStore } from "@/src/context/authStore";
 import { Theme } from "@/src/context/themeContext";
 import { useWorkoutStore } from "@/src/context/workoutStoreDB";
 import {
@@ -44,7 +44,7 @@ export default function WorkoutDashboard({
 	subscriptionCheck,
 }: WorkoutDashboardProps) {
 	const router = useRouter();
-	const { profile } = useHabitStore();
+	const { profile } = useAuthStore();
 	const {
 		getWorkoutStats,
 		getRecentWorkouts,
@@ -283,7 +283,7 @@ export default function WorkoutDashboard({
 			{/* Greeting */}
 			<View style={styles.greetingSection}>
 				<Text style={styles.greeting}>
-					Hello, {profile?.name?.split(" ")[0] || "Athlete"}! 💪
+					Hello, {profile?.full_name?.split(" ")[0] || "Athlete"}! 💪
 				</Text>
 				<Text style={styles.subGreeting}>
 					{currentSession
@@ -341,7 +341,18 @@ export default function WorkoutDashboard({
 			<View style={styles.section}>
 				<Text style={styles.sectionTitle}>Quick Start</Text>
 				<View style={styles.quickStartGrid}>
-					<TouchableOpacity onPress={handleBrowseExercises}>
+					<TouchableOpacity
+						style={[styles.quickStartCard, { backgroundColor: theme.success }]}
+						onPress={handleQuickWorkout}
+					>
+						<Ionicons name="flash" size={32} color="#FFFFFF" />
+						<Text style={styles.quickStartText}>Quick Workout</Text>
+					</TouchableOpacity>
+
+					<TouchableOpacity
+						style={[styles.quickStartCard, { backgroundColor: theme.primary }]}
+						onPress={handleBrowseExercises}
+					>
 						<Ionicons name="search" size={32} color="#FFFFFF" />
 						<Text style={styles.quickStartText}>Browse Exercises</Text>
 					</TouchableOpacity>
@@ -525,136 +536,238 @@ export default function WorkoutDashboard({
 				animationType="slide"
 				presentationStyle="pageSheet"
 			>
-				<SafeAreaView style={styles.modalContainer}>
-					<View style={styles.modalHeader}>
-						<Text style={styles.modalTitle}>Browse Exercises</Text>
-						<View style={styles.modalHeaderActions}>
+				<SafeAreaView style={styles.exerciseBrowserContainer}>
+					{/* Header with gradient feel */}
+					<View style={styles.exerciseBrowserHeader}>
+						<View style={styles.exerciseBrowserHeaderTop}>
 							<TouchableOpacity
-								style={styles.createExerciseBtn}
-								onPress={() => setShowCreateExercise(true)}
+								style={styles.exerciseBrowserCloseBtn}
+								onPress={() => setShowExerciseBrowser(false)}
 							>
-								<Ionicons name="add" size={20} color={theme.primary} />
-								<Text style={styles.createExerciseBtnText}>Create</Text>
-							</TouchableOpacity>
-							<TouchableOpacity onPress={() => setShowExerciseBrowser(false)}>
 								<Ionicons name="close" size={24} color={theme.text} />
 							</TouchableOpacity>
-						</View>
-					</View>
-
-					{/* Search */}
-					<View style={styles.searchContainer}>
-						<Ionicons name="search" size={20} color={theme.textMuted} />
-						<TextInput
-							style={styles.searchInput}
-							placeholder="Search exercises..."
-							placeholderTextColor={theme.textMuted}
-							value={exerciseSearch}
-							onChangeText={setExerciseSearch}
-						/>
-					</View>
-
-					{/* Muscle Filter */}
-					<ScrollView
-						horizontal
-						showsHorizontalScrollIndicator={false}
-						style={styles.muscleFilter}
-					>
-						<TouchableOpacity
-							style={[
-								styles.muscleChip,
-								selectedMuscle === "all" && styles.muscleChipActive,
-							]}
-							onPress={() => setSelectedMuscle("all")}
-						>
-							<Text
-								style={[
-									styles.muscleChipText,
-									selectedMuscle === "all" && styles.muscleChipTextActive,
-								]}
-								numberOfLines={1}
-							>
-								All
-							</Text>
-						</TouchableOpacity>
-						{Object.keys(MUSCLE_GROUP_INFO).map((muscle) => (
+							<Text style={styles.exerciseBrowserTitle}>Exercise Library</Text>
 							<TouchableOpacity
-								key={muscle}
-								style={[
-									styles.muscleChip,
-									selectedMuscle === muscle && styles.muscleChipActive,
-								]}
-								onPress={() => setSelectedMuscle(muscle as MuscleGroup)}
+								style={styles.exerciseBrowserCreateBtn}
+								onPress={() => setShowCreateExercise(true)}
 							>
+								<Ionicons name="add-circle" size={28} color={theme.primary} />
+							</TouchableOpacity>
+						</View>
+
+						{/* Search Bar */}
+						<View style={styles.exerciseSearchBar}>
+							<Ionicons name="search" size={20} color={theme.textMuted} />
+							<TextInput
+								style={styles.exerciseSearchInput}
+								placeholder="Search by name or muscle..."
+								placeholderTextColor={theme.textMuted}
+								value={exerciseSearch}
+								onChangeText={setExerciseSearch}
+							/>
+							{exerciseSearch.length > 0 && (
+								<TouchableOpacity onPress={() => setExerciseSearch("")}>
+									<Ionicons
+										name="close-circle"
+										size={20}
+										color={theme.textMuted}
+									/>
+								</TouchableOpacity>
+							)}
+						</View>
+
+						{/* Muscle Group Filter */}
+						<ScrollView
+							horizontal
+							showsHorizontalScrollIndicator={false}
+							style={styles.muscleGroupFilter}
+							contentContainerStyle={styles.muscleGroupFilterContent}
+						>
+							<TouchableOpacity
+								style={[
+									styles.muscleGroupChip,
+									selectedMuscle === "all" && styles.muscleGroupChipActive,
+								]}
+								onPress={() => setSelectedMuscle("all")}
+							>
+								<Ionicons
+									name="body"
+									size={16}
+									color={selectedMuscle === "all" ? "#FFFFFF" : theme.primary}
+								/>
 								<Text
 									style={[
-										styles.muscleChipText,
-										selectedMuscle === muscle && styles.muscleChipTextActive,
+										styles.muscleGroupChipText,
+										selectedMuscle === "all" &&
+											styles.muscleGroupChipTextActive,
 									]}
-									numberOfLines={1}
 								>
-									{MUSCLE_GROUP_INFO[muscle as MuscleGroup].name}
+									All
 								</Text>
 							</TouchableOpacity>
-						))}
-					</ScrollView>
+							{Object.keys(MUSCLE_GROUP_INFO).map((muscle) => {
+								const isActive = selectedMuscle === muscle;
+								const info = MUSCLE_GROUP_INFO[muscle as MuscleGroup];
+								return (
+									<TouchableOpacity
+										key={muscle}
+										style={[
+											styles.muscleGroupChip,
+											isActive && styles.muscleGroupChipActive,
+										]}
+										onPress={() => setSelectedMuscle(muscle as MuscleGroup)}
+									>
+										<Text
+											style={[
+												styles.muscleGroupChipText,
+												isActive && styles.muscleGroupChipTextActive,
+											]}
+										>
+											{info.name}
+										</Text>
+									</TouchableOpacity>
+								);
+							})}
+						</ScrollView>
+					</View>
+
+					{/* Results Count */}
+					<View style={styles.exerciseResultsHeader}>
+						<Text style={styles.exerciseResultsCount}>
+							{getFilteredExercises().length} exercises
+						</Text>
+					</View>
 
 					{/* Exercise List */}
 					<FlatList
 						data={getFilteredExercises()}
 						keyExtractor={(item) => item.id}
-						renderItem={({ item }) => (
-							<View style={styles.exerciseItem}>
-								<View style={styles.exerciseItemLeft}>
-									<View style={styles.exerciseNameRow}>
-										<Text style={styles.exerciseItemName}>{item.name}</Text>
-										{item.isCustom && (
-											<View style={styles.customBadge}>
-												<Text style={styles.customBadgeText}>Custom</Text>
-											</View>
-										)}
-									</View>
-									<Text style={styles.exerciseItemMuscles}>
-										{item.primaryMuscles.join(", ")}
-									</Text>
-								</View>
-								<View
-									style={[
-										styles.difficultyBadge,
-										{
-											backgroundColor:
-												item.difficulty === "beginner"
-													? theme.success + "20"
-													: item.difficulty === "intermediate"
-													? theme.warning + "20"
-													: theme.error + "20",
-										},
-									]}
+						renderItem={({ item }) => {
+							const difficultyColor =
+								item.difficulty === "beginner"
+									? theme.success
+									: item.difficulty === "intermediate"
+									? theme.warning
+									: theme.error;
+
+							return (
+								<TouchableOpacity
+									style={styles.exerciseCard}
+									activeOpacity={0.7}
 								>
-									<Text
+									{/* Exercise Icon */}
+									<View
 										style={[
-											styles.difficultyText,
-											{
-												color:
-													item.difficulty === "beginner"
-														? theme.success
-														: item.difficulty === "intermediate"
-														? theme.warning
-														: theme.error,
-											},
+											styles.exerciseCardIcon,
+											{ backgroundColor: difficultyColor + "15" },
 										]}
 									>
-										{item.difficulty}
-									</Text>
-								</View>
-							</View>
-						)}
-						contentContainerStyle={styles.exerciseList}
+										<Ionicons
+											name="barbell"
+											size={24}
+											color={difficultyColor}
+										/>
+									</View>
+
+									{/* Exercise Info */}
+									<View style={styles.exerciseCardContent}>
+										<View style={styles.exerciseCardHeader}>
+											<Text style={styles.exerciseCardName} numberOfLines={1}>
+												{item.name}
+											</Text>
+											{item.isCustom && (
+												<View style={styles.exerciseCustomTag}>
+													<Text style={styles.exerciseCustomTagText}>
+														Custom
+													</Text>
+												</View>
+											)}
+										</View>
+
+										{/* Muscles */}
+										<View style={styles.exerciseCardMuscles}>
+											{item.primaryMuscles.slice(0, 3).map((muscle, idx) => (
+												<View key={idx} style={styles.exerciseMuscleTag}>
+													<Text style={styles.exerciseMuscleTagText}>
+														{muscle}
+													</Text>
+												</View>
+											))}
+											{item.primaryMuscles.length > 3 && (
+												<Text style={styles.exerciseMoreMuscles}>
+													+{item.primaryMuscles.length - 3}
+												</Text>
+											)}
+										</View>
+
+										{/* Bottom row */}
+										<View style={styles.exerciseCardFooter}>
+											<View style={styles.exerciseCardMeta}>
+												<View
+													style={[
+														styles.exerciseDifficultyDot,
+														{ backgroundColor: difficultyColor },
+													]}
+												/>
+												<Text style={styles.exerciseDifficultyLabel}>
+													{item.difficulty}
+												</Text>
+											</View>
+											{item.equipment && item.equipment.length > 0 && (
+												<View style={styles.exerciseEquipment}>
+													<Ionicons
+														name="fitness"
+														size={12}
+														color={theme.textMuted}
+													/>
+													<Text style={styles.exerciseEquipmentText}>
+														{item.equipment[0]}
+													</Text>
+												</View>
+											)}
+										</View>
+									</View>
+
+									{/* Chevron */}
+									<Ionicons
+										name="chevron-forward"
+										size={20}
+										color={theme.textMuted}
+									/>
+								</TouchableOpacity>
+							);
+						}}
+						contentContainerStyle={styles.exerciseListContent}
 						ListEmptyComponent={
-							<View style={styles.emptyList}>
-								<Text style={styles.emptyListText}>No exercises found</Text>
+							<View style={styles.exerciseEmptyState}>
+								<View style={styles.exerciseEmptyIcon}>
+									<Ionicons
+										name="search-outline"
+										size={48}
+										color={theme.textMuted}
+									/>
+								</View>
+								<Text style={styles.exerciseEmptyTitle}>
+									No exercises found
+								</Text>
+								<Text style={styles.exerciseEmptySubtitle}>
+									Try a different search term or filter
+								</Text>
+								<TouchableOpacity
+									style={styles.exerciseEmptyButton}
+									onPress={() => {
+										setExerciseSearch("");
+										setSelectedMuscle("all");
+									}}
+								>
+									<Text style={styles.exerciseEmptyButtonText}>
+										Clear filters
+									</Text>
+								</TouchableOpacity>
 							</View>
 						}
+						ItemSeparatorComponent={() => <View style={{ height: 12 }} />}
+						showsVerticalScrollIndicator={false}
 					/>
 				</SafeAreaView>
 			</Modal>
@@ -1032,6 +1145,7 @@ const createStyles = (theme: Theme) =>
 			fontSize: 13,
 			fontWeight: "600",
 			color: "#FFFFFF",
+			flexShrink: 0,
 		},
 		activePlanCard: {
 			flexDirection: "row",
@@ -1230,25 +1344,29 @@ const createStyles = (theme: Theme) =>
 			flexDirection: "row",
 			alignItems: "center",
 			gap: 4,
-			paddingHorizontal: 12,
+			paddingHorizontal: 14,
 			paddingVertical: 6,
 			backgroundColor: theme.primary + "20",
 			borderRadius: 20,
+			flexShrink: 0,
 		},
 		createExerciseBtnText: {
 			fontSize: 14,
 			fontWeight: "600",
 			color: theme.primary,
+			flexShrink: 0,
 		},
 		saveButtonText: {
 			fontSize: 16,
 			fontWeight: "600",
 			color: theme.primary,
+			flexShrink: 0,
 		},
 		modalTitle: {
 			fontSize: 20,
 			fontWeight: "700",
 			color: theme.text,
+			flexShrink: 0,
 		},
 		searchContainer: {
 			flexDirection: "row",
@@ -1354,6 +1472,243 @@ const createStyles = (theme: Theme) =>
 		emptyListText: {
 			fontSize: 16,
 			color: theme.textMuted,
+		},
+		// Exercise Browser Modern Styles
+		exerciseBrowserContainer: {
+			flex: 1,
+			backgroundColor: theme.background,
+		},
+		exerciseBrowserHeader: {
+			backgroundColor: theme.surface,
+			paddingBottom: 12,
+			borderBottomLeftRadius: 24,
+			borderBottomRightRadius: 24,
+			shadowColor: "#000",
+			shadowOffset: { width: 0, height: 2 },
+			shadowOpacity: 0.1,
+			shadowRadius: 8,
+			elevation: 4,
+		},
+		exerciseBrowserHeaderTop: {
+			flexDirection: "row",
+			alignItems: "center",
+			justifyContent: "space-between",
+			paddingHorizontal: 16,
+			paddingTop: 12,
+			paddingBottom: 16,
+		},
+		exerciseBrowserCloseBtn: {
+			width: 40,
+			height: 40,
+			borderRadius: 20,
+			backgroundColor: theme.background,
+			alignItems: "center",
+			justifyContent: "center",
+		},
+		exerciseBrowserTitle: {
+			fontSize: 20,
+			fontWeight: "700",
+			color: theme.text,
+		},
+		exerciseBrowserCreateBtn: {
+			width: 40,
+			height: 40,
+			alignItems: "center",
+			justifyContent: "center",
+		},
+		exerciseSearchBar: {
+			flexDirection: "row",
+			alignItems: "center",
+			backgroundColor: theme.background,
+			marginHorizontal: 16,
+			paddingHorizontal: 16,
+			borderRadius: 16,
+			gap: 12,
+			height: 52,
+		},
+		exerciseSearchInput: {
+			flex: 1,
+			fontSize: 16,
+			color: theme.text,
+			paddingVertical: 12,
+		},
+		muscleGroupFilter: {
+			marginTop: 16,
+			maxHeight: 44,
+		},
+		muscleGroupFilterContent: {
+			paddingHorizontal: 16,
+			gap: 8,
+		},
+		muscleGroupChip: {
+			flexDirection: "row",
+			alignItems: "center",
+			gap: 6,
+			paddingHorizontal: 16,
+			paddingVertical: 10,
+			borderRadius: 24,
+			backgroundColor: theme.background,
+		},
+		muscleGroupChipActive: {
+			backgroundColor: theme.primary,
+		},
+		muscleGroupChipText: {
+			fontSize: 14,
+			fontWeight: "500",
+			color: theme.text,
+		},
+		muscleGroupChipTextActive: {
+			color: "#FFFFFF",
+			fontWeight: "600",
+		},
+		exerciseResultsHeader: {
+			paddingHorizontal: 20,
+			paddingVertical: 16,
+		},
+		exerciseResultsCount: {
+			fontSize: 14,
+			fontWeight: "600",
+			color: theme.textMuted,
+			textTransform: "uppercase",
+			letterSpacing: 0.5,
+		},
+		exerciseCard: {
+			flexDirection: "row",
+			alignItems: "center",
+			backgroundColor: theme.surface,
+			borderRadius: 16,
+			padding: 16,
+			gap: 14,
+		},
+		exerciseCardIcon: {
+			width: 52,
+			height: 52,
+			borderRadius: 14,
+			alignItems: "center",
+			justifyContent: "center",
+		},
+		exerciseCardContent: {
+			flex: 1,
+		},
+		exerciseCardHeader: {
+			flexDirection: "row",
+			alignItems: "center",
+			gap: 8,
+			marginBottom: 6,
+		},
+		exerciseCardName: {
+			fontSize: 16,
+			fontWeight: "600",
+			color: theme.text,
+			flex: 1,
+		},
+		exerciseCustomTag: {
+			backgroundColor: theme.primary + "20",
+			paddingHorizontal: 8,
+			paddingVertical: 3,
+			borderRadius: 8,
+		},
+		exerciseCustomTagText: {
+			fontSize: 10,
+			fontWeight: "700",
+			color: theme.primary,
+			textTransform: "uppercase",
+		},
+		exerciseCardMuscles: {
+			flexDirection: "row",
+			alignItems: "center",
+			gap: 6,
+			marginBottom: 8,
+		},
+		exerciseMuscleTag: {
+			backgroundColor: theme.background,
+			paddingHorizontal: 8,
+			paddingVertical: 4,
+			borderRadius: 6,
+		},
+		exerciseMuscleTagText: {
+			fontSize: 11,
+			fontWeight: "500",
+			color: theme.textMuted,
+			textTransform: "capitalize",
+		},
+		exerciseMoreMuscles: {
+			fontSize: 11,
+			fontWeight: "600",
+			color: theme.primary,
+		},
+		exerciseCardFooter: {
+			flexDirection: "row",
+			alignItems: "center",
+			gap: 12,
+		},
+		exerciseCardMeta: {
+			flexDirection: "row",
+			alignItems: "center",
+			gap: 6,
+		},
+		exerciseDifficultyDot: {
+			width: 8,
+			height: 8,
+			borderRadius: 4,
+		},
+		exerciseDifficultyLabel: {
+			fontSize: 12,
+			fontWeight: "500",
+			color: theme.textMuted,
+			textTransform: "capitalize",
+		},
+		exerciseEquipment: {
+			flexDirection: "row",
+			alignItems: "center",
+			gap: 4,
+		},
+		exerciseEquipmentText: {
+			fontSize: 12,
+			fontWeight: "500",
+			color: theme.textMuted,
+			textTransform: "capitalize",
+		},
+		exerciseListContent: {
+			paddingHorizontal: 16,
+			paddingBottom: 24,
+		},
+		exerciseEmptyState: {
+			alignItems: "center",
+			paddingVertical: 60,
+			paddingHorizontal: 40,
+		},
+		exerciseEmptyIcon: {
+			width: 80,
+			height: 80,
+			borderRadius: 40,
+			backgroundColor: theme.surface,
+			alignItems: "center",
+			justifyContent: "center",
+			marginBottom: 20,
+		},
+		exerciseEmptyTitle: {
+			fontSize: 18,
+			fontWeight: "700",
+			color: theme.text,
+			marginBottom: 8,
+		},
+		exerciseEmptySubtitle: {
+			fontSize: 14,
+			color: theme.textMuted,
+			textAlign: "center",
+			marginBottom: 24,
+		},
+		exerciseEmptyButton: {
+			backgroundColor: theme.primary,
+			paddingHorizontal: 24,
+			paddingVertical: 12,
+			borderRadius: 12,
+		},
+		exerciseEmptyButtonText: {
+			fontSize: 15,
+			fontWeight: "600",
+			color: "#FFFFFF",
 		},
 		// Create Exercise Form styles
 		createExerciseForm: {
@@ -1470,6 +1825,7 @@ const createStyles = (theme: Theme) =>
 			fontSize: 18,
 			fontWeight: "700",
 			color: "#FFFFFF",
+			flexShrink: 0,
 		},
 		// Weight Logger styles
 		weightInputSection: {
@@ -1508,6 +1864,7 @@ const createStyles = (theme: Theme) =>
 			fontSize: 16,
 			fontWeight: "600",
 			color: theme.text,
+			flexShrink: 0,
 		},
 		unitTextActive: {
 			color: "#FFFFFF",
@@ -1522,6 +1879,7 @@ const createStyles = (theme: Theme) =>
 			fontSize: 16,
 			fontWeight: "700",
 			color: "#FFFFFF",
+			flexShrink: 0,
 		},
 		recentWeightsSection: {
 			padding: 24,

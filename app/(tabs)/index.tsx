@@ -3713,11 +3713,11 @@ const createStyles = (theme: Theme) =>
 			flexDirection: "row",
 			alignItems: "center",
 			justifyContent: "space-between",
-			paddingHorizontal: 20,
-			paddingVertical: 12,
+			paddingHorizontal: 16,
+			paddingVertical: 8,
 		},
 		habitsTitle: {
-			fontSize: 24,
+			fontSize: 22,
 			fontWeight: "700",
 			color: theme.text,
 		},
@@ -3785,9 +3785,7 @@ const createStyles = (theme: Theme) =>
 		headerActions: {
 			flexDirection: "row",
 			alignItems: "center",
-			justifyContent: "flex-end",
-			gap: 20,
-			paddingBottom: 12,
+			gap: 12,
 		},
 		headerAvatar: {
 			width: 28,

@@ -306,7 +306,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
 
 					// Open the browser
 					WebBrowser.openAuthSessionAsync(data.url, redirectUrl)
-						.then((result) => {
+						.then(async (result) => {
 							console.log("WebBrowser result:", result.type);
 
 							// If WebBrowser returns success (happens on some devices/configs)
@@ -361,8 +361,63 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
 									linkingListener.remove();
 								}
 								resolve({ error: new Error("Authentication cancelled") });
+							} else if (result.type === "dismiss") {
+								// Browser was dismissed - check if auth succeeded via onAuthStateChange
+								// Wait a short moment for the auth state to update
+								console.log("Browser dismissed, checking for session...");
+
+								// Poll for session a few times since onAuthStateChange might fire
+								let attempts = 0;
+								const maxAttempts = 10;
+								const checkInterval = setInterval(async () => {
+									attempts++;
+
+									// Check if session was set by onAuthStateChange
+									const currentSession = get().session;
+									if (currentSession) {
+										clearInterval(checkInterval);
+										clearTimeout(timeout);
+										if (linkingListener) {
+											linkingListener.remove();
+										}
+										console.log("Session found after browser dismiss");
+										resolve({ error: null });
+										return;
+									}
+
+									// Also check Supabase directly
+									const { data: sessionData } =
+										await supabase.auth.getSession();
+									if (sessionData.session) {
+										clearInterval(checkInterval);
+										clearTimeout(timeout);
+										if (linkingListener) {
+											linkingListener.remove();
+										}
+										set({
+											session: sessionData.session,
+											user: sessionData.session.user,
+										});
+										await Promise.all([
+											get().fetchProfile(),
+											get().fetchSubscription(),
+										]);
+										console.log(
+											"Session found from Supabase after browser dismiss"
+										);
+										resolve({ error: null });
+										return;
+									}
+
+									if (attempts >= maxAttempts) {
+										clearInterval(checkInterval);
+										// Continue waiting for deep link or timeout
+										console.log(
+											"No session found after dismiss, waiting for deep link..."
+										);
+									}
+								}, 500);
 							}
-							// If result.type is "dismiss", we'll wait for the deep link
 						})
 						.catch((err) => {
 							clearTimeout(timeout);

@@ -22,6 +22,22 @@ module.exports = function withNotificationListener(config, options = {}) {
 			return config;
 		}
 
+		// Add tools namespace to manifest if not present
+		if (!manifest.$["xmlns:tools"]) {
+			manifest.$["xmlns:tools"] = "http://schemas.android.com/tools";
+		}
+
+		// Add tools:replace to application to resolve allowBackup conflict
+		// The react-native-android-notification-listener library sets allowBackup=false
+		// but our app uses allowBackup=true, so we need to override it
+		if (!application.$["tools:replace"]) {
+			application.$["tools:replace"] = "android:allowBackup";
+		} else if (
+			!application.$["tools:replace"].includes("android:allowBackup")
+		) {
+			application.$["tools:replace"] += ",android:allowBackup";
+		}
+
 		// Ensure uses-permission array exists
 		if (!manifest["uses-permission"]) {
 			manifest["uses-permission"] = [];
