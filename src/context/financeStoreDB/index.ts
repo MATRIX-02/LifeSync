@@ -67,7 +67,7 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
 				supabase.from("finance_budgets").select("*").eq("user_id", userId),
 				supabase.from("savings_goals").select("*").eq("user_id", userId),
 				supabase.from("bill_reminders").select("*").eq("user_id", userId),
-				supabase.from("debts").select("*").eq("user_id", userId),
+				supabase.from("finance_debts").select("*").eq("user_id", userId),
 				supabase.from("split_groups").select("*").eq("user_id", userId),
 			]);
 
@@ -812,7 +812,7 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
 			user_id: userId,
 			payments: JSON.stringify(newDebt.payments),
 		});
-		const { error } = await supabase.from("debts").insert(dbData);
+		const { error } = await supabase.from("finance_debts").insert(dbData);
 		if (error) {
 			console.error("Error adding debt:", error);
 			return;
@@ -828,7 +828,7 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
 		if (updates.payments) dbUpdates.payments = JSON.stringify(updates.payments);
 
 		const { error } = await supabase
-			.from("debts")
+			.from("finance_debts")
 			.update(objectToSnakeCase(dbUpdates))
 			.eq("id", id)
 			.eq("user_id", userId);
@@ -850,7 +850,7 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
 		if (!userId) return;
 
 		const { error } = await supabase
-			.from("debts")
+			.from("finance_debts")
 			.delete()
 			.eq("id", id)
 			.eq("user_id", userId);
@@ -1340,7 +1340,9 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
 						payments: JSON.stringify(d.payments || []),
 					})
 				);
-				await supabase.from("debts").upsert(debtsData, { onConflict: "id" });
+				await supabase
+					.from("finance_debts")
+					.upsert(debtsData, { onConflict: "id" });
 			}
 			if (data.splitGroups?.length) {
 				const groupsData = data.splitGroups.map((g) =>
@@ -1376,7 +1378,7 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
 			supabase.from("finance_budgets").delete().eq("user_id", userId),
 			supabase.from("savings_goals").delete().eq("user_id", userId),
 			supabase.from("bill_reminders").delete().eq("user_id", userId),
-			supabase.from("debts").delete().eq("user_id", userId),
+			supabase.from("finance_debts").delete().eq("user_id", userId),
 			supabase.from("split_groups").delete().eq("user_id", userId),
 		]);
 
