@@ -1,6 +1,5 @@
 import { AuthError, Session, User } from "@supabase/supabase-js";
 import { makeRedirectUri } from "expo-auth-session";
-import Constants from "expo-constants";
 import * as Linking from "expo-linking";
 import * as WebBrowser from "expo-web-browser";
 import { create } from "zustand";
@@ -40,10 +39,16 @@ interface AuthActions {
 	) => Promise<{ error: Error | null }>;
 	fetchProfile: () => Promise<void>;
 	fetchSubscription: () => Promise<void>;
+	setupRealtimeListeners: () => void;
+	cleanupRealtimeListeners: () => void;
 	isAdmin: () => boolean;
 	isPremium: () => boolean;
 	clearError: () => void;
 }
+
+// Store realtime subscription references for cleanup
+let profileSubscription: ReturnType<typeof supabase.channel> | null = null;
+let subscriptionChannel: ReturnType<typeof supabase.channel> | null = null;
 
 type AuthStore = AuthState & AuthActions;
 
@@ -61,62 +66,155 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
 	initialize: async () => {
 		try {
 			set({ isLoading: true });
-			console.log("🔐 Initializing auth...");
+			console.log("🔐 [Initialize] Starting auth initialization...");
 
 			// Get current session from storage
+			console.log("🔐 [Initialize] Getting session from storage...");
 			const {
 				data: { session },
 				error,
 			} = await supabase.auth.getSession();
 
 			if (error) {
-				console.error("❌ Error getting session:", error);
+				console.error("❌ [Initialize] Error getting session:", error);
 				throw error;
 			}
 
-			console.log("📱 Session found:", session ? "Yes" : "No");
+			console.log("📱 [Initialize] Session found:", session ? "Yes" : "No");
 
 			if (session) {
-				console.log("✅ User logged in:", session.user.email);
+				console.log("✅ [Initialize] User logged in:", session.user.email);
 				set({ session, user: session.user });
 				// Fetch profile and subscription in parallel
+				console.log("🔐 [Initialize] Fetching profile and subscription...");
 				await Promise.all([get().fetchProfile(), get().fetchSubscription()]);
+				console.log("🔐 [Initialize] Profile and subscription fetched");
+
+				// Check if user account is active after fetching profile
+				const profile = get().profile;
+				console.log("🔐 [Initialize] Profile is_active:", profile?.is_active);
+				if (profile && !profile.is_active) {
+					console.log(
+						"⚠️ [Initialize] User account is deactivated, signing out..."
+					);
+					await get().signOut();
+					set({
+						error: "Your account has been deactivated. Please contact support.",
+					});
+					return;
+				}
+
+				// Setup realtime listeners for profile and subscription changes
+				console.log("🔐 [Initialize] Setting up realtime listeners...");
+				get().setupRealtimeListeners();
 			} else {
-				console.log("ℹ️ No saved session found");
+				console.log("ℹ️ [Initialize] No saved session found");
 			}
 
 			// Listen for auth state changes
+			console.log("🔐 [Initialize] Setting up onAuthStateChange listener...");
 			supabase.auth.onAuthStateChange(
 				async (_event: string, session: Session | null) => {
-					console.log("Auth state changed:", _event);
+					console.log(
+						"🔔 [onAuthStateChange] Event:",
+						_event,
+						"Session:",
+						session ? "present" : "null"
+					);
+
+					// Skip if signInWithGoogle is handling this (isLoading will be true)
+					const isCurrentlyLoading = get().isLoading;
+					if (isCurrentlyLoading && _event === "SIGNED_IN") {
+						console.log(
+							"🔔 [onAuthStateChange] Sign-in in progress, letting signInWithGoogle handle fetch"
+						);
+						set({ session, user: session?.user || null });
+						return;
+					}
 
 					// Only fetch profile/subscription if session changed and not already loaded
 					const currentSession = get().session;
+					const currentProfile = get().profile;
+					console.log(
+						"🔔 [onAuthStateChange] Current session:",
+						currentSession?.user?.id || "null"
+					);
+					console.log(
+						"🔔 [onAuthStateChange] Current profile:",
+						currentProfile?.id || "null"
+					);
+
 					const shouldFetch =
 						session?.user &&
 						(!currentSession ||
 							currentSession.user.id !== session.user.id ||
-							_event === "SIGNED_IN");
+							(_event === "SIGNED_IN" && !currentProfile));
+					console.log("🔔 [onAuthStateChange] Should fetch:", shouldFetch);
 
 					set({ session, user: session?.user || null });
 
 					if (shouldFetch) {
 						// Only fetch if we don't already have profile data for this user
 						if (!get().profile || get().profile?.id !== session.user.id) {
-							await Promise.all([
-								get().fetchProfile(),
-								get().fetchSubscription(),
-							]);
+							console.log(
+								"🔔 [onAuthStateChange] Fetching profile and subscription..."
+							);
+							try {
+								await Promise.all([
+									get().fetchProfile(),
+									get().fetchSubscription(),
+								]);
+								console.log("🔔 [onAuthStateChange] Fetch complete");
+							} catch (fetchError) {
+								console.error(
+									"🔴 [onAuthStateChange] Fetch error:",
+									fetchError
+								);
+							} finally {
+								// Always set isLoading to false after fetch attempt
+								set({ isLoading: false });
+							}
+
+							// Check if user account is active
+							const profile = get().profile;
+							if (profile && !profile.is_active) {
+								console.log(
+									"⚠️ [onAuthStateChange] User account is deactivated, signing out..."
+								);
+								await get().signOut();
+								set({
+									error:
+										"Your account has been deactivated. Please contact support.",
+								});
+								return;
+							}
+
+							// Setup realtime listeners
+							console.log(
+								"🔔 [onAuthStateChange] Setting up realtime listeners..."
+							);
+							get().setupRealtimeListeners();
+						} else {
+							console.log(
+								"🔔 [onAuthStateChange] Profile already exists for user, skipping fetch"
+							);
 						}
 					} else if (!session) {
+						console.log("🔔 [onAuthStateChange] No session, cleaning up...");
+						// Cleanup realtime listeners when signed out
+						get().cleanupRealtimeListeners();
 						set({ profile: null, subscription: null });
 					}
+					console.log("🔔 [onAuthStateChange] Handler complete");
 				}
 			);
 		} catch (error) {
-			console.error("Auth initialization error:", error);
+			console.error("❌ [Initialize] Auth initialization error:", error);
 			set({ error: (error as Error).message });
 		} finally {
+			console.log(
+				"🔐 [Initialize] Complete, setting isLoading=false, isInitialized=true"
+			);
 			set({ isLoading: false, isInitialized: true });
 		}
 	},
@@ -190,265 +288,207 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
 
 	signInWithGoogle: async () => {
 		set({ isLoading: true, error: null });
+		console.log("🔵 [Google Sign-In] Starting Google OAuth flow...");
 		try {
-			// For Expo Go, we need to use the auth.expo.io proxy
-			// Get the slug from app.json (via Constants)
-			const slug = Constants.expoConfig?.slug || "lifesync";
-			const owner =
-				Constants.expoConfig?.owner ||
-				Constants.expoConfig?.extra?.eas?.projectId
-					? undefined
-					: null;
+			// For deep link back to app after auth
+			const appRedirectUrl = __DEV__
+				? Linking.createURL("auth/callback")
+				: makeRedirectUri({ scheme: "lifesync", path: "auth/callback" });
 
-			// Construct the Expo Go redirect URL
-			// Format: https://auth.expo.io/@owner/slug OR https://auth.expo.io/@username/slug
-			let redirectUrl: string;
+			console.log("🔵 [Google Sign-In] App redirect URL:", appRedirectUrl);
 
-			if (__DEV__) {
-				// In development with Expo Go, use auth.expo.io proxy
-				// You need to replace YOUR_EXPO_USERNAME with your actual Expo username
-				redirectUrl = `https://auth.expo.io/@matrix122001/${slug}`;
-			} else {
-				// In production, use the native scheme
-				redirectUrl = makeRedirectUri({
-					scheme: "lifesync",
-					path: "auth/callback",
-				});
-			}
-
-			console.log("Google OAuth redirect URL:", redirectUrl);
-
-			const { data, error } = await supabase.auth.signInWithOAuth({
+			// Use Supabase's signInWithOAuth which handles the OAuth flow properly
+			const { data, error: oauthError } = await supabase.auth.signInWithOAuth({
 				provider: "google",
 				options: {
-					redirectTo: redirectUrl,
-					skipBrowserRedirect: false, // Let Supabase handle redirect
+					redirectTo: appRedirectUrl,
+					skipBrowserRedirect: true, // We handle browser manually
 				},
 			});
 
-			if (error) {
-				set({ error: error.message });
-				return { error };
+			if (oauthError) {
+				console.log("🔴 [Google Sign-In] OAuth error:", oauthError.message);
+				set({ error: oauthError.message, isLoading: false });
+				return { error: oauthError };
 			}
 
-			if (data?.url) {
-				console.log("Opening OAuth URL:", data.url);
+			if (!data?.url) {
+				console.log("🔴 [Google Sign-In] No OAuth URL received");
+				set({ error: "Failed to get OAuth URL", isLoading: false });
+				return { error: new Error("No OAuth URL") };
+			}
 
-				// In production with custom schemes, we need to handle the deep link
-				// Set up a promise that resolves when we get the deep link callback
-				let linkingListener: any = null;
-				const authPromise = new Promise<{ error: Error | null }>((resolve) => {
-					// Timeout after 60 seconds
-					const timeout = setTimeout(() => {
-						if (linkingListener) {
-							linkingListener.remove();
+			console.log("🔵 [Google Sign-In] Got OAuth URL, opening browser...");
+
+			// Flag to prevent processing tokens twice
+			let tokensProcessed = false;
+
+			// Helper function to process tokens from URL
+			const processTokensFromUrl = async (
+				urlString: string
+			): Promise<{ error: Error | null }> => {
+				if (tokensProcessed) {
+					console.log(
+						"🔵 [Google Sign-In] Tokens already processed, skipping..."
+					);
+					return { error: null };
+				}
+
+				try {
+					const url = new URL(urlString);
+					let params = new URLSearchParams(url.hash.substring(1));
+					if (!params.has("access_token")) {
+						params = new URLSearchParams(url.search);
+					}
+
+					const accessToken = params.get("access_token");
+					const refreshToken = params.get("refresh_token");
+
+					console.log(
+						"🔵 [Google Sign-In] Tokens found - access:",
+						!!accessToken,
+						"refresh:",
+						!!refreshToken
+					);
+
+					if (accessToken && refreshToken) {
+						tokensProcessed = true;
+						console.log("🔵 [Google Sign-In] Setting session...");
+
+						const { data: sessionData, error: sessionError } =
+							await supabase.auth.setSession({
+								access_token: accessToken,
+								refresh_token: refreshToken,
+							});
+
+						if (sessionError) {
+							console.log(
+								"🔴 [Google Sign-In] Session error:",
+								sessionError.message
+							);
+							return { error: sessionError };
 						}
-						set({ isLoading: false });
-						resolve({ error: new Error("Authentication timeout") });
-					}, 60000);
 
-					// Listen for deep link
-					linkingListener = Linking.addEventListener("url", async (event) => {
-						clearTimeout(timeout);
-						if (linkingListener) {
-							linkingListener.remove();
-						}
+						if (sessionData.session) {
+							console.log(
+								"🟢 [Google Sign-In] Session set! User:",
+								sessionData.session.user.email
+							);
 
-						console.log("Deep link received:", event.url);
+							// Update state with session
+							set({
+								session: sessionData.session,
+								user: sessionData.session.user,
+							});
 
-						try {
-							const url = new URL(event.url);
+							// Wait a moment for Supabase client to sync auth headers
+							console.log("🔵 [Google Sign-In] Waiting for auth sync...");
+							await new Promise((resolve) => setTimeout(resolve, 500));
 
-							// Tokens can be in hash or query params
-							let params = new URLSearchParams(url.hash.substring(1));
-							if (!params.has("access_token")) {
-								params = new URLSearchParams(url.search);
+							// Now fetch profile and subscription
+							console.log("🔵 [Google Sign-In] Fetching profile...");
+							try {
+								await Promise.all([
+									get().fetchProfile(),
+									get().fetchSubscription(),
+								]);
+								console.log(
+									"🟢 [Google Sign-In] Profile fetched successfully!"
+								);
+							} catch (fetchErr) {
+								console.log(
+									"⚠️ [Google Sign-In] Fetch error (non-fatal):",
+									fetchErr
+								);
+								// Don't fail sign-in if profile fetch fails - it will retry on next app load
 							}
 
-							const accessToken = params.get("access_token");
-							const refreshToken = params.get("refresh_token");
-
-							console.log("Access token found:", !!accessToken);
-							console.log("Refresh token found:", !!refreshToken);
-
-							if (accessToken && refreshToken) {
-								// Set the session manually
-								const { data: sessionData, error: sessionError } =
-									await supabase.auth.setSession({
-										access_token: accessToken,
-										refresh_token: refreshToken,
-									});
-
-								if (sessionError) {
-									resolve({ error: sessionError });
-								} else {
-									// Update state immediately with session
-									if (sessionData.session) {
-										set({
-											session: sessionData.session,
-											user: sessionData.session.user,
-										});
-										// Fetch profile immediately to avoid delay
-										await Promise.all([
-											get().fetchProfile(),
-											get().fetchSubscription(),
-										]);
-									}
-									resolve({ error: null });
-								}
-							} else {
-								resolve({ error: new Error("No tokens in redirect URL") });
-							}
-						} catch (err) {
-							resolve({ error: err as Error });
+							// Setup realtime listeners
+							get().setupRealtimeListeners();
 						}
+
+						return { error: null };
+					} else {
+						return { error: new Error("No tokens in URL") };
+					}
+				} catch (err) {
+					console.log("🔴 [Google Sign-In] Error processing URL:", err);
+					return { error: err as Error };
+				}
+			};
+
+			// Open browser and wait for result
+			console.log("🔵 [Google Sign-In] Opening browser...");
+			const result = await WebBrowser.openAuthSessionAsync(
+				data.url,
+				appRedirectUrl
+			);
+			console.log("🔵 [Google Sign-In] Browser result type:", result.type);
+
+			if (result.type === "success" && result.url) {
+				console.log("🟢 [Google Sign-In] Browser returned success");
+				const processResult = await processTokensFromUrl(result.url);
+				if (processResult.error) {
+					set({ error: processResult.error.message, isLoading: false });
+					return processResult;
+				}
+				set({ isLoading: false });
+				return { error: null };
+			} else if (result.type === "cancel") {
+				console.log("🔴 [Google Sign-In] User cancelled");
+				set({ error: "Authentication cancelled", isLoading: false });
+				return { error: new Error("Authentication cancelled") };
+			} else if (result.type === "dismiss") {
+				console.log(
+					"🔵 [Google Sign-In] Browser dismissed, checking for session..."
+				);
+
+				// Wait a moment and check if session was set
+				await new Promise((resolve) => setTimeout(resolve, 1000));
+
+				const { data: sessionData } = await supabase.auth.getSession();
+				if (sessionData.session) {
+					console.log("🟢 [Google Sign-In] Session found after dismiss!");
+					set({
+						session: sessionData.session,
+						user: sessionData.session.user,
+						isLoading: false,
 					});
 
-					// Open the browser
-					WebBrowser.openAuthSessionAsync(data.url, redirectUrl)
-						.then(async (result) => {
-							console.log("WebBrowser result:", result.type);
+					// Fetch profile
+					try {
+						await Promise.all([
+							get().fetchProfile(),
+							get().fetchSubscription(),
+						]);
+					} catch (fetchErr) {
+						console.log("⚠️ [Google Sign-In] Fetch error:", fetchErr);
+					}
 
-							// If WebBrowser returns success (happens on some devices/configs)
-							if (result.type === "success" && result.url) {
-								clearTimeout(timeout);
-								if (linkingListener) {
-									linkingListener.remove();
-								}
-
-								const url = new URL(result.url);
-								let params = new URLSearchParams(url.hash.substring(1));
-								if (!params.has("access_token")) {
-									params = new URLSearchParams(url.search);
-								}
-
-								const accessToken = params.get("access_token");
-								const refreshToken = params.get("refresh_token");
-
-								if (accessToken && refreshToken) {
-									supabase.auth
-										.setSession({
-											access_token: accessToken,
-											refresh_token: refreshToken,
-										})
-										.then(
-											async ({ data: sessionData, error: sessionError }) => {
-												if (sessionError) {
-													resolve({ error: sessionError });
-												} else {
-													// Update state immediately
-													if (sessionData.session) {
-														set({
-															session: sessionData.session,
-															user: sessionData.session.user,
-														});
-														// Fetch profile immediately
-														await Promise.all([
-															get().fetchProfile(),
-															get().fetchSubscription(),
-														]);
-													}
-													resolve({ error: null });
-												}
-											}
-										);
-								} else {
-									resolve({ error: new Error("No tokens in redirect URL") });
-								}
-							} else if (result.type === "cancel") {
-								clearTimeout(timeout);
-								if (linkingListener) {
-									linkingListener.remove();
-								}
-								resolve({ error: new Error("Authentication cancelled") });
-							} else if (result.type === "dismiss") {
-								// Browser was dismissed - check if auth succeeded via onAuthStateChange
-								// Wait a short moment for the auth state to update
-								console.log("Browser dismissed, checking for session...");
-
-								// Poll for session a few times since onAuthStateChange might fire
-								let attempts = 0;
-								const maxAttempts = 10;
-								const checkInterval = setInterval(async () => {
-									attempts++;
-
-									// Check if session was set by onAuthStateChange
-									const currentSession = get().session;
-									if (currentSession) {
-										clearInterval(checkInterval);
-										clearTimeout(timeout);
-										if (linkingListener) {
-											linkingListener.remove();
-										}
-										console.log("Session found after browser dismiss");
-										resolve({ error: null });
-										return;
-									}
-
-									// Also check Supabase directly
-									const { data: sessionData } =
-										await supabase.auth.getSession();
-									if (sessionData.session) {
-										clearInterval(checkInterval);
-										clearTimeout(timeout);
-										if (linkingListener) {
-											linkingListener.remove();
-										}
-										set({
-											session: sessionData.session,
-											user: sessionData.session.user,
-										});
-										await Promise.all([
-											get().fetchProfile(),
-											get().fetchSubscription(),
-										]);
-										console.log(
-											"Session found from Supabase after browser dismiss"
-										);
-										resolve({ error: null });
-										return;
-									}
-
-									if (attempts >= maxAttempts) {
-										clearInterval(checkInterval);
-										// Continue waiting for deep link or timeout
-										console.log(
-											"No session found after dismiss, waiting for deep link..."
-										);
-									}
-								}, 500);
-							}
-						})
-						.catch((err) => {
-							clearTimeout(timeout);
-							if (linkingListener) {
-								linkingListener.remove();
-							}
-							resolve({ error: err });
-						});
-				});
-
-				const result = await authPromise;
-				if (result.error) {
-					set({ error: result.error.message });
-					return { error: result.error };
+					get().setupRealtimeListeners();
+					return { error: null };
+				} else {
+					console.log("🔴 [Google Sign-In] No session after dismiss");
+					set({ error: "Authentication failed", isLoading: false });
+					return { error: new Error("Authentication failed") };
 				}
 			}
 
-			return { error: null };
+			set({ isLoading: false });
+			return { error: new Error("Unknown browser result") };
 		} catch (error) {
 			const err = error as Error;
-			console.error("Google sign-in error:", err);
-			set({ error: err.message });
+			console.error("🔴 [Google Sign-In] Unexpected error:", err);
+			set({ error: err.message, isLoading: false });
 			return { error: err };
-		} finally {
-			set({ isLoading: false });
 		}
 	},
 
 	signOut: async () => {
 		set({ isLoading: true, error: null });
 		try {
+			// Cleanup realtime listeners before signing out
+			get().cleanupRealtimeListeners();
 			await supabase.auth.signOut();
 			set({ session: null, user: null, profile: null, subscription: null });
 		} catch (error) {
@@ -533,23 +573,50 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
 	},
 
 	fetchProfile: async () => {
-		const { user } = get();
-		if (!user) return;
+		const { user, session } = get();
+		console.log("🔵 [fetchProfile] Starting, user:", user?.id || "null");
+		console.log("🔵 [fetchProfile] Session exists:", !!session);
+		if (!user) {
+			console.log("🔵 [fetchProfile] No user, returning early");
+			return;
+		}
 
 		try {
-			const { data, error } = await supabase
+			console.log("🔵 [fetchProfile] Fetching from Supabase...");
+
+			// Add timeout to prevent hanging
+			const timeoutPromise = new Promise<never>((_, reject) =>
+				setTimeout(
+					() => reject(new Error("fetchProfile timeout after 10s")),
+					10000
+				)
+			);
+
+			const fetchPromise = supabase
 				.from("profiles")
 				.select("*")
 				.eq("id", user.id)
 				.maybeSingle();
 
+			const { data, error } = (await Promise.race([
+				fetchPromise,
+				timeoutPromise,
+			])) as Awaited<typeof fetchPromise>;
+
+			console.log(
+				"🔵 [fetchProfile] Response - data:",
+				!!data,
+				"error:",
+				!!error
+			);
 			if (error) throw error;
 
 			if (data) {
+				console.log("🟢 [fetchProfile] Profile found, setting state");
 				set({ profile: data });
 			} else {
 				console.log(
-					"Profile not found for user:",
+					"🔵 [fetchProfile] Profile not found for user:",
 					user.id,
 					"- Creating one automatically"
 				);
@@ -564,6 +631,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
 					is_active: true,
 				};
 
+				console.log("🔵 [fetchProfile] Creating new profile...");
 				const { data: createdProfile, error: createError } = await (
 					supabase.from("profiles") as any
 				)
@@ -575,7 +643,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
 					// If it's a duplicate key error, profile was created by database trigger - fetch it
 					if (createError.code === "23505") {
 						console.log(
-							"Profile already exists (created by database trigger), fetching..."
+							"🔵 [fetchProfile] Profile already exists (created by database trigger), fetching..."
 						);
 						const { data: existingProfile } = await supabase
 							.from("profiles")
@@ -583,31 +651,53 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
 							.eq("id", user.id)
 							.single();
 						if (existingProfile) {
-							console.log("✅ Profile fetched successfully");
+							console.log("🟢 [fetchProfile] Profile fetched successfully");
 							set({ profile: existingProfile });
 							return;
 						}
 					} else {
 						// Only log as error if it's NOT a duplicate key error
-						console.error("Error creating profile:", createError);
+						console.error(
+							"🔴 [fetchProfile] Error creating profile:",
+							createError
+						);
 					}
 					set({ profile: null });
 				} else if (createdProfile) {
-					console.log("✅ Profile created successfully for user:", user.id);
+					console.log(
+						"🟢 [fetchProfile] Profile created successfully for user:",
+						user.id
+					);
 					set({ profile: createdProfile });
 				}
 			}
 		} catch (error) {
-			console.error("Error fetching profile:", error);
+			console.error("🔴 [fetchProfile] Error:", error);
 		}
+		console.log("🔵 [fetchProfile] Complete");
 	},
 
 	fetchSubscription: async () => {
-		const { user } = get();
-		if (!user) return;
+		const { user, session } = get();
+		console.log("🔵 [fetchSubscription] Starting, user:", user?.id || "null");
+		console.log("🔵 [fetchSubscription] Session exists:", !!session);
+		if (!user) {
+			console.log("🔵 [fetchSubscription] No user, returning early");
+			return;
+		}
 
 		try {
-			const { data, error } = await supabase
+			console.log("🔵 [fetchSubscription] Fetching from Supabase...");
+
+			// Add timeout to prevent hanging
+			const timeoutPromise = new Promise<never>((_, reject) =>
+				setTimeout(
+					() => reject(new Error("fetchSubscription timeout after 10s")),
+					10000
+				)
+			);
+
+			const fetchPromise = supabase
 				.from("user_subscriptions")
 				.select(
 					`
@@ -619,11 +709,106 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
 				.eq("status", "active")
 				.single();
 
+			const { data, error } = (await Promise.race([
+				fetchPromise,
+				timeoutPromise,
+			])) as Awaited<typeof fetchPromise>;
+
+			console.log(
+				"🔵 [fetchSubscription] Response - data:",
+				!!data,
+				"error:",
+				error?.code || "none"
+			);
 			if (error && error.code !== "PGRST116") throw error;
 
 			set({ subscription: (data || null) as UserSubscriptionWithPlan | null });
+			console.log(
+				"🟢 [fetchSubscription] Complete, subscription:",
+				data ? "found" : "none"
+			);
 		} catch (error) {
-			console.error("Error fetching subscription:", error);
+			console.error("🔴 [fetchSubscription] Error:", error);
+		}
+	},
+
+	// Setup realtime listeners for profile and subscription changes
+	// This enables real-time updates when admin changes user settings
+	setupRealtimeListeners: () => {
+		const { user } = get();
+		if (!user) return;
+
+		// Cleanup any existing subscriptions first
+		get().cleanupRealtimeListeners();
+
+		console.log("🔄 Setting up realtime listeners for user:", user.id);
+
+		// Listen for profile changes (role, is_active, etc.)
+		profileSubscription = supabase
+			.channel(`profile-changes-${user.id}`)
+			.on(
+				"postgres_changes",
+				{
+					event: "UPDATE",
+					schema: "public",
+					table: "profiles",
+					filter: `id=eq.${user.id}`,
+				},
+				async (payload) => {
+					console.log("📡 Profile updated via realtime:", payload.new);
+					const newProfile = payload.new as Profile;
+
+					// Check if account was deactivated
+					if (!newProfile.is_active) {
+						console.log("⚠️ Account deactivated via realtime, signing out...");
+						await get().signOut();
+						set({
+							error:
+								"Your account has been deactivated. Please contact support.",
+						});
+						return;
+					}
+
+					// Update profile in state
+					set({ profile: newProfile });
+				}
+			)
+			.subscribe((status) => {
+				console.log("Profile subscription status:", status);
+			});
+
+		// Listen for subscription changes (plan changes, etc.)
+		subscriptionChannel = supabase
+			.channel(`subscription-changes-${user.id}`)
+			.on(
+				"postgres_changes",
+				{
+					event: "*", // Listen to INSERT, UPDATE, DELETE
+					schema: "public",
+					table: "user_subscriptions",
+					filter: `user_id=eq.${user.id}`,
+				},
+				async (payload) => {
+					console.log("📡 Subscription changed via realtime:", payload);
+					// Refetch subscription to get the full plan details
+					await get().fetchSubscription();
+				}
+			)
+			.subscribe((status) => {
+				console.log("Subscription channel status:", status);
+			});
+	},
+
+	// Cleanup realtime listeners
+	cleanupRealtimeListeners: () => {
+		console.log("🧹 Cleaning up realtime listeners");
+		if (profileSubscription) {
+			supabase.removeChannel(profileSubscription);
+			profileSubscription = null;
+		}
+		if (subscriptionChannel) {
+			supabase.removeChannel(subscriptionChannel);
+			subscriptionChannel = null;
 		}
 	},
 

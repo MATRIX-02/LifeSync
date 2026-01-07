@@ -132,8 +132,11 @@ export default function AdminUsersScreen() {
 				scrollEventThrottle={400}
 			>
 				{users.map((user) => {
-					const subscription = user.user_subscriptions?.[0];
-					const planName = subscription?.subscription_plans?.name || "No Plan";
+					const activeSubscription = user.user_subscriptions?.find(
+						(sub) => sub.status === "active"
+					);
+					const planName =
+						activeSubscription?.subscription_plans?.name || "Free";
 
 					return (
 						<TouchableOpacity
@@ -326,8 +329,11 @@ export default function AdminUsersScreen() {
 									</Text>
 									<View style={styles.planButtons}>
 										{plans.map((plan) => {
-											const currentPlanId =
-												selectedUser.user_subscriptions?.[0]?.plan_id;
+											const activeSubscription =
+												selectedUser.user_subscriptions?.find(
+													(sub) => sub.status === "active"
+												);
+											const currentPlanId = activeSubscription?.plan_id;
 											const isSelected = currentPlanId === plan.id;
 
 											return (

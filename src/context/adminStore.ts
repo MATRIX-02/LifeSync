@@ -109,12 +109,13 @@ export const useAdminStore = create<AdminStore>((set, get) => ({
 			const from = (page - 1) * PAGE_SIZE;
 			const to = from + PAGE_SIZE - 1;
 
+			// Filter user_subscriptions to only include active ones
 			let query = supabase
 				.from("profiles")
 				.select(
 					`
 					*,
-					user_subscriptions (
+					user_subscriptions!left (
 						*,
 						subscription_plans (*)
 					)
@@ -132,8 +133,17 @@ export const useAdminStore = create<AdminStore>((set, get) => ({
 
 			if (error) throw error;
 
+			// Filter subscriptions to only show active ones (client-side filter)
+			// This is needed because Supabase doesn't support filtering nested relations directly
+			const filteredData = (data || []).map((user: any) => ({
+				...user,
+				user_subscriptions: (user.user_subscriptions || []).filter(
+					(sub: any) => sub.status === "active"
+				),
+			}));
+
 			set({
-				users: data as ProfileWithSubscription[],
+				users: filteredData as ProfileWithSubscription[],
 				currentPage: page,
 				totalPages: Math.ceil((count || 0) / PAGE_SIZE),
 				searchQuery: search,
