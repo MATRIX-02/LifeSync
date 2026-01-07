@@ -144,12 +144,21 @@ export default function DashboardScreen() {
 	const [drawerAnim] = useState(new Animated.Value(-width * 0.8));
 	const [daysOffset, setDaysOffset] = useState(0); // For scrollable date navigation
 	const [viewMode, setViewMode] = useState<"week" | "grid">("week"); // Habit view mode
+	const [gridZoom, setGridZoom] = useState(1); // Grid view zoom level (0.5 to 2)
 
 	// Load view mode preference on mount
 	useEffect(() => {
 		AsyncStorage.getItem("habit_view_mode").then((mode) => {
 			if (mode === "week" || mode === "grid") {
 				setViewMode(mode);
+			}
+		});
+		AsyncStorage.getItem("habit_grid_zoom").then((zoom) => {
+			if (zoom) {
+				const parsedZoom = parseFloat(zoom);
+				if (parsedZoom >= 0.5 && parsedZoom <= 2) {
+					setGridZoom(parsedZoom);
+				}
 			}
 		});
 	}, []);
@@ -589,6 +598,7 @@ export default function DashboardScreen() {
 									onLongPress={() => handleHabitLongPress(habit)}
 									theme={theme}
 									isDark={isDark}
+									zoomLevel={gridZoom}
 								/>
 							))}
 						</ScrollView>
@@ -701,6 +711,72 @@ export default function DashboardScreen() {
 				}}
 				theme={theme}
 			/>
+
+			{/* Floating Zoom Controls (bottom right) */}
+			{viewMode === "grid" && (
+				<View
+					style={{
+						position: "absolute",
+						bottom: 24,
+						right: 16,
+						flexDirection: "column",
+						alignItems: "center",
+						gap: 8,
+						backgroundColor: theme.surface,
+						borderRadius: 16,
+						padding: 8,
+						shadowColor: "#000",
+						shadowOffset: { width: 0, height: 2 },
+						shadowOpacity: 0.25,
+						shadowRadius: 4,
+						elevation: 5,
+					}}
+				>
+					<TouchableOpacity
+						onPress={() => {
+							const newZoom = Math.min(2, gridZoom + 0.25);
+							setGridZoom(newZoom);
+							AsyncStorage.setItem("habit_grid_zoom", newZoom.toString());
+						}}
+						disabled={gridZoom >= 2}
+						style={{
+							padding: 4,
+						}}
+					>
+						<Ionicons
+							name="add-circle"
+							size={28}
+							color={gridZoom >= 2 ? theme.textMuted : theme.primary}
+						/>
+					</TouchableOpacity>
+					<Text
+						style={{
+							fontSize: 11,
+							color: theme.textMuted,
+							fontWeight: "600",
+						}}
+					>
+						{Math.round(gridZoom * 100)}%
+					</Text>
+					<TouchableOpacity
+						onPress={() => {
+							const newZoom = Math.max(0.5, gridZoom - 0.25);
+							setGridZoom(newZoom);
+							AsyncStorage.setItem("habit_grid_zoom", newZoom.toString());
+						}}
+						disabled={gridZoom <= 0.5}
+						style={{
+							padding: 4,
+						}}
+					>
+						<Ionicons
+							name="remove-circle"
+							size={28}
+							color={gridZoom <= 0.5 ? theme.textMuted : theme.primary}
+						/>
+					</TouchableOpacity>
+				</View>
+			)}
 		</SafeAreaView>
 	);
 }
@@ -861,6 +937,7 @@ interface HabitGridItemProps {
 	onLongPress: () => void;
 	theme: Theme;
 	isDark: boolean;
+	zoomLevel?: number;
 }
 
 const MONTHS_SHORT = [
@@ -896,6 +973,7 @@ const HabitGridItem: React.FC<HabitGridItemProps> = ({
 	onLongPress,
 	theme,
 	isDark,
+	zoomLevel = 1,
 }) => {
 	// Fixed to 30 days view
 	const selectedPeriod = "30d";
@@ -910,32 +988,19 @@ const HabitGridItem: React.FC<HabitGridItemProps> = ({
 	const availableWidth = width - horizontalPadding;
 	const cellGap = 2;
 
-	// Calculate optimal cell size and maximum weeks that fit
-	const minCellSize = 6; // Minimum readable cell size
-	const maxCellSize = 12; // Maximum cell size for good aesthetics
+	// Calculate cell size based on zoom level
+	// Base sizes: min=6, max=12
+	// Zoom range: 0.5 (3px) to 2.0 (24px)
+	const baseCellSize = 9; // Middle ground
+	const cellSize = Math.round(baseCellSize * zoomLevel);
 
-	// Calculate how many weeks we can fit with different cell sizes
-	const calculateOptimalWeeks = () => {
-		for (let cellSize = maxCellSize; cellSize >= minCellSize; cellSize--) {
-			const numWeeks = Math.floor(
-				(availableWidth + cellGap) / (cellSize + cellGap)
-			);
-			if (numWeeks >= 8) {
-				// At least ~2 months
-				return { numWeeks, cellSize };
-			}
-		}
-		// Fallback: maximize weeks with minimum cell size
-		const numWeeks = Math.floor(
-			(availableWidth + cellGap) / (minCellSize + cellGap)
-		);
-		return { numWeeks, cellSize: minCellSize };
-	};
+	// Calculate how many weeks fit with the current cell size
+	const numWeeks = Math.max(
+		4,
+		Math.floor((availableWidth + cellGap) / (cellSize + cellGap))
+	);
 
-	const { numWeeks, cellSize: calculatedCellSize } = calculateOptimalWeeks();
 	const totalDays = numWeeks * 7;
-
-	const cellSize = calculatedCellSize;
 	const weekWidth = cellSize + cellGap;
 
 	// Calculate the actual grid width

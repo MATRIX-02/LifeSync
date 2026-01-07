@@ -6,7 +6,13 @@ import { supabase } from "../config/supabase";
 
 // Types for sync status
 export type SyncStatus = "idle" | "syncing" | "success" | "error";
-export type SyncModule = "profile" | "habits" | "workouts" | "finance" | "all";
+export type SyncModule =
+	| "profile"
+	| "habits"
+	| "workouts"
+	| "finance"
+	| "study"
+	| "all";
 
 interface SyncResult {
 	success: boolean;
@@ -827,6 +833,234 @@ export const fetchFinanceFromCloud = async (
 	}
 };
 
+// ============ STUDY HUB SYNC ============
+export const syncStudyToCloud = async (
+	userId: string,
+	studyData: {
+		studyGoals: any[];
+		subjects: any[];
+		studySessions: any[];
+		flashcardDecks: any[];
+		flashcards: any[];
+		revisionSchedule: any[];
+		mockTests: any[];
+		dailyPlans: any[];
+		studyNotes: any[];
+	}
+): Promise<SyncResult> => {
+	try {
+		// Sync study goals
+		if (studyData.studyGoals.length > 0) {
+			const goalsWithUser = studyData.studyGoals.map((g) =>
+				objectToSnakeCase({
+					...g,
+					user_id: userId,
+				})
+			);
+
+			const { error: goalsError } = await (
+				supabase.from("study_goals") as any
+			).upsert(goalsWithUser, { onConflict: "id" });
+
+			if (goalsError) throw goalsError;
+		}
+
+		// Sync subjects
+		if (studyData.subjects.length > 0) {
+			const subjectsWithUser = studyData.subjects.map((s) =>
+				objectToSnakeCase({
+					...s,
+					user_id: userId,
+				})
+			);
+
+			const { error: subjectsError } = await (
+				supabase.from("study_subjects") as any
+			).upsert(subjectsWithUser, { onConflict: "id" });
+
+			if (subjectsError) throw subjectsError;
+		}
+
+		// Sync study sessions
+		if (studyData.studySessions.length > 0) {
+			const sessionsWithUser = studyData.studySessions.map((s) =>
+				objectToSnakeCase({
+					...s,
+					user_id: userId,
+				})
+			);
+
+			const { error: sessionsError } = await (
+				supabase.from("study_sessions") as any
+			).upsert(sessionsWithUser, { onConflict: "id" });
+
+			if (sessionsError) throw sessionsError;
+		}
+
+		// Sync flashcard decks
+		if (studyData.flashcardDecks.length > 0) {
+			const decksWithUser = studyData.flashcardDecks.map((d) =>
+				objectToSnakeCase({
+					...d,
+					user_id: userId,
+				})
+			);
+
+			const { error: decksError } = await (
+				supabase.from("flashcard_decks") as any
+			).upsert(decksWithUser, { onConflict: "id" });
+
+			if (decksError) throw decksError;
+		}
+
+		// Sync flashcards
+		if (studyData.flashcards.length > 0) {
+			const cardsWithUser = studyData.flashcards.map((c) =>
+				objectToSnakeCase({
+					...c,
+					user_id: userId,
+				})
+			);
+
+			const { error: cardsError } = await (
+				supabase.from("flashcards") as any
+			).upsert(cardsWithUser, { onConflict: "id" });
+
+			if (cardsError) throw cardsError;
+		}
+
+		// Sync revision schedule
+		if (studyData.revisionSchedule.length > 0) {
+			const revisionWithUser = studyData.revisionSchedule.map((r) =>
+				objectToSnakeCase({
+					...r,
+					user_id: userId,
+				})
+			);
+
+			const { error: revisionError } = await (
+				supabase.from("revision_schedule") as any
+			).upsert(revisionWithUser, { onConflict: "id" });
+
+			if (revisionError) throw revisionError;
+		}
+
+		// Sync mock tests
+		if (studyData.mockTests.length > 0) {
+			const testsWithUser = studyData.mockTests.map((t) =>
+				objectToSnakeCase({
+					...t,
+					user_id: userId,
+				})
+			);
+
+			const { error: testsError } = await (
+				supabase.from("mock_tests") as any
+			).upsert(testsWithUser, { onConflict: "id" });
+
+			if (testsError) throw testsError;
+		}
+
+		// Sync daily plans
+		if (studyData.dailyPlans.length > 0) {
+			const plansWithUser = studyData.dailyPlans.map((p) =>
+				objectToSnakeCase({
+					...p,
+					user_id: userId,
+				})
+			);
+
+			const { error: plansError } = await (
+				supabase.from("daily_plans") as any
+			).upsert(plansWithUser, { onConflict: "id" });
+
+			if (plansError) throw plansError;
+		}
+
+		// Sync study notes
+		if (studyData.studyNotes.length > 0) {
+			const notesWithUser = studyData.studyNotes.map((n) =>
+				objectToSnakeCase({
+					...n,
+					user_id: userId,
+				})
+			);
+
+			const { error: notesError } = await (
+				supabase.from("study_notes") as any
+			).upsert(notesWithUser, { onConflict: "id" });
+
+			if (notesError) throw notesError;
+		}
+
+		// Update sync timestamp
+		await (supabase.from("user_sync_status") as any).upsert(
+			{
+				user_id: userId,
+				study_synced_at: new Date().toISOString(),
+			},
+			{ onConflict: "user_id" }
+		);
+
+		return {
+			success: true,
+			module: "study",
+			timestamp: new Date().toISOString(),
+		};
+	} catch (error: any) {
+		console.error("Study sync error:", error);
+		return { success: false, module: "study", error: error.message };
+	}
+};
+
+export const fetchStudyFromCloud = async (
+	userId: string
+): Promise<{ data: any; error?: string }> => {
+	try {
+		const [
+			goalsRes,
+			subjectsRes,
+			sessionsRes,
+			decksRes,
+			cardsRes,
+			revisionRes,
+			testsRes,
+			plansRes,
+			notesRes,
+		] = await Promise.all([
+			supabase.from("study_goals").select("*").eq("user_id", userId),
+			supabase.from("study_subjects").select("*").eq("user_id", userId),
+			supabase
+				.from("study_sessions")
+				.select("*")
+				.eq("user_id", userId)
+				.order("start_time", { ascending: false }),
+			supabase.from("flashcard_decks").select("*").eq("user_id", userId),
+			supabase.from("flashcards").select("*").eq("user_id", userId),
+			supabase.from("revision_schedule").select("*").eq("user_id", userId),
+			supabase.from("mock_tests").select("*").eq("user_id", userId),
+			supabase.from("daily_plans").select("*").eq("user_id", userId),
+			supabase.from("study_notes").select("*").eq("user_id", userId),
+		]);
+
+		return {
+			data: {
+				studyGoals: (goalsRes.data || []).map(objectToCamelCase),
+				subjects: (subjectsRes.data || []).map(objectToCamelCase),
+				studySessions: (sessionsRes.data || []).map(objectToCamelCase),
+				flashcardDecks: (decksRes.data || []).map(objectToCamelCase),
+				flashcards: (cardsRes.data || []).map(objectToCamelCase),
+				revisionSchedule: (revisionRes.data || []).map(objectToCamelCase),
+				mockTests: (testsRes.data || []).map(objectToCamelCase),
+				dailyPlans: (plansRes.data || []).map(objectToCamelCase),
+				studyNotes: (notesRes.data || []).map(objectToCamelCase),
+			},
+		};
+	} catch (error: any) {
+		return { data: null, error: error.message };
+	}
+};
+
 // ============ SYNC ALL ============
 export const syncAllToCloud = async (
 	userId: string,
@@ -835,6 +1069,7 @@ export const syncAllToCloud = async (
 		habits?: any;
 		workouts?: any;
 		finance?: any;
+		study?: any;
 	}
 ): Promise<SyncResult[]> => {
 	const results: SyncResult[] = [];
@@ -855,6 +1090,10 @@ export const syncAllToCloud = async (
 		results.push(await syncFinanceToCloud(userId, data.finance));
 	}
 
+	if (data.study) {
+		results.push(await syncStudyToCloud(userId, data.study));
+	}
+
 	return results;
 };
 
@@ -865,6 +1104,7 @@ export const getSyncStatus = async (
 	habits_synced_at?: string;
 	workouts_synced_at?: string;
 	finance_synced_at?: string;
+	study_synced_at?: string;
 }> => {
 	try {
 		const { data } = await supabase
@@ -915,6 +1155,18 @@ export const deleteAllCloudData = async (
 			await supabase.from("bill_reminders").delete().eq("user_id", userId);
 			await supabase.from("finance_debts").delete().eq("user_id", userId);
 			await supabase.from("split_groups").delete().eq("user_id", userId);
+		}
+
+		if (!module || module === "all" || module === "study") {
+			await supabase.from("study_sessions").delete().eq("user_id", userId);
+			await supabase.from("study_subjects").delete().eq("user_id", userId);
+			await supabase.from("study_goals").delete().eq("user_id", userId);
+			await supabase.from("flashcards").delete().eq("user_id", userId);
+			await supabase.from("flashcard_decks").delete().eq("user_id", userId);
+			await supabase.from("revision_schedule").delete().eq("user_id", userId);
+			await supabase.from("mock_tests").delete().eq("user_id", userId);
+			await supabase.from("daily_plans").delete().eq("user_id", userId);
+			await supabase.from("study_notes").delete().eq("user_id", userId);
 		}
 
 		return { success: true, module: module || "all" };

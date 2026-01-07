@@ -1,5 +1,5 @@
-import React from "react";
 import { Stack } from "expo-router";
+import React from "react";
 
 export default function TabLayout() {
 	return (
@@ -14,6 +14,7 @@ export default function TabLayout() {
 			<Stack.Screen name="two" />
 			<Stack.Screen name="workout" />
 			<Stack.Screen name="finance" />
+			<Stack.Screen name="study" />
 			<Stack.Screen name="profile" />
 			<Stack.Screen name="statistics" />
 		</Stack>

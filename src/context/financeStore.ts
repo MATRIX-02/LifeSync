@@ -194,6 +194,7 @@ interface FinanceStore {
 	setCurrency: (currency: string) => void;
 
 	// Import/Export
+	initialize: (userId: string) => Promise<void>;
 	importData: (data: {
 		accounts?: Account[];
 		transactions?: Transaction[];
@@ -1450,6 +1451,12 @@ export const useFinanceStore = create<FinanceStore>()(
 
 			// Settings
 			setCurrency: (currency) => set({ currency }),
+
+			// Initialize from database (stub for now - will be implemented with database-first)
+			initialize: async (userId: string) => {
+				// TODO: Load data from Supabase tables when fully migrated to database-first
+				console.log("Finance store initialize called for user:", userId);
+			},
 
 			// Import/Export
 			importData: (data) =>

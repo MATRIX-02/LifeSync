@@ -3,7 +3,7 @@ import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import { NotificationService } from "../services/notificationService";
 
-export type ModuleType = "habits" | "workout" | "finance";
+export type ModuleType = "habits" | "workout" | "finance" | "study";
 
 interface ModuleStore {
 	// Module states
@@ -15,7 +15,7 @@ interface ModuleStore {
 	getFirstEnabledModule: () => ModuleType;
 }
 
-const defaultModules: ModuleType[] = ["habits", "workout", "finance"];
+const defaultModules: ModuleType[] = ["habits", "workout", "finance", "study"];
 
 // Create store with persist
 const useModuleStoreBase = create<ModuleStore>()(
@@ -144,6 +144,14 @@ const useModuleStoreBase = create<ModuleStore>()(
 					(!state.enabledModules || state.enabledModules.length === 0)
 				) {
 					state.enabledModules = defaultModules;
+				} else if (state && state.enabledModules) {
+					// Merge in any new default modules that were added
+					const newModules = defaultModules.filter(
+						(m) => !state.enabledModules.includes(m)
+					);
+					if (newModules.length > 0) {
+						state.enabledModules = [...state.enabledModules, ...newModules];
+					}
 				}
 			},
 		}

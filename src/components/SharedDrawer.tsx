@@ -56,6 +56,13 @@ const moduleConfig: Record<
 		route: "/(tabs)/finance",
 		description: "Manage your finances",
 	},
+	study: {
+		label: "Study Hub",
+		icon: "school",
+		color: "accent",
+		route: "/(tabs)/study",
+		description: "Master any exam or skill",
+	},
 };
 
 export const SharedDrawer: React.FC<SharedDrawerProps> = ({

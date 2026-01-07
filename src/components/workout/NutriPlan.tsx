@@ -1,15 +1,11 @@
 // NutriPlan - Comprehensive Meal & Nutrition Tracker
 // Features: Meal logging, Food search, Gut health, Hydration, Fasting, Insights
 
+import { supabase } from "@/src/config/supabase";
 import { useAuthStore } from "@/src/context/authStore";
 import { useNutritionStore } from "@/src/context/nutritionStoreDB";
 import { Theme } from "@/src/context/themeContext";
-import {
-	getFoodRecommendations,
-	getPrebioticFoods,
-	getProbioticFoods,
-	searchFoods,
-} from "@/src/data/mealDatabase";
+import { getFoodRecommendations, searchFoods } from "@/src/data/mealDatabase";
 import type {
 	BristolStoolType,
 	FastingType,
@@ -25,13 +21,23 @@ import {
 	FlatList,
 	Modal,
 	ScrollView,
+	StatusBar,
 	StyleSheet,
 	Text,
 	TextInput,
 	TouchableOpacity,
 	View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { FastingTab } from "./nutriplan/FastingTab";
+import { GutHealthTab } from "./nutriplan/GutHealthTab";
+import { InsightsTab } from "./nutriplan/InsightsTab";
+import {
+	BRISTOL_SCALE_INFO,
+	FASTING_PRESETS,
+	GUT_SYMPTOMS,
+	WATER_AMOUNTS,
+} from "./nutriplan/constants";
+import type { FoodWithQuantity, SubTab } from "./nutriplan/types";
 
 const { width } = Dimensions.get("window");
 
@@ -43,94 +49,51 @@ interface NutriPlanProps {
 	theme: Theme;
 }
 
-type SubTab = "log" | "hydration" | "gut" | "fasting" | "insights";
-
-interface FoodWithQuantity {
-	food: FoodItem;
-	quantity: number;
-}
-
-// ============================================
-// GUT SYMPTOMS LIST
-// ============================================
-
-const GUT_SYMPTOMS: { id: GutSymptom; label: string; icon: string }[] = [
-	{ id: "bloating", label: "Bloating", icon: "ellipse" },
-	{ id: "gas", label: "Gas", icon: "cloud" },
-	{ id: "cramps", label: "Cramps", icon: "flash" },
-	{ id: "constipation", label: "Constipation", icon: "remove-circle" },
-	{ id: "diarrhea", label: "Diarrhea", icon: "water" },
-	{ id: "heartburn", label: "Heartburn", icon: "flame" },
-	{ id: "nausea", label: "Nausea", icon: "medical" },
-	{ id: "none", label: "No Issues", icon: "checkmark-circle" },
-];
-
-// ============================================
-// FASTING PRESETS
-// ============================================
-
-const FASTING_PRESETS: {
-	type: FastingType;
-	label: string;
-	hours: number;
-	description: string;
-}[] = [
-	{
-		type: "16_8",
-		label: "16:8",
-		hours: 16,
-		description: "Fast 16 hours, eat within 8 hour window",
-	},
-	{
-		type: "18_6",
-		label: "18:6",
-		hours: 18,
-		description: "Fast 18 hours, eat within 6 hour window",
-	},
-	{
-		type: "20_4",
-		label: "20:4 (Warrior)",
-		hours: 20,
-		description: "Fast 20 hours, eat within 4 hour window",
-	},
-	{ type: "omad", label: "OMAD", hours: 23, description: "One Meal A Day" },
-	{
-		type: "eat_stop_eat",
-		label: "24 Hour",
-		hours: 24,
-		description: "Full 24 hour fast",
-	},
-	{
-		type: "custom",
-		label: "Custom",
-		hours: 0,
-		description: "Set your own duration",
-	},
-];
-
-// ============================================
-// WATER AMOUNTS
-// ============================================
-
-const WATER_AMOUNTS = [
-	{ amount: 250, label: "Glass", icon: "water" },
-	{ amount: 500, label: "Bottle", icon: "flask" },
-	{ amount: 150, label: "Cup", icon: "cafe" },
-	{ amount: 1000, label: "Liter", icon: "water" },
-];
-
-// ============================================
-// MAIN COMPONENT
-// ============================================
-
 export default function NutriPlan({ theme }: NutriPlanProps) {
-	const { profile } = useAuthStore();
 	const store = useNutritionStore();
+	const profile = useAuthStore((state) => state.profile);
 
-	// Initialize store
+	// Derive isDark from theme background color
+	const isDark =
+		theme.background === "#0D0D0D" ||
+		theme.background.startsWith("#0") ||
+		theme.background.startsWith("#1");
+
+	// Force re-render at midnight to reset water intake display
+	const [, forceUpdate] = useState(0);
+	useEffect(() => {
+		const now = new Date();
+		const midnight = new Date(
+			now.getFullYear(),
+			now.getMonth(),
+			now.getDate() + 1,
+			0,
+			0,
+			0,
+			0
+		);
+		const timeUntilMidnight = midnight.getTime() - now.getTime();
+
+		const timer = setTimeout(() => {
+			forceUpdate((n) => n + 1);
+			// Set up daily interval after first midnight
+			const dailyInterval = setInterval(() => {
+				forceUpdate((n) => n + 1);
+			}, 24 * 60 * 60 * 1000);
+			return () => clearInterval(dailyInterval);
+		}, timeUntilMidnight);
+
+		return () => clearTimeout(timer);
+	}, []);
+
+	// Initialize store and auto-calculate goals from fitness profile
 	useEffect(() => {
 		if (profile?.id) {
 			store.initialize(profile.id);
+			// Auto-calculate daily goals if fitness profile exists
+			if (store.nutritionProfile) {
+				store.calculateDailyGoals();
+			}
 		}
 	}, [profile?.id]);
 
@@ -140,6 +103,13 @@ export default function NutriPlan({ theme }: NutriPlanProps) {
 	const [showFoodSearchModal, setShowFoodSearchModal] = useState(false);
 	const [showGutLogModal, setShowGutLogModal] = useState(false);
 	const [showFastingModal, setShowFastingModal] = useState(false);
+	const [showWaterGoalModal, setShowWaterGoalModal] = useState(false);
+	const [showCalorieGoalModal, setShowCalorieGoalModal] = useState(false);
+	const [customWaterGoal, setCustomWaterGoal] = useState("");
+	const [customCalories, setCustomCalories] = useState("");
+	const [customProtein, setCustomProtein] = useState("");
+	const [customCarbs, setCustomCarbs] = useState("");
+	const [customFat, setCustomFat] = useState("");
 	const [selectedMealType, setSelectedMealType] = useState<MealType>("lunch");
 	const [searchQuery, setSearchQuery] = useState("");
 	const [selectedFoods, setSelectedFoods] = useState<FoodWithQuantity[]>([]);
@@ -157,6 +127,60 @@ export default function NutriPlan({ theme }: NutriPlanProps) {
 	const [selectedFastingType, setSelectedFastingType] =
 		useState<FastingType>("16_8");
 	const [customFastingHours, setCustomFastingHours] = useState(16);
+
+	// Goal setup state
+	const [showGoalSetupModal, setShowGoalSetupModal] = useState(false);
+	const [selectedGoal, setSelectedGoal] = useState<string>("maintenance");
+
+	// Calculate preview goals for a specific goal type
+	const calculatePreviewGoals = (goalType: string) => {
+		const nutritionProfile = store.nutritionProfile;
+		if (!nutritionProfile) {
+			return { calories: 2000, protein: 60, carbs: 250, fat: 65 };
+		}
+
+		// Calculate BMR
+		let bmr = 10 * (nutritionProfile.weight || 70);
+		bmr += 6.25 * (nutritionProfile.height || 170);
+		bmr -= 5 * (nutritionProfile.age || 30);
+		bmr += nutritionProfile.gender === "male" ? 5 : -161;
+
+		// TDEE
+		const activityMultipliers: Record<string, number> = {
+			sedentary: 1.2,
+			light: 1.375,
+			moderate: 1.55,
+			active: 1.725,
+			extremely_active: 1.9,
+		};
+		const tdee =
+			bmr * (activityMultipliers[nutritionProfile.activityLevel] || 1.55);
+
+		// Adjust for goal
+		let calories = tdee;
+		let proteinRatio = 0.25;
+		let carbRatio = 0.45;
+		let fatRatio = 0.3;
+
+		if (goalType === "weight_loss") {
+			calories = tdee - 500;
+			proteinRatio = 0.3;
+			carbRatio = 0.35;
+			fatRatio = 0.35;
+		} else if (goalType === "muscle_gain") {
+			calories = tdee + 300;
+			proteinRatio = 0.3;
+			carbRatio = 0.45;
+			fatRatio = 0.25;
+		}
+
+		return {
+			calories: Math.round(calories),
+			protein: Math.round((calories * proteinRatio) / 4),
+			carbs: Math.round((calories * carbRatio) / 4),
+			fat: Math.round((calories * fatRatio) / 9),
+		};
+	};
 
 	// Daily summary
 	const today = new Date();
@@ -473,7 +497,8 @@ export default function NutriPlan({ theme }: NutriPlanProps) {
 		stoolTypeGrid: {
 			flexDirection: "row",
 			flexWrap: "wrap",
-			justifyContent: "space-between",
+			justifyContent: "flex-start",
+			gap: 8,
 			marginBottom: 16,
 		},
 		stoolTypeItem: {
@@ -637,6 +662,54 @@ export default function NutriPlan({ theme }: NutriPlanProps) {
 			marginBottom: 12,
 			marginTop: 8,
 		},
+		// Goal Setup Modal Styles
+		goalCard: {
+			backgroundColor: theme.surface,
+			borderRadius: 12,
+			padding: 16,
+			marginBottom: 12,
+			borderWidth: 2,
+			borderColor: "transparent",
+			flexDirection: "row",
+			alignItems: "center",
+		},
+		goalCardSelected: {
+			borderColor: theme.primary,
+			backgroundColor: theme.primary + "15",
+		},
+		goalLabel: {
+			fontSize: 16,
+			fontWeight: "600",
+			color: theme.text,
+		},
+		goalDesc: {
+			fontSize: 13,
+			color: theme.textSecondary,
+			marginTop: 4,
+		},
+		input: {
+			backgroundColor: theme.surface,
+			borderRadius: 12,
+			paddingHorizontal: 16,
+			paddingVertical: 12,
+			fontSize: 16,
+			color: theme.text,
+			marginBottom: 12,
+			borderWidth: 1,
+			borderColor: theme.border,
+		},
+		inputLabelText: {
+			fontSize: 14,
+			fontWeight: "600",
+			color: theme.text,
+			marginBottom: 8,
+		},
+		modalButton: {
+			paddingVertical: 12,
+			paddingHorizontal: 16,
+			borderRadius: 12,
+			alignItems: "center",
+		},
 	});
 
 	// ============================================
@@ -733,6 +806,20 @@ export default function NutriPlan({ theme }: NutriPlanProps) {
 		Alert.alert("Success", "Meal logged successfully!");
 	};
 
+	const handleDeleteMeal = async (mealId: string) => {
+		Alert.alert("Delete Meal", "Are you sure you want to delete this meal?", [
+			{ text: "Cancel", style: "cancel" },
+			{
+				text: "Delete",
+				style: "destructive",
+				onPress: async () => {
+					await store.deleteMealLog(mealId);
+					Alert.alert("Success", "Meal deleted");
+				},
+			},
+		]);
+	};
+
 	const handleLogGutHealth = async () => {
 		if (!selectedStoolType) {
 			Alert.alert("Error", "Please select stool type");
@@ -781,7 +868,202 @@ export default function NutriPlan({ theme }: NutriPlanProps) {
 	};
 
 	const handleLogWater = async (amount: number) => {
+		// Prevent water intake from going below 0
+		if (amount < 0 && todayWater + amount < 0) {
+			return;
+		}
 		await store.logWater(amount);
+	};
+
+	const handleResetWater = async () => {
+		Alert.alert(
+			"Reset Water Intake",
+			"Are you sure you want to reset today's water intake to 0?",
+			[
+				{ text: "Cancel", style: "cancel" },
+				{
+					text: "Reset",
+					style: "destructive",
+					onPress: async () => {
+						await store.logWater(-todayWater);
+					},
+				},
+			]
+		);
+	};
+
+	const handleSetWaterGoal = async () => {
+		const goalMl = parseInt(customWaterGoal);
+		if (isNaN(goalMl) || goalMl < 500 || goalMl > 10000) {
+			Alert.alert(
+				"Invalid Goal",
+				"Please enter a water goal between 500ml and 10000ml"
+			);
+			return;
+		}
+		await store.setCustomWaterGoal(goalMl);
+		setShowWaterGoalModal(false);
+		setCustomWaterGoal("");
+		Alert.alert(
+			"Success",
+			`Water goal set to ${(goalMl / 1000).toFixed(1)}L per day`
+		);
+	};
+
+	const handleSetCalorieGoal = async () => {
+		const calories = parseInt(customCalories);
+		const protein = customProtein ? parseInt(customProtein) : undefined;
+		const carbs = customCarbs ? parseInt(customCarbs) : undefined;
+		const fat = customFat ? parseInt(customFat) : undefined;
+
+		if (isNaN(calories) || calories < 1000 || calories > 5000) {
+			Alert.alert(
+				"Invalid Goal",
+				"Please enter calories between 1000 and 5000"
+			);
+			return;
+		}
+
+		await store.setCustomCalorieGoal(calories, protein, carbs, fat);
+		setShowCalorieGoalModal(false);
+		setCustomCalories("");
+		setCustomProtein("");
+		setCustomCarbs("");
+		setCustomFat("");
+		Alert.alert("Success", "Calorie goals updated successfully!");
+	};
+
+	const handleCompleteGoalSetup = async () => {
+		// Auto-calculate based on fitness profile and selected goal
+		try {
+			console.log("=== GOAL SETUP START ===");
+			console.log("Selected Goal:", selectedGoal);
+			console.log(
+				"Current Nutrition Profile:",
+				JSON.stringify(store.nutritionProfile, null, 2)
+			);
+
+			// Map UI goal values to database enum values
+			const goalMapping: Record<string, string> = {
+				weight_loss: "lose_weight",
+				maintenance: "maintain",
+				muscle_gain: "gain_muscle",
+			};
+			const dbGoal = goalMapping[selectedGoal] || "maintain";
+			console.log("Mapped DB Goal:", dbGoal);
+
+			// First, check if we have a fitness profile and create/update nutrition profile
+			if (!store.nutritionProfile && profile?.id) {
+				console.log(
+					"No nutrition profile found, checking for fitness profile..."
+				);
+
+				// Get fitness profile from database
+				const { data: fitnessProfile } = await (supabase as any)
+					.from("fitness_profiles")
+					.select("*")
+					.eq("user_id", profile.id)
+					.single();
+
+				console.log(
+					"Fitness Profile from DB:",
+					JSON.stringify(fitnessProfile, null, 2)
+				);
+
+				if (fitnessProfile) {
+					// Create nutrition profile from fitness profile
+					const newNutritionProfile = {
+						user_id: profile.id,
+						age: fitnessProfile.age || 25,
+						gender: fitnessProfile.gender || "male",
+						height: fitnessProfile.height || 170,
+						weight: fitnessProfile.weight || 70,
+						activity_level: fitnessProfile.activity_level || "moderate",
+						goal: dbGoal,
+						dietary_preferences: [],
+						allergies: [],
+						target_calories: 2000,
+						target_protein: 150,
+						target_carbs: 200,
+						target_fat: 65,
+						target_fiber: 30,
+						target_water: 2500,
+						meal_frequency: 3,
+					};
+
+					console.log(
+						"Creating new nutrition profile:",
+						JSON.stringify(newNutritionProfile, null, 2)
+					);
+
+					const { data: createdProfile, error } = await (supabase as any)
+						.from("nutrition_profiles")
+						.insert(newNutritionProfile)
+						.select()
+						.single();
+
+					if (error) {
+						console.error("Error creating nutrition profile:", error);
+						throw error;
+					}
+
+					console.log(
+						"Created Nutrition Profile:",
+						JSON.stringify(createdProfile, null, 2)
+					);
+					store.nutritionProfile = createdProfile;
+				}
+			} else if (store.nutritionProfile) {
+				// Update existing nutrition profile with the selected goal
+				console.log("Updating nutrition profile goal to:", dbGoal);
+				await (supabase as any)
+					.from("nutrition_profiles")
+					.update({ goal: dbGoal })
+					.eq("id", store.nutritionProfile.id);
+
+				// Refresh the nutrition profile to get updated goal
+				const { data } = await (supabase as any)
+					.from("nutrition_profiles")
+					.select("*")
+					.eq("id", store.nutritionProfile.id)
+					.single();
+
+				console.log(
+					"Refreshed Profile from DB:",
+					JSON.stringify(data, null, 2)
+				);
+
+				if (data) {
+					// Update the store with refreshed profile
+					store.nutritionProfile = data;
+					console.log(
+						"Updated store.nutritionProfile:",
+						JSON.stringify(store.nutritionProfile, null, 2)
+					);
+				}
+			}
+
+			// Calculate goals based on fitness profile from DB (now with updated goal)
+			const goals = store.calculateDailyGoals();
+			console.log("Calculated Daily Goals:", JSON.stringify(goals, null, 2));
+			console.log("=== GOAL SETUP END ===");
+
+			setShowGoalSetupModal(false);
+			Alert.alert(
+				"Success",
+				`Daily goals set based on your ${selectedGoal.replace(
+					"_",
+					" "
+				)} goal!\n\nCalories: ${Math.round(
+					goals.calories
+				)} kcal\nProtein: ${Math.round(goals.protein)}g\nCarbs: ${Math.round(
+					goals.carbs
+				)}g\nFat: ${Math.round(goals.fat)}g`
+			);
+		} catch (error) {
+			console.error("Error setting goals:", error);
+			Alert.alert("Error", "Failed to set goals. Please try again.");
+		}
 	};
 
 	const formatTime = (hours: number) => {
@@ -798,6 +1080,31 @@ export default function NutriPlan({ theme }: NutriPlanProps) {
 		<ScrollView showsVerticalScrollIndicator={false}>
 			{/* Daily Summary Card */}
 			<View style={styles.card}>
+				<View
+					style={{
+						flexDirection: "row",
+						justifyContent: "space-between",
+						alignItems: "center",
+						marginBottom: 12,
+					}}
+				>
+					<Text style={styles.cardTitle}>Daily Goals</Text>
+					<TouchableOpacity
+						onPress={() => setShowGoalSetupModal(true)}
+						style={{
+							paddingHorizontal: 12,
+							paddingVertical: 6,
+							backgroundColor: theme.primary + "20",
+							borderRadius: 8,
+						}}
+					>
+						<Text
+							style={{ color: theme.primary, fontSize: 12, fontWeight: "600" }}
+						>
+							Set Goals
+						</Text>
+					</TouchableOpacity>
+				</View>
 				<View style={styles.calorieRing}>
 					<Text style={styles.calorieText}>{dailySummary.totalCalories}</Text>
 					<Text style={styles.calorieLabel}>
@@ -978,458 +1285,241 @@ export default function NutriPlan({ theme }: NutriPlanProps) {
 		</ScrollView>
 	);
 
-	const renderHydrationTab = () => (
-		<ScrollView showsVerticalScrollIndicator={false}>
-			<View style={styles.card}>
-				<View style={styles.waterContainer}>
-					<Ionicons name="water" size={48} color={theme.primary} />
-					<Text style={styles.waterAmount}>
-						{(todayWater / 1000).toFixed(1)}L
-					</Text>
-					<Text style={styles.waterLabel}>
-						of {(dailySummary.waterGoal / 1000).toFixed(1)}L goal
-					</Text>
-					<View style={[styles.progressBar, { width: "80%", marginTop: 12 }]}>
-						<View
-							style={[
-								styles.progressFill,
-								{
-									width: `${Math.min(
-										100,
-										(todayWater / dailySummary.waterGoal) * 100
-									)}%`,
-									backgroundColor: "#4FC3F7",
-								},
-							]}
-						/>
-					</View>
-				</View>
+	const renderHydrationTab = () => {
+		const waterProgress = Math.min(
+			100,
+			(todayWater / dailySummary.waterGoal) * 100
+		);
+		const remainingWater = Math.max(0, dailySummary.waterGoal - todayWater);
 
-				<Text style={[styles.cardTitle, { marginTop: 16 }]}>Quick Add</Text>
-				<View style={styles.waterButtonRow}>
-					{WATER_AMOUNTS.map((item) => (
-						<TouchableOpacity
-							key={item.amount}
-							style={styles.waterButton}
-							onPress={() => handleLogWater(item.amount)}
-						>
-							<Ionicons
-								name={item.icon as any}
-								size={24}
-								color={theme.primary}
-							/>
-							<Text style={styles.waterButtonText}>{item.amount}ml</Text>
-						</TouchableOpacity>
-					))}
-				</View>
-			</View>
-
-			{/* Hydration Tips */}
-			<View style={styles.card}>
-				<Text style={styles.cardTitle}>💡 Hydration Tips</Text>
-				<Text style={{ color: theme.textSecondary, lineHeight: 20 }}>
-					• Drink water first thing in the morning{"\n"}• Keep a water bottle at
-					your desk{"\n"}• Drink before you feel thirsty{"\n"}• Add lemon or
-					cucumber for flavor{"\n"}• Increase intake during exercise
-				</Text>
-			</View>
-		</ScrollView>
-	);
-
-	const renderGutHealthTab = () => (
-		<ScrollView showsVerticalScrollIndicator={false}>
-			{/* Quick Log Button */}
-			<TouchableOpacity
-				style={styles.addButton}
-				onPress={() => setShowGutLogModal(true)}
-			>
-				<Text style={styles.addButtonText}>+ Log Gut Health</Text>
-			</TouchableOpacity>
-
-			{/* Recent Gut Health */}
-			<Text style={styles.sectionTitle}>Recent Logs</Text>
-			{store.gutHealthLogs.length === 0 ? (
-				<View style={styles.emptyState}>
-					<Ionicons name="leaf-outline" size={48} color={theme.textSecondary} />
-					<Text style={styles.emptyStateText}>No gut health logs yet</Text>
-				</View>
-			) : (
+		return (
+			<ScrollView showsVerticalScrollIndicator={false}>
+				{/* Water Progress Card */}
 				<View style={styles.card}>
-					{store.gutHealthLogs.slice(0, 5).map((log: any, index) => {
-						const logDate =
-							log.date instanceof Date ? log.date : new Date(log.date);
-						const digestionRating =
-							log.digestionRating || log.overallGutFeeling || 3;
-						return (
+					<View style={styles.waterContainer}>
+						<Ionicons
+							name="water"
+							size={56}
+							color={waterProgress >= 100 ? theme.success : theme.primary}
+						/>
+						<Text style={styles.waterAmount}>
+							{(todayWater / 1000).toFixed(2)}L
+						</Text>
+						<Text style={styles.waterLabel}>
+							of {(dailySummary.waterGoal / 1000).toFixed(1)}L daily goal
+						</Text>
+
+						{/* Progress Bar */}
+						<View style={[styles.progressBar, { width: "85%", marginTop: 16 }]}>
 							<View
-								key={log.id}
 								style={[
-									styles.mealLogItem,
-									index === Math.min(4, store.gutHealthLogs.length - 1) && {
-										borderBottomWidth: 0,
+									styles.progressFill,
+									{
+										width: `${waterProgress}%`,
+										backgroundColor:
+											waterProgress >= 100 ? theme.success : "#4FC3F7",
 									},
 								]}
-							>
-								<View style={styles.mealLogInfo}>
-									<Text style={styles.mealLogTitle}>
-										{logDate.toLocaleDateString()}
-									</Text>
-									<Text style={styles.mealLogSubtitle}>
-										Type {log.stoolType || log.stoolLog?.type || "N/A"} •
-										Digestion: {digestionRating}/5
-									</Text>
-								</View>
-								<View style={{ flexDirection: "row", alignItems: "center" }}>
-									<Ionicons
-										name={
-											digestionRating >= 4
-												? "happy"
-												: digestionRating >= 3
-												? "happy-outline"
-												: "sad"
-										}
-										size={20}
-										color={
-											digestionRating >= 4
-												? "#4CAF50"
-												: digestionRating >= 3
-												? "#FFC107"
-												: "#F44336"
-										}
-									/>
-								</View>
-							</View>
-						);
-					})}
-				</View>
-			)}
+							/>
+						</View>
 
-			{/* Probiotic Foods */}
-			<Text style={styles.sectionTitle}>🦠 Probiotic Foods</Text>
-			<FlatList
-				horizontal
-				data={getProbioticFoods().slice(0, 10)}
-				keyExtractor={(item) => item.id}
-				showsHorizontalScrollIndicator={false}
-				renderItem={({ item }) => (
-					<View style={[styles.foodItem, { width: 140, marginRight: 8 }]}>
-						<Text style={styles.foodName} numberOfLines={1}>
-							{item.name}
-						</Text>
-						<Text style={styles.foodCalories}>
-							{item.gutHealthNotes || "Good for gut"}
-						</Text>
-					</View>
-				)}
-			/>
-
-			{/* Prebiotic Foods */}
-			<Text style={styles.sectionTitle}>🌱 Prebiotic Foods</Text>
-			<FlatList
-				horizontal
-				data={getPrebioticFoods().slice(0, 10)}
-				keyExtractor={(item) => item.id}
-				showsHorizontalScrollIndicator={false}
-				renderItem={({ item }) => (
-					<View style={[styles.foodItem, { width: 140, marginRight: 8 }]}>
-						<Text style={styles.foodName} numberOfLines={1}>
-							{item.name}
-						</Text>
-						<Text style={styles.foodCalories}>
-							{item.gutHealthNotes || "Feeds good bacteria"}
-						</Text>
-					</View>
-				)}
-			/>
-		</ScrollView>
-	);
-
-	const renderFastingTab = () => (
-		<ScrollView showsVerticalScrollIndicator={false}>
-			{store.currentFasting && currentFast ? (
-				<View style={styles.fastingCard}>
-					<Ionicons name="timer" size={48} color={theme.primary} />
-					<Text style={styles.fastingTimer}>
-						{formatTime(currentFast.elapsedHours)}
-					</Text>
-					<Text style={styles.fastingProgress}>
-						{currentFast.progress}% Complete
-					</Text>
-					<Text style={styles.fastingLabel}>
-						{formatTime(currentFast.remainingHours)} remaining
-					</Text>
-
-					<View style={[styles.progressBar, { width: "80%", marginTop: 16 }]}>
-						<View
-							style={[
-								styles.progressFill,
-								{
-									width: `${currentFast.progress}%`,
-									backgroundColor: theme.primary,
-								},
-							]}
-						/>
-					</View>
-
-					<TouchableOpacity
-						style={[
-							styles.addButton,
-							{ marginTop: 20, width: 200, backgroundColor: "#F44336" },
-						]}
-						onPress={handleEndFast}
-					>
-						<Text style={styles.addButtonText}>End Fast</Text>
-					</TouchableOpacity>
-				</View>
-			) : (
-				<>
-					<View style={styles.card}>
-						<Text style={styles.cardTitle}>Start Intermittent Fasting</Text>
-						<Text style={{ color: theme.textSecondary, marginBottom: 16 }}>
-							Select a fasting protocol to begin
+						{/* Status Text */}
+						<Text
+							style={{
+								color: waterProgress >= 100 ? theme.success : theme.textMuted,
+								fontSize: 13,
+								fontWeight: "600",
+								marginTop: 12,
+							}}
+						>
+							{waterProgress >= 100
+								? "🎉 Goal Achieved!"
+								: `${(remainingWater / 1000).toFixed(2)}L remaining`}
 						</Text>
 
+						{/* Action Buttons */}
 						<View
 							style={{
 								flexDirection: "row",
-								flexWrap: "wrap",
-								marginHorizontal: -4,
+								gap: 12,
+								marginTop: 20,
+								width: "100%",
 							}}
 						>
-							{FASTING_PRESETS.slice(0, 4).map((preset) => (
-								<TouchableOpacity
-									key={preset.type}
-									style={[
-										styles.fastingPreset,
-										selectedFastingType === preset.type &&
-											styles.fastingPresetSelected,
-										{ width: (width - 64) / 2 - 8, marginBottom: 8 },
-									]}
-									onPress={() => setSelectedFastingType(preset.type)}
+							<TouchableOpacity
+								style={{
+									flex: 1,
+									paddingVertical: 12,
+									paddingHorizontal: 16,
+									backgroundColor: theme.primary + "15",
+									borderRadius: 12,
+									flexDirection: "row",
+									alignItems: "center",
+									justifyContent: "center",
+									gap: 6,
+								}}
+								onPress={() => setShowWaterGoalModal(true)}
+							>
+								<Ionicons name="flag" size={18} color={theme.primary} />
+								<Text
+									style={{
+										color: theme.primary,
+										fontSize: 14,
+										fontWeight: "600",
+									}}
 								>
-									<Text style={styles.fastingPresetLabel}>{preset.label}</Text>
-									<Text style={styles.fastingPresetHours}>
-										{preset.hours}h fast
-									</Text>
-								</TouchableOpacity>
-							))}
+									Set Goal
+								</Text>
+							</TouchableOpacity>
+							<TouchableOpacity
+								onPress={handleResetWater}
+								disabled={todayWater === 0}
+								style={{
+									flex: 1,
+									paddingVertical: 12,
+									paddingHorizontal: 16,
+									backgroundColor:
+										todayWater === 0 ? theme.surface : theme.error + "15",
+									borderRadius: 12,
+									flexDirection: "row",
+									alignItems: "center",
+									justifyContent: "center",
+									gap: 6,
+									opacity: todayWater === 0 ? 0.5 : 1,
+								}}
+							>
+								<Ionicons
+									name="refresh"
+									size={18}
+									color={todayWater === 0 ? theme.textMuted : theme.error}
+								/>
+								<Text
+									style={{
+										color: todayWater === 0 ? theme.textMuted : theme.error,
+										fontSize: 14,
+										fontWeight: "600",
+									}}
+								>
+									Reset
+								</Text>
+							</TouchableOpacity>
 						</View>
-
-						<TouchableOpacity
-							style={[styles.addButton, { marginTop: 16 }]}
-							onPress={handleStartFast}
-						>
-							<Text style={styles.addButtonText}>Start Fast</Text>
-						</TouchableOpacity>
-					</View>
-
-					{/* Fasting History */}
-					<Text style={styles.sectionTitle}>Fasting History</Text>
-					{store.getFastingHistory().length === 0 ? (
-						<View style={styles.emptyState}>
-							<Ionicons
-								name="time-outline"
-								size={48}
-								color={theme.textSecondary}
-							/>
-							<Text style={styles.emptyStateText}>No completed fasts yet</Text>
-						</View>
-					) : (
-						<View style={styles.card}>
-							{store
-								.getFastingHistory()
-								.slice(0, 5)
-								.map((fast: any, index) => {
-									const startTime =
-										fast.startTime instanceof Date
-											? fast.startTime
-											: new Date(fast.startTime);
-									return (
-										<View
-											key={fast.id}
-											style={[
-												styles.mealLogItem,
-												index ===
-													Math.min(4, store.getFastingHistory().length - 1) && {
-													borderBottomWidth: 0,
-												},
-											]}
-										>
-											<View style={styles.mealLogInfo}>
-												<Text style={styles.mealLogTitle}>
-													{(
-														fast.type ||
-														fast.fastingType ||
-														"Custom"
-													).toUpperCase()}{" "}
-													Fast
-												</Text>
-												<Text style={styles.mealLogSubtitle}>
-													{startTime.toLocaleDateString()}
-												</Text>
-											</View>
-											<Text style={styles.mealLogCalories}>
-												{(
-													fast.actualDuration ||
-													fast.plannedDuration ||
-													0
-												).toFixed(1)}
-												h
-											</Text>
-										</View>
-									);
-								})}
-						</View>
-					)}
-				</>
-			)}
-
-			{/* Fasting Benefits */}
-			<View style={[styles.card, { marginTop: 16 }]}>
-				<Text style={styles.cardTitle}>✨ Benefits of Fasting</Text>
-				<Text style={{ color: theme.textSecondary, lineHeight: 20 }}>
-					• Improved insulin sensitivity{"\n"}• Enhanced autophagy (cell
-					cleanup){"\n"}• Mental clarity and focus{"\n"}• Weight management
-					{"\n"}• Reduced inflammation
-				</Text>
-			</View>
-		</ScrollView>
-	);
-
-	const renderInsightsTab = () => (
-		<ScrollView showsVerticalScrollIndicator={false}>
-			{/* Weekly Summary */}
-			<View style={styles.card}>
-				<Text style={styles.cardTitle}>📊 Weekly Average</Text>
-				<View style={styles.macroRow}>
-					<View style={styles.macroItem}>
-						<Text style={styles.macroValue}>
-							{store.getWeeklyAverages().totalCalories}
-						</Text>
-						<Text style={styles.macroLabel}>Calories/day</Text>
-					</View>
-					<View style={styles.macroItem}>
-						<Text style={styles.macroValue}>
-							{store.getWeeklyAverages().totalProtein}g
-						</Text>
-						<Text style={styles.macroLabel}>Protein</Text>
-					</View>
-					<View style={styles.macroItem}>
-						<Text style={styles.macroValue}>
-							{(store.getWeeklyAverages().totalWater / 1000).toFixed(1)}L
-						</Text>
-						<Text style={styles.macroLabel}>Water</Text>
 					</View>
 				</View>
-			</View>
 
-			{/* Macro Breakdown */}
-			<View style={styles.card}>
-				<Text style={styles.cardTitle}>🥧 Today's Macro Split</Text>
-				<View style={styles.macroRow}>
-					<View style={styles.macroItem}>
-						<View
-							style={{
-								width: 50,
-								height: 50,
-								borderRadius: 25,
-								backgroundColor: "#4CAF50",
-								alignItems: "center",
-								justifyContent: "center",
-							}}
-						>
-							<Text style={{ color: "#FFF", fontWeight: "700" }}>
-								{macroBreakdown.protein}%
-							</Text>
-						</View>
-						<Text style={styles.macroLabel}>Protein</Text>
+				{/* Quick Add Card */}
+				<View style={styles.card}>
+					<Text style={styles.cardTitle}>Quick Add Water</Text>
+					<View
+						style={{
+							flexDirection: "row",
+							flexWrap: "wrap",
+							gap: 12,
+							marginTop: 12,
+						}}
+					>
+						{WATER_AMOUNTS.map((item) => (
+							<TouchableOpacity
+								key={item.amount}
+								style={{
+									flex: 1,
+									minWidth: "45%",
+									backgroundColor: theme.primary + "10",
+									borderRadius: 12,
+									paddingVertical: 16,
+									paddingHorizontal: 12,
+									alignItems: "center",
+									gap: 8,
+								}}
+								onPress={() => handleLogWater(item.amount)}
+							>
+								<Ionicons
+									name={item.icon as any}
+									size={28}
+									color={theme.primary}
+								/>
+								<Text
+									style={{
+										color: theme.text,
+										fontSize: 16,
+										fontWeight: "700",
+									}}
+								>
+									{item.amount}ml
+								</Text>
+								<Text
+									style={{
+										color: theme.textMuted,
+										fontSize: 12,
+										fontWeight: "500",
+									}}
+								>
+									{item.label}
+								</Text>
+							</TouchableOpacity>
+						))}
 					</View>
-					<View style={styles.macroItem}>
-						<View
-							style={{
-								width: 50,
-								height: 50,
-								borderRadius: 25,
-								backgroundColor: "#2196F3",
-								alignItems: "center",
-								justifyContent: "center",
-							}}
-						>
-							<Text style={{ color: "#FFF", fontWeight: "700" }}>
-								{macroBreakdown.carbs}%
-							</Text>
-						</View>
-						<Text style={styles.macroLabel}>Carbs</Text>
-					</View>
-					<View style={styles.macroItem}>
-						<View
-							style={{
-								width: 50,
-								height: 50,
-								borderRadius: 25,
-								backgroundColor: "#FF9800",
-								alignItems: "center",
-								justifyContent: "center",
-							}}
-						>
-							<Text style={{ color: "#FFF", fontWeight: "700" }}>
-								{macroBreakdown.fat}%
-							</Text>
-						</View>
-						<Text style={styles.macroLabel}>Fat</Text>
+
+					{/* Minus Buttons for Undo */}
+					<View
+						style={{
+							flexDirection: "row",
+							flexWrap: "wrap",
+							gap: 12,
+							marginTop: 12,
+						}}
+					>
+						{WATER_AMOUNTS.map((item) => (
+							<TouchableOpacity
+								key={`minus-${item.amount}`}
+								style={{
+									flex: 1,
+									minWidth: "45%",
+									backgroundColor:
+										todayWater === 0 ? theme.surface : theme.error + "10",
+									borderRadius: 12,
+									paddingVertical: 12,
+									paddingHorizontal: 12,
+									alignItems: "center",
+									flexDirection: "row",
+									justifyContent: "center",
+									gap: 6,
+									opacity: todayWater === 0 ? 0.5 : 1,
+								}}
+								onPress={() => handleLogWater(-item.amount)}
+								disabled={todayWater === 0}
+							>
+								<Ionicons
+									name="remove-circle"
+									size={20}
+									color={todayWater === 0 ? theme.textMuted : theme.error}
+								/>
+								<Text
+									style={{
+										color: todayWater === 0 ? theme.textMuted : theme.error,
+										fontSize: 14,
+										fontWeight: "600",
+									}}
+								>
+									-{item.amount}ml
+								</Text>
+							</TouchableOpacity>
+						))}
 					</View>
 				</View>
-			</View>
 
-			{/* Insights */}
-			<Text style={styles.sectionTitle}>💡 Insights & Tips</Text>
-			{insights.length === 0 ? (
-				<View style={styles.emptyState}>
-					<Ionicons name="bulb-outline" size={48} color={theme.textSecondary} />
-					<Text style={styles.emptyStateText}>
-						Log more meals for personalized insights
+				{/* Hydration Tips */}
+				<View style={styles.card}>
+					<Text style={styles.cardTitle}>💡 Hydration Tips</Text>
+					<Text style={{ color: theme.textSecondary, lineHeight: 22 }}>
+						• Drink water first thing in the morning{"\n"}• Keep a water bottle
+						at your desk{"\n"}• Drink before you feel thirsty{"\n"}• Add lemon
+						or cucumber for flavor{"\n"}• Increase intake during exercise
 					</Text>
 				</View>
-			) : (
-				insights.map((insight, index) => (
-					<View key={index} style={styles.insightCard}>
-						<View
-							style={[
-								styles.insightIcon,
-								{
-									backgroundColor:
-										insight.type === "success"
-											? "#4CAF50"
-											: insight.type === "warning"
-											? "#FF9800"
-											: insight.type === "tip"
-											? "#9C27B0"
-											: "#2196F3",
-								},
-							]}
-						>
-							<Ionicons
-								name={
-									(insight.icon as any) ||
-									(insight.type === "success"
-										? "checkmark"
-										: insight.type === "warning"
-										? "alert"
-										: "bulb")
-								}
-								size={20}
-								color="#FFF"
-							/>
-						</View>
-						<View style={styles.insightContent}>
-							<Text style={styles.insightTitle}>{insight.title}</Text>
-							<Text style={styles.insightMessage}>{insight.message}</Text>
-						</View>
-					</View>
-				))
-			)}
-		</ScrollView>
-	);
+			</ScrollView>
+		);
+	};
 
 	// ============================================
 	// MODALS
@@ -1624,64 +1714,190 @@ export default function NutriPlan({ theme }: NutriPlanProps) {
 						</TouchableOpacity>
 					</View>
 
-					<ScrollView style={styles.modalBody}>
+					<ScrollView
+						style={styles.modalBody}
+						showsVerticalScrollIndicator={false}
+						contentContainerStyle={{ paddingBottom: 100 }}
+					>
 						{/* Stool Type Selection */}
-						<Text style={styles.sectionTitle}>Stool Type (Bristol Scale)</Text>
+						<Text style={[styles.sectionTitle, { marginBottom: 4 }]}>
+							Bristol Stool Scale
+						</Text>
+						<Text
+							style={{
+								fontSize: 12,
+								color: theme.textMuted,
+								marginBottom: 16,
+								lineHeight: 16,
+							}}
+						>
+							Select the type that best matches your stool
+						</Text>
 						<View style={styles.stoolTypeGrid}>
-							{([1, 2, 3, 4, 5, 6, 7] as BristolStoolType[]).map((type) => (
-								<TouchableOpacity
-									key={type}
-									style={[
-										styles.stoolTypeItem,
-										selectedStoolType === type && styles.stoolTypeSelected,
-									]}
-									onPress={() => setSelectedStoolType(type)}
-								>
-									<Text style={{ fontSize: 24 }}>
-										{type <= 2 ? "🔴" : type <= 4 ? "🟢" : "🟡"}
-									</Text>
-									<Text style={styles.stoolTypeText}>Type {type}</Text>
-								</TouchableOpacity>
-							))}
+							{([1, 2, 3, 4, 5, 6, 7] as BristolStoolType[]).map((type) => {
+								const info = BRISTOL_SCALE_INFO[type];
+								const isSelected = selectedStoolType === type;
+								return (
+									<TouchableOpacity
+										key={type}
+										style={[
+											styles.stoolTypeItem,
+											isSelected && styles.stoolTypeSelected,
+											{
+												borderWidth: 2,
+												borderColor: isSelected
+													? theme.primary
+													: info.health === "good"
+													? theme.success + "30"
+													: info.health === "concerning"
+													? theme.warning + "30"
+													: theme.error + "30",
+												backgroundColor: isSelected
+													? theme.primary + "20"
+													: theme.surface,
+											},
+										]}
+										onPress={() => setSelectedStoolType(type)}
+									>
+										<Text style={{ fontSize: 28, marginBottom: 4 }}>
+											{info.emoji}
+										</Text>
+										<Text
+											style={[
+												styles.stoolTypeText,
+												{ fontWeight: "700", marginBottom: 2 },
+											]}
+										>
+											Type {type}
+										</Text>
+										<Text
+											style={{
+												fontSize: 10,
+												color: theme.textMuted,
+												textAlign: "center",
+												lineHeight: 12,
+											}}
+											numberOfLines={2}
+										>
+											{info.description}
+										</Text>
+									</TouchableOpacity>
+								);
+							})}
 						</View>
 
-						{/* Symptoms */}
-						<Text style={styles.sectionTitle}>Symptoms</Text>
-						<View style={{ flexDirection: "row", flexWrap: "wrap" }}>
-							{GUT_SYMPTOMS.map((symptom) => (
-								<TouchableOpacity
-									key={symptom.id}
-									style={[
-										styles.symptomChip,
-										selectedSymptoms.includes(symptom.id) &&
-											styles.symptomChipSelected,
-									]}
-									onPress={() => {
-										if (selectedSymptoms.includes(symptom.id)) {
-											setSelectedSymptoms(
-												selectedSymptoms.filter((s) => s !== symptom.id)
-											);
-										} else {
-											setSelectedSymptoms([...selectedSymptoms, symptom.id]);
-										}
+						{/* Selected Type Info */}
+						{selectedStoolType && (
+							<View
+								style={{
+									backgroundColor:
+										BRISTOL_SCALE_INFO[selectedStoolType].health === "good"
+											? theme.success + "15"
+											: BRISTOL_SCALE_INFO[selectedStoolType].health ===
+											  "concerning"
+											? theme.warning + "15"
+											: theme.error + "15",
+									padding: 12,
+									borderRadius: 12,
+									marginTop: 12,
+									borderWidth: 1,
+									borderColor:
+										BRISTOL_SCALE_INFO[selectedStoolType].health === "good"
+											? theme.success + "30"
+											: BRISTOL_SCALE_INFO[selectedStoolType].health ===
+											  "concerning"
+											? theme.warning + "30"
+											: theme.error + "30",
+								}}
+							>
+								<Text
+									style={{
+										fontSize: 12,
+										color:
+											BRISTOL_SCALE_INFO[selectedStoolType].health === "good"
+												? theme.success
+												: BRISTOL_SCALE_INFO[selectedStoolType].health ===
+												  "concerning"
+												? theme.warning
+												: theme.error,
+										fontWeight: "600",
 									}}
 								>
-									<Ionicons
-										name={symptom.icon as any}
-										size={16}
-										color={
-											selectedSymptoms.includes(symptom.id)
-												? theme.primary
-												: theme.textSecondary
-										}
-									/>
-									<Text style={styles.symptomChipText}>{symptom.label}</Text>
-								</TouchableOpacity>
-							))}
+									{BRISTOL_SCALE_INFO[selectedStoolType].health === "good"
+										? "✓ Healthy stool type"
+										: BRISTOL_SCALE_INFO[selectedStoolType].health ===
+										  "concerning"
+										? "⚠ May indicate constipation or diarrhea"
+										: "⚠ Consult a healthcare provider if persistent"}
+								</Text>
+							</View>
+						)}
+
+						{/* Symptoms */}
+						<Text
+							style={[styles.sectionTitle, { marginTop: 24, marginBottom: 12 }]}
+						>
+							Symptoms (Optional)
+						</Text>
+						<View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+							{GUT_SYMPTOMS.map((symptom) => {
+								const isSelected = selectedSymptoms.includes(symptom.id);
+								return (
+									<TouchableOpacity
+										key={symptom.id}
+										style={[
+											styles.symptomChip,
+											{
+												backgroundColor: isSelected
+													? theme.primary + "20"
+													: theme.surface,
+												borderWidth: 1.5,
+												borderColor: isSelected ? theme.primary : theme.border,
+											},
+										]}
+										onPress={() => {
+											if (isSelected) {
+												setSelectedSymptoms(
+													selectedSymptoms.filter((s) => s !== symptom.id)
+												);
+											} else {
+												setSelectedSymptoms([...selectedSymptoms, symptom.id]);
+											}
+										}}
+									>
+										<Ionicons
+											name={symptom.icon as any}
+											size={16}
+											color={isSelected ? theme.primary : theme.textSecondary}
+										/>
+										<Text
+											style={[
+												styles.symptomChipText,
+												{ color: isSelected ? theme.primary : theme.text },
+											]}
+										>
+											{symptom.label}
+										</Text>
+									</TouchableOpacity>
+								);
+							})}
 						</View>
 
 						{/* Digestion Rating */}
-						<Text style={styles.sectionTitle}>Digestion Rating</Text>
+						<Text
+							style={[styles.sectionTitle, { marginTop: 24, marginBottom: 4 }]}
+						>
+							Digestion Rating
+						</Text>
+						<Text
+							style={{
+								fontSize: 11,
+								color: theme.textMuted,
+								marginBottom: 12,
+							}}
+						>
+							How well did you digest your last meal?
+						</Text>
 						<View style={styles.ratingRow}>
 							{[1, 2, 3, 4, 5].map((rating) => (
 								<TouchableOpacity
@@ -1704,9 +1920,34 @@ export default function NutriPlan({ theme }: NutriPlanProps) {
 								</TouchableOpacity>
 							))}
 						</View>
+						<View
+							style={{
+								flexDirection: "row",
+								justifyContent: "space-between",
+								marginTop: 6,
+							}}
+						>
+							<Text style={{ fontSize: 10, color: theme.textMuted }}>Poor</Text>
+							<Text style={{ fontSize: 10, color: theme.textMuted }}>
+								Excellent
+							</Text>
+						</View>
 
 						{/* Energy Level */}
-						<Text style={styles.sectionTitle}>Energy Level</Text>
+						<Text
+							style={[styles.sectionTitle, { marginTop: 24, marginBottom: 4 }]}
+						>
+							Energy Level
+						</Text>
+						<Text
+							style={{
+								fontSize: 11,
+								color: theme.textMuted,
+								marginBottom: 12,
+							}}
+						>
+							How energetic do you feel?
+						</Text>
 						<View style={styles.ratingRow}>
 							{[1, 2, 3, 4, 5].map((level) => (
 								<TouchableOpacity
@@ -1728,11 +1969,29 @@ export default function NutriPlan({ theme }: NutriPlanProps) {
 								</TouchableOpacity>
 							))}
 						</View>
+						<View
+							style={{
+								flexDirection: "row",
+								justifyContent: "space-between",
+								marginTop: 6,
+							}}
+						>
+							<Text style={{ fontSize: 10, color: theme.textMuted }}>Low</Text>
+							<Text style={{ fontSize: 10, color: theme.textMuted }}>High</Text>
+						</View>
 
 						{/* Notes */}
+						<Text
+							style={[styles.sectionTitle, { marginTop: 24, marginBottom: 8 }]}
+						>
+							Additional Notes (Optional)
+						</Text>
 						<TextInput
-							style={[styles.searchInput, { marginTop: 16 }]}
-							placeholder="Additional notes..."
+							style={[
+								styles.searchInput,
+								{ height: 80, textAlignVertical: "top", paddingTop: 12 },
+							]}
+							placeholder="Any additional observations or notes..."
 							placeholderTextColor={theme.textSecondary}
 							value={gutNotes}
 							onChangeText={setGutNotes}
@@ -1741,7 +2000,7 @@ export default function NutriPlan({ theme }: NutriPlanProps) {
 
 						{/* Log Button */}
 						<TouchableOpacity
-							style={styles.addButton}
+							style={[styles.addButton, { marginTop: 24 }]}
 							onPress={handleLogGutHealth}
 						>
 							<Text style={styles.addButtonText}>Log Gut Health</Text>
@@ -1757,7 +2016,12 @@ export default function NutriPlan({ theme }: NutriPlanProps) {
 	// ============================================
 
 	return (
-		<SafeAreaView style={styles.container} edges={["left", "right"]}>
+		<View style={styles.container}>
+			<StatusBar
+				barStyle={isDark ? "light-content" : "dark-content"}
+				backgroundColor={theme.background}
+			/>
+
 			{/* Header */}
 			<View style={styles.header}>
 				<Text style={styles.headerTitle}>🍎 NutriPlan</Text>
@@ -1822,14 +2086,517 @@ export default function NutriPlan({ theme }: NutriPlanProps) {
 			<View style={styles.content}>
 				{activeSubTab === "log" && renderMealLogTab()}
 				{activeSubTab === "hydration" && renderHydrationTab()}
-				{activeSubTab === "gut" && renderGutHealthTab()}
-				{activeSubTab === "fasting" && renderFastingTab()}
-				{activeSubTab === "insights" && renderInsightsTab()}
+				{activeSubTab === "gut" && (
+					<GutHealthTab
+						theme={theme}
+						store={store}
+						styles={styles}
+						onLogPress={() => setShowGutLogModal(true)}
+					/>
+				)}
+				{activeSubTab === "fasting" && (
+					<FastingTab
+						theme={theme}
+						store={store}
+						styles={styles}
+						currentFast={currentFast}
+						formatTime={formatTime}
+						selectedFastingType={selectedFastingType}
+						setSelectedFastingType={setSelectedFastingType}
+						customFastingHours={customFastingHours}
+						setCustomFastingHours={setCustomFastingHours}
+						handleStartFast={handleStartFast}
+						handleEndFast={handleEndFast}
+					/>
+				)}
+				{activeSubTab === "insights" && (
+					<InsightsTab
+						theme={theme}
+						store={store}
+						styles={styles}
+						macroBreakdown={macroBreakdown}
+						insights={insights}
+					/>
+				)}
 			</View>
 
 			{/* Modals */}
 			{renderAddMealModal()}
 			{renderGutHealthModal()}
-		</SafeAreaView>
+
+			{/* Goal Setup Modal */}
+			<Modal
+				visible={showGoalSetupModal}
+				transparent
+				animationType="slide"
+				onRequestClose={() => setShowGoalSetupModal(false)}
+			>
+				<View style={styles.modalOverlay}>
+					<View style={styles.modalContent}>
+						<View style={styles.modalHeader}>
+							<Text style={styles.modalTitle}>Set Nutrition Goals</Text>
+							<TouchableOpacity onPress={() => setShowGoalSetupModal(false)}>
+								<Ionicons name="close" size={24} color={theme.text} />
+							</TouchableOpacity>
+						</View>
+
+						<ScrollView style={styles.modalBody}>
+							<Text style={styles.sectionTitle}>What's your goal?</Text>
+
+							{[
+								{
+									id: "weight_loss",
+									label: "💪 Lose Weight",
+									desc: "Calorie deficit for fat loss",
+								},
+								{
+									id: "maintenance",
+									label: "⚖️ Maintenance",
+									desc: "Maintain current weight",
+								},
+								{
+									id: "muscle_gain",
+									label: "🏋️ Gain Muscle",
+									desc: "Calorie surplus for muscle growth",
+								},
+							].map((goal) => {
+								const preview = calculatePreviewGoals(goal.id);
+								return (
+									<TouchableOpacity
+										key={goal.id}
+										style={[
+											styles.goalCard,
+											selectedGoal === goal.id && styles.goalCardSelected,
+										]}
+										onPress={() => setSelectedGoal(goal.id)}
+									>
+										<View style={{ flex: 1 }}>
+											<Text style={styles.goalLabel}>{goal.label}</Text>
+											<Text style={styles.goalDesc}>{goal.desc}</Text>
+
+											{/* Preview Macros */}
+											<View
+												style={{
+													flexDirection: "row",
+													marginTop: 8,
+													gap: 12,
+													flexWrap: "wrap",
+												}}
+											>
+												<View
+													style={{
+														backgroundColor: theme.primary + "15",
+														paddingHorizontal: 8,
+														paddingVertical: 4,
+														borderRadius: 6,
+													}}
+												>
+													<Text
+														style={{
+															fontSize: 11,
+															color: theme.primary,
+															fontWeight: "600",
+														}}
+													>
+														{preview.calories} kcal
+													</Text>
+												</View>
+												<View
+													style={{
+														backgroundColor: theme.success + "15",
+														paddingHorizontal: 8,
+														paddingVertical: 4,
+														borderRadius: 6,
+													}}
+												>
+													<Text
+														style={{
+															fontSize: 11,
+															color: theme.success,
+															fontWeight: "600",
+														}}
+													>
+														P: {preview.protein}g
+													</Text>
+												</View>
+												<View
+													style={{
+														backgroundColor: theme.warning + "15",
+														paddingHorizontal: 8,
+														paddingVertical: 4,
+														borderRadius: 6,
+													}}
+												>
+													<Text
+														style={{
+															fontSize: 11,
+															color: theme.warning,
+															fontWeight: "600",
+														}}
+													>
+														C: {preview.carbs}g
+													</Text>
+												</View>
+												<View
+													style={{
+														backgroundColor: theme.accent + "15",
+														paddingHorizontal: 8,
+														paddingVertical: 4,
+														borderRadius: 6,
+													}}
+												>
+													<Text
+														style={{
+															fontSize: 11,
+															color: theme.accent,
+															fontWeight: "600",
+														}}
+													>
+														F: {preview.fat}g
+													</Text>
+												</View>
+											</View>
+										</View>
+
+										{selectedGoal === goal.id && (
+											<Ionicons
+												name="checkmark-circle"
+												size={24}
+												color={theme.primary}
+												style={{ marginLeft: 12 }}
+											/>
+										)}
+									</TouchableOpacity>
+								);
+							})}
+
+							<View style={{ flexDirection: "row", gap: 12, marginTop: 20 }}>
+								<TouchableOpacity
+									style={[
+										styles.modalButton,
+										{ backgroundColor: theme.surface, flex: 1 },
+									]}
+									onPress={() => {
+										setShowGoalSetupModal(false);
+										setShowCalorieGoalModal(true);
+									}}
+								>
+									<Text style={{ color: theme.text, fontWeight: "600" }}>
+										Manual
+									</Text>
+								</TouchableOpacity>
+								<TouchableOpacity
+									style={[
+										styles.modalButton,
+										{ backgroundColor: theme.primary, flex: 1 },
+									]}
+									onPress={handleCompleteGoalSetup}
+								>
+									<Text style={{ color: "#FFF", fontWeight: "600" }}>
+										Continue
+									</Text>
+								</TouchableOpacity>
+							</View>
+						</ScrollView>
+					</View>
+				</View>
+			</Modal>
+
+			{/* Water Goal Modal */}
+			<Modal
+				visible={showWaterGoalModal}
+				transparent
+				animationType="slide"
+				onRequestClose={() => setShowWaterGoalModal(false)}
+			>
+				<View style={styles.modalOverlay}>
+					<View style={styles.modalContent}>
+						<View style={styles.modalHeader}>
+							<Text style={styles.modalTitle}>Set Daily Water Goal</Text>
+							<TouchableOpacity onPress={() => setShowWaterGoalModal(false)}>
+								<Ionicons name="close" size={24} color={theme.text} />
+							</TouchableOpacity>
+						</View>
+
+						<ScrollView
+							style={styles.modalBody}
+							showsVerticalScrollIndicator={false}
+						>
+							<Text
+								style={{
+									fontSize: 13,
+									color: theme.textSecondary,
+									marginBottom: 20,
+									lineHeight: 18,
+								}}
+							>
+								Set your daily water intake goal. Recommended: 2-3 liters for
+								most adults.
+							</Text>
+
+							{/* Preset Goals */}
+							<Text style={styles.inputLabelText}>Quick Presets</Text>
+							<View
+								style={{
+									flexDirection: "row",
+									flexWrap: "wrap",
+									gap: 10,
+									marginBottom: 20,
+								}}
+							>
+								{[
+									{ amount: 2000, label: "2L (Standard)" },
+									{ amount: 2500, label: "2.5L (Active)" },
+									{ amount: 3000, label: "3L (Athlete)" },
+									{ amount: 3500, label: "3.5L (Intense)" },
+								].map((preset) => (
+									<TouchableOpacity
+										key={preset.amount}
+										style={{
+											flex: 1,
+											minWidth: "45%",
+											backgroundColor: theme.primary + "15",
+											paddingVertical: 14,
+											paddingHorizontal: 16,
+											borderRadius: 12,
+											alignItems: "center",
+											borderWidth: 2,
+											borderColor:
+												customWaterGoal === preset.amount.toString()
+													? theme.primary
+													: "transparent",
+										}}
+										onPress={() => setCustomWaterGoal(preset.amount.toString())}
+									>
+										<Text
+											style={{
+												color: theme.text,
+												fontWeight: "700",
+												fontSize: 16,
+												marginBottom: 2,
+											}}
+										>
+											{preset.amount}ml
+										</Text>
+										<Text
+											style={{
+												color: theme.textMuted,
+												fontSize: 11,
+												fontWeight: "500",
+											}}
+										>
+											{preset.label}
+										</Text>
+									</TouchableOpacity>
+								))}
+							</View>
+
+							{/* Custom Input */}
+							<Text style={styles.inputLabelText}>Custom Goal (ml)</Text>
+							<TextInput
+								style={styles.input}
+								placeholder="e.g., 2500"
+								placeholderTextColor={theme.textSecondary}
+								value={customWaterGoal}
+								onChangeText={setCustomWaterGoal}
+								keyboardType="numeric"
+							/>
+							<Text
+								style={{
+									fontSize: 11,
+									color: theme.textMuted,
+									marginTop: 6,
+									marginBottom: 20,
+								}}
+							>
+								💡 Typical range: 1500ml - 4000ml per day
+							</Text>
+
+							{/* Action Buttons */}
+							<View style={{ flexDirection: "row", gap: 12 }}>
+								<TouchableOpacity
+									style={{
+										flex: 1,
+										paddingVertical: 14,
+										paddingHorizontal: 16,
+										backgroundColor: theme.surface,
+										borderRadius: 12,
+										alignItems: "center",
+										borderWidth: 1,
+										borderColor: theme.border,
+									}}
+									onPress={() => {
+										setCustomWaterGoal("");
+										setShowWaterGoalModal(false);
+									}}
+								>
+									<Text style={{ color: theme.text, fontWeight: "600" }}>
+										Cancel
+									</Text>
+								</TouchableOpacity>
+								<TouchableOpacity
+									style={{
+										flex: 1,
+										paddingVertical: 14,
+										paddingHorizontal: 16,
+										backgroundColor: theme.primary,
+										borderRadius: 12,
+										alignItems: "center",
+									}}
+									onPress={handleSetWaterGoal}
+								>
+									<Text style={{ color: "#FFF", fontWeight: "600" }}>
+										Set Goal
+									</Text>
+								</TouchableOpacity>
+							</View>
+						</ScrollView>
+					</View>
+				</View>
+			</Modal>
+
+			{/* Calorie Goal Modal */}
+			<Modal
+				visible={showCalorieGoalModal}
+				transparent
+				animationType="slide"
+				onRequestClose={() => setShowCalorieGoalModal(false)}
+			>
+				<View style={styles.modalOverlay}>
+					<View style={styles.modalContent}>
+						<View style={styles.modalHeader}>
+							<Text style={styles.modalTitle}>Set Daily Goals Manually</Text>
+							<TouchableOpacity onPress={() => setShowCalorieGoalModal(false)}>
+								<Ionicons name="close" size={24} color={theme.text} />
+							</TouchableOpacity>
+						</View>
+
+						<ScrollView style={styles.modalBody}>
+							<Text
+								style={{
+									fontSize: 13,
+									color: theme.textSecondary,
+									marginBottom: 16,
+									lineHeight: 18,
+								}}
+							>
+								Enter your custom daily nutrition targets. Macros will be
+								auto-calculated if left empty.
+							</Text>
+
+							{/* Calories */}
+							<View style={{ marginBottom: 16 }}>
+								<Text style={styles.inputLabelText}>Daily Calories *</Text>
+								<TextInput
+									style={styles.input}
+									placeholder="e.g., 2000"
+									placeholderTextColor={theme.textSecondary}
+									value={customCalories}
+									onChangeText={setCustomCalories}
+									keyboardType="numeric"
+								/>
+							</View>
+
+							{/* Protein */}
+							<View style={{ marginBottom: 16 }}>
+								<Text style={styles.inputLabelText}>Protein (g)</Text>
+								<TextInput
+									style={styles.input}
+									placeholder="e.g., 150"
+									placeholderTextColor={theme.textSecondary}
+									value={customProtein}
+									onChangeText={setCustomProtein}
+									keyboardType="numeric"
+								/>
+								<Text
+									style={{
+										fontSize: 11,
+										color: theme.textMuted,
+										marginTop: 4,
+									}}
+								>
+									Recommended: 1.6-2.2g per kg body weight
+								</Text>
+							</View>
+
+							{/* Carbs */}
+							<View style={{ marginBottom: 16 }}>
+								<Text style={styles.inputLabelText}>Carbohydrates (g)</Text>
+								<TextInput
+									style={styles.input}
+									placeholder="e.g., 200"
+									placeholderTextColor={theme.textSecondary}
+									value={customCarbs}
+									onChangeText={setCustomCarbs}
+									keyboardType="numeric"
+								/>
+								<Text
+									style={{
+										fontSize: 11,
+										color: theme.textMuted,
+										marginTop: 4,
+									}}
+								>
+									4 calories per gram
+								</Text>
+							</View>
+
+							{/* Fat */}
+							<View style={{ marginBottom: 20 }}>
+								<Text style={styles.inputLabelText}>Fat (g)</Text>
+								<TextInput
+									style={styles.input}
+									placeholder="e.g., 65"
+									placeholderTextColor={theme.textSecondary}
+									value={customFat}
+									onChangeText={setCustomFat}
+									keyboardType="numeric"
+								/>
+								<Text
+									style={{
+										fontSize: 11,
+										color: theme.textMuted,
+										marginTop: 4,
+									}}
+								>
+									9 calories per gram
+								</Text>
+							</View>
+
+							{/* Buttons */}
+							<View style={{ flexDirection: "row", gap: 12, marginTop: 8 }}>
+								<TouchableOpacity
+									style={[
+										styles.modalButton,
+										{
+											backgroundColor: theme.surface,
+											flex: 1,
+											borderWidth: 1,
+											borderColor: theme.border,
+										},
+									]}
+									onPress={() => setShowCalorieGoalModal(false)}
+								>
+									<Text style={{ color: theme.text, fontWeight: "600" }}>
+										Cancel
+									</Text>
+								</TouchableOpacity>
+								<TouchableOpacity
+									style={[
+										styles.modalButton,
+										{ backgroundColor: theme.primary, flex: 1 },
+									]}
+									onPress={handleSetCalorieGoal}
+								>
+									<Text style={{ color: "#FFF", fontWeight: "600" }}>
+										Set Goals
+									</Text>
+								</TouchableOpacity>
+							</View>
+						</ScrollView>
+					</View>
+				</View>
+			</Modal>
+		</View>
 	);
 }

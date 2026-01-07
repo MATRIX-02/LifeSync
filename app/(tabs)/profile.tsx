@@ -1,4 +1,5 @@
 import { MuscleBodyMap } from "@/src/components/muscle-map";
+import { supabase } from "@/src/config/supabase";
 import { useAuthStore } from "@/src/context/authStore";
 import { useHabitStore } from "@/src/context/habitStoreDB";
 import { Theme, useColors, useTheme } from "@/src/context/themeContext";
@@ -177,6 +178,56 @@ export default function ProfileScreen() {
 		}
 	}, [fitnessProfile]);
 
+	// Sync local fitness profile to database on mount
+	useEffect(() => {
+		const syncFitnessProfileToDB = async () => {
+			if (!user?.id || !fitnessProfile) return;
+
+			try {
+				// Check if profile exists in database
+				const { data: existingProfile } = await supabase
+					.from("fitness_profiles")
+					.select("id")
+					.eq("user_id", user.id)
+					.single();
+
+				if (!existingProfile) {
+					// Profile doesn't exist in DB but exists locally - sync it
+					console.log("Syncing local fitness profile to database...");
+
+					const dbData = {
+						user_id: user.id,
+						gender: fitnessProfile.gender,
+						height: fitnessProfile.height,
+						weight: fitnessProfile.weight,
+						age: fitnessProfile.age,
+						fitness_level: fitnessProfile.fitnessLevel,
+						goals: fitnessProfile.goals,
+						weekly_workout_goal: fitnessProfile.weeklyWorkoutGoal,
+						weight_unit: fitnessProfile.weightUnit || "kg",
+						distance_unit: fitnessProfile.distanceUnit || "km",
+						activity_level: "moderate",
+					};
+
+					const { error } = await supabase
+						.from("fitness_profiles")
+						// @ts-expect-error - Database types not yet generated
+						.insert(dbData);
+
+					if (error) {
+						console.error("Failed to sync fitness profile:", error);
+					} else {
+						console.log("Fitness profile synced to database successfully!");
+					}
+				}
+			} catch (err) {
+				console.error("Error syncing fitness profile:", err);
+			}
+		};
+
+		syncFitnessProfileToDB();
+	}, [user?.id, fitnessProfile]);
+
 	const pickImage = async () => {
 		// Request permission
 		const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -317,7 +368,7 @@ export default function ProfileScreen() {
 		}
 	};
 
-	const handleSaveFitness = () => {
+	const handleSaveFitness = async () => {
 		const fitnessData: FitnessProfile = {
 			gender,
 			height: parseFloat(height) || 170,
@@ -330,13 +381,84 @@ export default function ProfileScreen() {
 			distanceUnit: "km",
 		};
 
-		if (fitnessProfile) {
-			updateFitnessProfile(fitnessData);
-		} else {
-			setFitnessProfile(fitnessData);
+		try {
+			if (!user?.id) {
+				Alert.alert("Error", "User not authenticated");
+				return;
+			}
+
+			// Prepare data for database (activity_level is required in DB)
+			const dbData = {
+				user_id: user.id,
+				gender: fitnessData.gender,
+				height: fitnessData.height,
+				weight: fitnessData.weight,
+				age: fitnessData.age,
+				fitness_level: fitnessData.fitnessLevel,
+				goals: fitnessData.goals,
+				weekly_workout_goal: fitnessData.weeklyWorkoutGoal,
+				weight_unit: fitnessData.weightUnit,
+				distance_unit: fitnessData.distanceUnit,
+				activity_level: "moderate", // Default activity level for nutrition calculations
+			};
+
+			console.log("Saving fitness profile to database:", dbData);
+
+			// Check if profile exists
+			const { data: existingProfile } = await supabase
+				.from("fitness_profiles")
+				.select("id")
+				.eq("user_id", user.id)
+				.single();
+
+			if (existingProfile) {
+				// Update existing profile
+				const { error } = await supabase
+					.from("fitness_profiles")
+					// @ts-expect-error - Database types not yet generated
+					.update(dbData)
+					.eq("user_id", user.id);
+
+				if (error) {
+					console.error("Fitness profile update error:", error);
+					Alert.alert(
+						"Error",
+						error.message || "Failed to update fitness profile"
+					);
+					return;
+				}
+			} else {
+				// Insert new profile
+				const { error } = await supabase
+					.from("fitness_profiles")
+					// @ts-expect-error - Database types not yet generated
+					.insert(dbData);
+
+				if (error) {
+					console.error("Fitness profile insert error:", error);
+					Alert.alert(
+						"Error",
+						error.message || "Failed to create fitness profile"
+					);
+					return;
+				}
+			}
+
+			console.log("Fitness profile saved to database successfully");
+
+			// Update local state
+			if (fitnessProfile) {
+				updateFitnessProfile(fitnessData);
+			} else {
+				setFitnessProfile(fitnessData);
+			}
+
+			setIsEditing(false);
+			Alert.alert("Success", "Fitness profile updated!");
+		} catch (err: any) {
+			console.error("Fitness profile save error:", err);
+			Alert.alert("Error", err.message || "Failed to update fitness profile");
 		}
-		setIsEditing(false);
-		Alert.alert("Success", "Fitness profile updated!");
 	};
 
 	const toggleFitnessGoal = (goal: FitnessGoal) => {

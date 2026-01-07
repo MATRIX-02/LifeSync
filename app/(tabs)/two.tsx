@@ -2,18 +2,14 @@ import { useAuthStore } from "@/src/context/authStore";
 import { useFinanceStore } from "@/src/context/financeStoreDB";
 import { useHabitStore } from "@/src/context/habitStoreDB";
 import { ModuleType, useModuleStore } from "@/src/context/moduleContext";
+import { useStudyStore } from "@/src/context/studyStoreDB/index";
 import { Theme, useColors, useTheme } from "@/src/context/themeContext";
 import { useWorkoutStore } from "@/src/context/workoutStoreDB";
 import { NotificationService } from "@/src/services/notificationService";
 import {
 	deleteAllCloudData,
-	fetchFinanceFromCloud,
-	fetchWorkoutsFromCloud,
 	getSyncStatus,
-	syncFinanceToCloud,
 	SyncModule,
-	syncProfileToCloud,
-	syncWorkoutsToCloud,
 } from "@/src/services/syncService";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import * as DocumentPicker from "expo-document-picker";
@@ -45,6 +41,7 @@ export default function SettingsScreen() {
 	const habitStore = useHabitStore();
 	const workoutStore = useWorkoutStore();
 	const financeStore = useFinanceStore();
+	const studyStore = useStudyStore();
 	const moduleStore = useModuleStore();
 	const { user, isAdmin } = useAuthStore();
 
@@ -65,6 +62,7 @@ export default function SettingsScreen() {
 		habits_synced_at?: string;
 		workouts_synced_at?: string;
 		finance_synced_at?: string;
+		study_synced_at?: string;
 	}>({});
 
 	const styles = createStyles(theme);
@@ -103,73 +101,12 @@ export default function SettingsScreen() {
 			return;
 		}
 
-		// Habits are database-first - no sync needed
-		if (module === "habits") {
-			Alert.alert(
-				"Database-First",
-				"Habits are automatically saved to the database. No manual sync needed!"
-			);
-			return;
-		}
-
-		setIsSyncing(module);
-		try {
-			let result;
-
-			if (module === "workouts" || module === "all") {
-				result = await syncWorkoutsToCloud(user.id, {
-					fitnessProfile: workoutStore.fitnessProfile,
-					workoutPlans: workoutStore.workoutPlans,
-					workoutSessions: workoutStore.workoutSessions,
-					personalRecords: workoutStore.personalRecords,
-					bodyMeasurements: workoutStore.bodyMeasurements,
-					bodyWeights: workoutStore.bodyWeights,
-					customExercises: workoutStore.customExercises,
-				});
-				if (!result.success) throw new Error(result.error);
-			}
-
-			if (module === "finance" || module === "all") {
-				result = await syncFinanceToCloud(user.id, {
-					accounts: financeStore.accounts,
-					transactions: financeStore.transactions,
-					recurringTransactions: financeStore.recurringTransactions,
-					budgets: financeStore.budgets,
-					savingsGoals: financeStore.savingsGoals,
-					billReminders: financeStore.billReminders,
-					debts: financeStore.debts,
-					splitGroups: financeStore.splitGroups,
-					currency: financeStore.currency,
-				});
-				if (!result.success) throw new Error(result.error);
-			}
-
-			if (module === "profile") {
-				result = await syncProfileToCloud(user.id, {
-					name: habitStore.profile?.name || "",
-					email: habitStore.profile?.email,
-					bio: habitStore.profile?.bio,
-					avatar: habitStore.profile?.avatar,
-				});
-				if (!result.success) throw new Error(result.error);
-			}
-
-			// Refresh sync status
-			const newStatus = await getSyncStatus(user.id);
-			setSyncStatus(newStatus);
-
-			Alert.alert(
-				"Success",
-				`${module === "all" ? "All data" : module} synced to cloud!`
-			);
-		} catch (error: any) {
-			Alert.alert(
-				"Sync Failed",
-				error.message || "Failed to sync data to cloud."
-			);
-		} finally {
-			setIsSyncing(null);
-		}
+		// All modules are now database-first - no manual sync needed
+		Alert.alert(
+			"Database-First",
+			"Your data is automatically saved to the database in real-time. No manual sync needed!"
+		);
+		return;
 	};
 
 	const handleRestoreFromCloud = async (module: SyncModule) => {
@@ -181,11 +118,13 @@ export default function SettingsScreen() {
 			return;
 		}
 
-		// Habits are database-first - just refresh from DB
-		if (module === "habits") {
+		// Habits and Study are database-first - just refresh from DB
+		if (module === "habits" || module === "study") {
 			Alert.alert(
-				"Refresh Habits",
-				"This will refresh your habits from the database.",
+				"Refresh Data",
+				`This will refresh your ${
+					module === "habits" ? "habits" : "study"
+				} data from the database.`,
 				[
 					{ text: "Cancel", style: "cancel" },
 					{
@@ -193,12 +132,16 @@ export default function SettingsScreen() {
 						onPress: async () => {
 							setIsRestoring(module);
 							try {
-								await habitStore.refreshFromDatabase();
-								Alert.alert("Success", "Habits refreshed from database!");
+								if (module === "habits") {
+									await habitStore.refreshFromDatabase();
+								} else {
+									await studyStore.initialize(user.id);
+								}
+								Alert.alert("Success", "Data refreshed from database!");
 							} catch (error: any) {
 								Alert.alert(
 									"Refresh Failed",
-									error.message || "Failed to refresh habits."
+									error.message || "Failed to refresh data."
 								);
 							} finally {
 								setIsRestoring(null);
@@ -210,62 +153,31 @@ export default function SettingsScreen() {
 			return;
 		}
 
+		// All modules are database-first - just refresh from DB
 		Alert.alert(
-			"Restore from Cloud",
-			`This will replace your local ${module} data with the cloud backup. Continue?`,
+			"Refresh Data",
+			"This will refresh your data from the database.",
 			[
 				{ text: "Cancel", style: "cancel" },
 				{
-					text: "Restore",
+					text: "Refresh",
 					onPress: async () => {
 						setIsRestoring(module);
 						try {
-							if (module === "all") {
-								// Refresh habits from database
-								await habitStore.refreshFromDatabase();
-							}
-
 							if (module === "workouts" || module === "all") {
-								const { data, error } = await fetchWorkoutsFromCloud(user.id);
-								if (error) throw new Error(error);
-								if (data) {
-									workoutStore.importData({
-										fitnessProfile: data.fitnessProfile,
-										workoutPlans: data.workoutPlans,
-										workoutSessions: data.workoutSessions,
-										personalRecords: data.personalRecords,
-										bodyMeasurements: data.bodyMeasurements,
-										bodyWeights: data.bodyWeights,
-										customExercises: data.customExercises,
-									});
-								}
+								await workoutStore.initialize(user.id);
 							}
-
 							if (module === "finance" || module === "all") {
-								const { data, error } = await fetchFinanceFromCloud(user.id);
-								if (error) throw new Error(error);
-								if (data) {
-									financeStore.importData({
-										accounts: data.accounts,
-										transactions: data.transactions,
-										recurringTransactions: data.recurringTransactions,
-										budgets: data.budgets,
-										savingsGoals: data.savingsGoals,
-										billReminders: data.billReminders,
-										debts: data.debts,
-										splitGroups: data.splitGroups,
-									});
-								}
+								await financeStore.initialize(user.id);
 							}
+							// Note: Habits and Study have their own refresh methods
+							// and are not part of the SyncModule type
 
-							Alert.alert(
-								"Success",
-								`${module === "all" ? "All data" : module} restored from cloud!`
-							);
+							Alert.alert("Success", "Data refreshed from database!");
 						} catch (error: any) {
 							Alert.alert(
-								"Restore Failed",
-								error.message || "Failed to restore data from cloud."
+								"Refresh Failed",
+								error.message || "Failed to refresh data."
 							);
 						} finally {
 							setIsRestoring(null);
@@ -274,6 +186,7 @@ export default function SettingsScreen() {
 				},
 			]
 		);
+		return;
 	};
 
 	const handleDeleteCloudData = (module: SyncModule) => {
@@ -385,6 +298,18 @@ export default function SettingsScreen() {
 					splitGroups: financeStore.splitGroups,
 					currency: financeStore.currency,
 				};
+			} else if (module === "study") {
+				exportData.data = {
+					studyGoals: studyStore.studyGoals,
+					subjects: studyStore.subjects,
+					studySessions: studyStore.studySessions,
+					flashcardDecks: studyStore.flashcardDecks,
+					flashcards: studyStore.flashcards,
+					revisionSchedule: studyStore.revisionSchedule,
+					mockTests: studyStore.mockTests,
+					dailyPlans: studyStore.dailyPlans,
+					studyNotes: studyStore.studyNotes,
+				};
 			}
 
 			const jsonString = JSON.stringify(exportData, null, 2);
@@ -456,6 +381,8 @@ export default function SettingsScreen() {
 								workoutStore.importData(importData.data);
 							} else if (module === "finance") {
 								financeStore.importData(importData.data);
+							} else if (module === "study") {
+								studyStore.importData(importData.data);
 							}
 
 							Alert.alert("Success", `${module} data imported successfully!`);
@@ -478,7 +405,9 @@ export default function SettingsScreen() {
 				? "Habits"
 				: module === "workout"
 				? "Workout"
-				: "Finance";
+				: module === "finance"
+				? "Finance"
+				: "Study";
 
 		Alert.alert(
 			`Clear ${moduleName} Data`,
@@ -495,6 +424,8 @@ export default function SettingsScreen() {
 							workoutStore.clearAllData();
 						} else if (module === "finance") {
 							financeStore.clearAllData();
+						} else if (module === "study") {
+							studyStore.clearAllData();
 						}
 						Alert.alert("Success", `All ${moduleName} data has been cleared.`);
 					},
@@ -538,6 +469,17 @@ export default function SettingsScreen() {
 						debts: financeStore.debts,
 						splitGroups: financeStore.splitGroups,
 						currency: financeStore.currency,
+					},
+					study: {
+						studyGoals: studyStore.studyGoals,
+						subjects: studyStore.subjects,
+						studySessions: studyStore.studySessions,
+						flashcardDecks: studyStore.flashcardDecks,
+						flashcards: studyStore.flashcards,
+						revisionSchedule: studyStore.revisionSchedule,
+						mockTests: studyStore.mockTests,
+						dailyPlans: studyStore.dailyPlans,
+						studyNotes: studyStore.studyNotes,
 					},
 				},
 			};
@@ -619,6 +561,11 @@ export default function SettingsScreen() {
 								financeStore.importData(importData.data.finance);
 							}
 
+							// Import Study data
+							if (importData.data?.study) {
+								studyStore.importData(importData.data.study);
+							}
+
 							Alert.alert("Success", "Data imported successfully!");
 						} catch (error) {
 							console.error("Import error:", error);
@@ -639,7 +586,7 @@ export default function SettingsScreen() {
 	const handleClearAllData = () => {
 		Alert.alert(
 			"Clear All Data",
-			"This will permanently delete ALL your habits, workouts, and finance data. This action cannot be undone!",
+			"This will permanently delete ALL your habits, workouts, finance, and study data. This action cannot be undone!",
 			[
 				{ text: "Cancel", style: "cancel" },
 				{
@@ -650,6 +597,7 @@ export default function SettingsScreen() {
 						habitStore.clearAllData();
 						workoutStore.clearAllData();
 						financeStore.clearAllData();
+						studyStore.clearAllData();
 
 						Alert.alert("Success", "All data has been cleared.");
 					},
@@ -779,6 +727,27 @@ export default function SettingsScreen() {
 									value={moduleStore.isModuleEnabled("finance")}
 									onValueChange={(enabled) =>
 										moduleStore.toggleModule("finance", enabled)
+									}
+									trackColor={{ false: theme.border, true: theme.primary }}
+									thumbColor="#FFFFFF"
+								/>
+							}
+						/>
+
+						<View style={styles.divider} />
+
+						<SettingRow
+							icon="book"
+							iconColor="#06B6D4"
+							iconBg="#06B6D420"
+							label="Study Hub"
+							description="Track your study sessions and goals"
+							theme={theme}
+							rightElement={
+								<Switch
+									value={moduleStore.isModuleEnabled("study")}
+									onValueChange={(enabled) =>
+										moduleStore.toggleModule("study", enabled)
 									}
 									trackColor={{ false: theme.border, true: theme.primary }}
 									thumbColor="#FFFFFF"
@@ -1077,55 +1046,118 @@ export default function SettingsScreen() {
 
 								{/* Finance Cloud */}
 								{moduleStore.isModuleEnabled("finance") && (
-									<View style={styles.moduleRow}>
-										<View style={styles.moduleInfo}>
-											<Ionicons name="wallet" size={16} color={theme.warning} />
-											<View>
-												<Text style={styles.moduleLabel}>Finance</Text>
-												<Text style={styles.syncTimeText}>
-													{formatSyncTime(syncStatus.finance_synced_at)}
-												</Text>
+									<>
+										<View style={styles.thinDivider} />
+										<View style={styles.moduleRow}>
+											<View style={styles.moduleInfo}>
+												<Ionicons
+													name="wallet"
+													size={16}
+													color={theme.warning}
+												/>
+												<View>
+													<Text style={styles.moduleLabel}>Finance</Text>
+													<Text style={styles.syncTimeText}>
+														{formatSyncTime(syncStatus.finance_synced_at)}
+													</Text>
+												</View>
+											</View>
+											<View style={styles.moduleActions}>
+												<TouchableOpacity
+													style={styles.iconButton}
+													onPress={() => handleSyncToCloud("finance")}
+													disabled={isSyncing !== null}
+												>
+													{isSyncing === "finance" ? (
+														<ActivityIndicator
+															size="small"
+															color={theme.success}
+														/>
+													) : (
+														<Ionicons
+															name="cloud-upload"
+															size={18}
+															color={theme.success}
+														/>
+													)}
+												</TouchableOpacity>
+												<TouchableOpacity
+													style={styles.iconButton}
+													onPress={() => handleRestoreFromCloud("finance")}
+													disabled={isRestoring !== null}
+												>
+													{isRestoring === "finance" ? (
+														<ActivityIndicator
+															size="small"
+															color={theme.primary}
+														/>
+													) : (
+														<Ionicons
+															name="cloud-download"
+															size={18}
+															color={theme.primary}
+														/>
+													)}
+												</TouchableOpacity>
 											</View>
 										</View>
-										<View style={styles.moduleActions}>
-											<TouchableOpacity
-												style={styles.iconButton}
-												onPress={() => handleSyncToCloud("finance")}
-												disabled={isSyncing !== null}
-											>
-												{isSyncing === "finance" ? (
-													<ActivityIndicator
-														size="small"
-														color={theme.success}
-													/>
-												) : (
-													<Ionicons
-														name="cloud-upload"
-														size={18}
-														color={theme.success}
-													/>
-												)}
-											</TouchableOpacity>
-											<TouchableOpacity
-												style={styles.iconButton}
-												onPress={() => handleRestoreFromCloud("finance")}
-												disabled={isRestoring !== null}
-											>
-												{isRestoring === "finance" ? (
-													<ActivityIndicator
-														size="small"
-														color={theme.primary}
-													/>
-												) : (
-													<Ionicons
-														name="cloud-download"
-														size={18}
-														color={theme.primary}
-													/>
-												)}
-											</TouchableOpacity>
+									</>
+								)}
+
+								{/* Study Hub Cloud */}
+								{moduleStore.isModuleEnabled("study") && (
+									<>
+										<View style={styles.thinDivider} />
+										<View style={styles.moduleRow}>
+											<View style={styles.moduleInfo}>
+												<Ionicons name="book" size={16} color="#06B6D4" />
+												<View>
+													<Text style={styles.moduleLabel}>Study Hub</Text>
+													<Text style={styles.syncTimeText}>
+														{formatSyncTime(syncStatus.study_synced_at)}
+													</Text>
+												</View>
+											</View>
+											<View style={styles.moduleActions}>
+												<TouchableOpacity
+													style={styles.iconButton}
+													onPress={() => handleSyncToCloud("study")}
+													disabled={isSyncing !== null}
+												>
+													{isSyncing === "study" ? (
+														<ActivityIndicator
+															size="small"
+															color={theme.success}
+														/>
+													) : (
+														<Ionicons
+															name="cloud-upload"
+															size={18}
+															color={theme.success}
+														/>
+													)}
+												</TouchableOpacity>
+												<TouchableOpacity
+													style={styles.iconButton}
+													onPress={() => handleRestoreFromCloud("study")}
+													disabled={isRestoring !== null}
+												>
+													{isRestoring === "study" ? (
+														<ActivityIndicator
+															size="small"
+															color={theme.primary}
+														/>
+													) : (
+														<Ionicons
+															name="cloud-download"
+															size={18}
+															color={theme.primary}
+														/>
+													)}
+												</TouchableOpacity>
+											</View>
 										</View>
-									</View>
+									</>
 								)}
 							</View>
 						</>
@@ -1241,7 +1273,8 @@ export default function SettingsScreen() {
 					{/* Module-Specific Data */}
 					{(moduleStore.isModuleEnabled("habits") ||
 						moduleStore.isModuleEnabled("workout") ||
-						moduleStore.isModuleEnabled("finance")) && (
+						moduleStore.isModuleEnabled("finance") ||
+						moduleStore.isModuleEnabled("study")) && (
 						<View style={[styles.settingCard, { marginTop: 12 }]}>
 							<View style={styles.compactHeader}>
 								<Text style={styles.compactHeaderText}>By Module (Local)</Text>
@@ -1420,6 +1453,61 @@ export default function SettingsScreen() {
 										</TouchableOpacity>
 									</View>
 								</View>
+							)}
+
+							{/* Study Hub */}
+							{moduleStore.isModuleEnabled("study") && (
+								<>
+									<View style={styles.thinDivider} />
+									<View style={styles.moduleRow}>
+										<View style={styles.moduleInfo}>
+											<Ionicons name="book" size={16} color="#06B6D4" />
+											<Text style={styles.moduleLabel}>Study Hub</Text>
+										</View>
+										<View style={styles.moduleActions}>
+											<TouchableOpacity
+												style={styles.iconButton}
+												onPress={() => handleExportModuleData("study")}
+												disabled={isExporting !== null}
+											>
+												<Ionicons
+													name="download-outline"
+													size={18}
+													color={
+														isExporting === "study"
+															? theme.textMuted
+															: theme.primary
+													}
+												/>
+											</TouchableOpacity>
+											<TouchableOpacity
+												style={styles.iconButton}
+												onPress={() => handleImportModuleData("study")}
+												disabled={isImporting !== null}
+											>
+												<Ionicons
+													name="cloud-upload-outline"
+													size={18}
+													color={
+														isImporting === "study"
+															? theme.textMuted
+															: theme.accent
+													}
+												/>
+											</TouchableOpacity>
+											<TouchableOpacity
+												style={styles.iconButton}
+												onPress={() => handleClearModuleData("study")}
+											>
+												<Ionicons
+													name="trash-outline"
+													size={18}
+													color={theme.error}
+												/>
+											</TouchableOpacity>
+										</View>
+									</View>
+								</>
 							)}
 						</View>
 					)}

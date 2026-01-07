@@ -176,6 +176,13 @@ interface NutritionStore {
 
 	// Nutrition Profile
 	setNutritionProfile: (profile: Partial<NutritionProfile>) => Promise<void>;
+	setCustomWaterGoal: (goalMl: number) => Promise<void>;
+	setCustomCalorieGoal: (
+		calories: number,
+		protein?: number,
+		carbs?: number,
+		fat?: number
+	) => Promise<void>;
 	calculateDailyGoals: () => {
 		calories: number;
 		protein: number;
@@ -508,6 +515,25 @@ export const useNutritionStore = create<NutritionStore>()((set, get) => ({
 		}
 	},
 
+	setCustomWaterGoal: async (goalMl: number) => {
+		const { setNutritionProfile, nutritionProfile } = get();
+		await setNutritionProfile({
+			...nutritionProfile,
+			targetWater: goalMl,
+		});
+	},
+
+	setCustomCalorieGoal: async (calories, protein, carbs, fat) => {
+		const { setNutritionProfile, nutritionProfile } = get();
+		await setNutritionProfile({
+			...nutritionProfile,
+			targetCalories: calories,
+			targetProtein: protein,
+			targetCarbs: carbs,
+			targetFat: fat,
+		});
+	},
+
 	calculateDailyGoals: () => {
 		const { nutritionProfile } = get();
 
@@ -519,6 +545,17 @@ export const useNutritionStore = create<NutritionStore>()((set, get) => ({
 				carbs: 250,
 				fat: 65,
 				water: 2500,
+			};
+		}
+
+		// If custom goals are set, use them
+		if (nutritionProfile.targetCalories) {
+			return {
+				calories: nutritionProfile.targetCalories,
+				protein: nutritionProfile.targetProtein || 60,
+				carbs: nutritionProfile.targetCarbs || 250,
+				fat: nutritionProfile.targetFat || 65,
+				water: nutritionProfile.targetWater || 2500,
 			};
 		}
 

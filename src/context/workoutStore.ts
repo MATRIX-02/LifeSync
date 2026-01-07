@@ -96,6 +96,7 @@ interface WorkoutStore {
 	getStreakCount: () => number;
 
 	// Import/Export
+	initialize: (userId: string) => Promise<void>;
 	importData: (data: {
 		fitnessProfile?: FitnessProfile | null;
 		bodyMeasurements?: BodyMeasurements[];
@@ -593,6 +594,12 @@ export const useWorkoutStore = create<WorkoutStore>()(
 			getStreakCount: () => {
 				const stats = get().getWorkoutStats();
 				return stats.currentStreak;
+			},
+
+			// Initialize from database (stub for now - will be implemented with database-first)
+			initialize: async (userId: string) => {
+				// TODO: Load data from Supabase tables when fully migrated to database-first
+				console.log("Workout store initialize called for user:", userId);
 			},
 
 			// Import/Export
