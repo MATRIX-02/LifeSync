@@ -37,21 +37,21 @@ const moduleConfig: Record<
 > = {
 	habits: {
 		label: "Daily Rituals",
-		icon: "sparkles",
+		icon: "checkmark-circle",
 		color: "primary",
 		route: "/(tabs)/",
 		description: "Build better habits",
 	},
 	workout: {
 		label: "FitZone",
-		icon: "flame",
+		icon: "barbell",
 		color: "success",
 		route: "/(tabs)/workout",
 		description: "Track your workouts",
 	},
 	finance: {
 		label: "Money Hub",
-		icon: "trending-up",
+		icon: "wallet",
 		color: "warning",
 		route: "/(tabs)/finance",
 		description: "Manage your finances",

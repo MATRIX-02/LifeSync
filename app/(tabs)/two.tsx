@@ -726,7 +726,7 @@ export default function SettingsScreen() {
 
 					<View style={styles.settingCard}>
 						<SettingRow
-							icon="sparkles"
+							icon="checkmark-circle"
 							iconColor={theme.primary}
 							iconBg={theme.primary + "20"}
 							label="Daily Rituals"
@@ -747,7 +747,7 @@ export default function SettingsScreen() {
 						<View style={styles.divider} />
 
 						<SettingRow
-							icon="flame"
+							icon="barbell"
 							iconColor={theme.success}
 							iconBg={theme.success + "20"}
 							label="FitZone"
@@ -768,7 +768,7 @@ export default function SettingsScreen() {
 						<View style={styles.divider} />
 
 						<SettingRow
-							icon="trending-up"
+							icon="wallet"
 							iconColor={theme.warning}
 							iconBg={theme.warning + "20"}
 							label="Money Hub"
@@ -961,7 +961,7 @@ export default function SettingsScreen() {
 										<View style={styles.moduleRow}>
 											<View style={styles.moduleInfo}>
 												<Ionicons
-													name="sparkles"
+													name="checkmark-circle"
 													size={16}
 													color={theme.primary}
 												/>
@@ -1021,7 +1021,7 @@ export default function SettingsScreen() {
 										<View style={styles.moduleRow}>
 											<View style={styles.moduleInfo}>
 												<Ionicons
-													name="flame"
+													name="barbell"
 													size={16}
 													color={theme.success}
 												/>
@@ -1079,11 +1079,7 @@ export default function SettingsScreen() {
 								{moduleStore.isModuleEnabled("finance") && (
 									<View style={styles.moduleRow}>
 										<View style={styles.moduleInfo}>
-											<Ionicons
-												name="trending-up"
-												size={16}
-												color={theme.warning}
-											/>
+											<Ionicons name="wallet" size={16} color={theme.warning} />
 											<View>
 												<Text style={styles.moduleLabel}>Finance</Text>
 												<Text style={styles.syncTimeText}>
@@ -1257,7 +1253,7 @@ export default function SettingsScreen() {
 									<View style={styles.moduleRow}>
 										<View style={styles.moduleInfo}>
 											<Ionicons
-												name="sparkles"
+												name="checkmark-circle"
 												size={16}
 												color={theme.primary}
 											/>
@@ -1318,7 +1314,11 @@ export default function SettingsScreen() {
 								<>
 									<View style={styles.moduleRow}>
 										<View style={styles.moduleInfo}>
-											<Ionicons name="flame" size={16} color={theme.success} />
+											<Ionicons
+												name="barbell"
+												size={16}
+												color={theme.success}
+											/>
 											<Text style={styles.moduleLabel}>FitZone</Text>
 										</View>
 										<View style={styles.moduleActions}>
@@ -1374,11 +1374,7 @@ export default function SettingsScreen() {
 							{moduleStore.isModuleEnabled("finance") && (
 								<View style={styles.moduleRow}>
 									<View style={styles.moduleInfo}>
-										<Ionicons
-											name="trending-up"
-											size={16}
-											color={theme.warning}
-										/>
+										<Ionicons name="wallet" size={16} color={theme.warning} />
 										<Text style={styles.moduleLabel}>Finance</Text>
 									</View>
 									<View style={styles.moduleActions}>

@@ -166,17 +166,17 @@ export interface WorkoutPlan {
 	targetMuscleGroups: MuscleGroup[];
 	estimatedDuration: number; // minutes
 	exercises: WorkoutExercise[];
-	daysPerWeek?: number;
-	schedule?: {
-		day: number; // 0-6 (Sun-Sat)
-		name: string;
-	}[];
 	isCustom: boolean;
 	isActive: boolean;
 	color: string;
 	icon: string;
 	createdAt: Date;
 	updatedAt: Date;
+	daysPerWeek?: number;
+	schedule?: {
+		day: number; // 0-6 (Sun-Sat)
+		name: string;
+	}[];
 }
 
 // Personal Record

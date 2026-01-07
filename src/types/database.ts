@@ -17,6 +17,16 @@ export type SubscriptionStatus =
 	| "past_due";
 export type PaymentStatus = "pending" | "completed" | "failed" | "refunded";
 export type UserRole = "user" | "admin" | "super_admin";
+export type ExerciseCategory =
+	| "strength"
+	| "cardio"
+	| "flexibility"
+	| "hiit"
+	| "calisthenics"
+	| "plyometrics";
+export type FitnessLevel = "beginner" | "intermediate" | "advanced" | "athlete";
+export type WeightUnit = "kg" | "lbs";
+export type PRType = "weight" | "reps" | "duration" | "distance";
 
 export interface Database {
 	public: {
@@ -208,6 +218,248 @@ export interface Database {
 					updated_at?: string;
 				};
 			};
+			custom_exercises: {
+				Row: {
+					id: string;
+					user_id: string;
+					name: string;
+					category: ExerciseCategory;
+					primary_muscles: string[];
+					secondary_muscles: string[];
+					target_muscles: string[];
+					equipment: string[];
+					difficulty: FitnessLevel;
+					description: string | null;
+					instructions: string[];
+					tips: string[];
+					video_url: string | null;
+					image_url: string | null;
+					is_custom: boolean;
+					muscle_group: string | null;
+					is_compound: boolean;
+					created_at: string;
+					updated_at: string;
+				};
+				Insert: {
+					id: string;
+					user_id: string;
+					name: string;
+					category?: ExerciseCategory;
+					primary_muscles: string[];
+					secondary_muscles?: string[];
+					target_muscles: string[];
+					equipment?: string[];
+					difficulty?: FitnessLevel;
+					description?: string | null;
+					instructions?: string[];
+					tips?: string[];
+					video_url?: string | null;
+					image_url?: string | null;
+					is_custom?: boolean;
+					muscle_group?: string | null;
+					is_compound?: boolean;
+					created_at?: string;
+					updated_at?: string;
+				};
+				Update: {
+					name?: string;
+					category?: ExerciseCategory;
+					primary_muscles?: string[];
+					secondary_muscles?: string[];
+					target_muscles?: string[];
+					equipment?: string[];
+					difficulty?: FitnessLevel;
+					description?: string | null;
+					instructions?: string[];
+					tips?: string[];
+					video_url?: string | null;
+					image_url?: string | null;
+					muscle_group?: string | null;
+					is_compound?: boolean;
+					updated_at?: string;
+				};
+			};
+			workout_plans: {
+				Row: {
+					id: string;
+					user_id: string;
+					name: string;
+					description: string | null;
+					category: ExerciseCategory;
+					difficulty: FitnessLevel;
+					target_muscle_groups: string[];
+					estimated_duration: number;
+					exercises: Json;
+					is_custom: boolean;
+					is_active: boolean;
+					color: string;
+					icon: string;
+					days_per_week: number | null;
+					schedule: Json | null;
+					created_at: string;
+					updated_at: string;
+				};
+				Insert: {
+					id: string;
+					user_id: string;
+					name: string;
+					description?: string | null;
+					category?: ExerciseCategory;
+					difficulty?: FitnessLevel;
+					target_muscle_groups: string[];
+					estimated_duration?: number;
+					exercises?: Json;
+					is_custom?: boolean;
+					is_active?: boolean;
+					color?: string;
+					icon?: string;
+					days_per_week?: number | null;
+					schedule?: Json | null;
+					created_at?: string;
+					updated_at?: string;
+				};
+				Update: {
+					name?: string;
+					description?: string | null;
+					category?: ExerciseCategory;
+					difficulty?: FitnessLevel;
+					target_muscle_groups?: string[];
+					estimated_duration?: number;
+					exercises?: Json;
+					is_active?: boolean;
+					color?: string;
+					icon?: string;
+					days_per_week?: number | null;
+					schedule?: Json | null;
+					updated_at?: string;
+				};
+			};
+			workout_sessions: {
+				Row: {
+					id: string;
+					user_id: string;
+					plan_id: string | null;
+					plan_name: string | null;
+					name: string;
+					date: string;
+					start_time: string;
+					end_time: string | null;
+					duration: number;
+					exercises: Json;
+					total_volume: number;
+					calories_burned: number | null;
+					mood: number | null;
+					energy_level: number | null;
+					notes: string | null;
+					photo_urls: string[];
+					is_completed: boolean;
+					created_at: string;
+					updated_at: string;
+				};
+				Insert: {
+					id: string;
+					user_id: string;
+					plan_id?: string | null;
+					plan_name?: string | null;
+					name: string;
+					date: string;
+					start_time: string;
+					end_time?: string | null;
+					duration?: number;
+					exercises?: Json;
+					total_volume?: number;
+					calories_burned?: number | null;
+					mood?: number | null;
+					energy_level?: number | null;
+					notes?: string | null;
+					photo_urls?: string[];
+					is_completed?: boolean;
+					created_at?: string;
+					updated_at?: string;
+				};
+				Update: {
+					plan_id?: string | null;
+					plan_name?: string | null;
+					name?: string;
+					date?: string;
+					start_time?: string;
+					end_time?: string | null;
+					duration?: number;
+					exercises?: Json;
+					total_volume?: number;
+					calories_burned?: number | null;
+					mood?: number | null;
+					energy_level?: number | null;
+					notes?: string | null;
+					photo_urls?: string[];
+					is_completed?: boolean;
+					updated_at?: string;
+				};
+			};
+			personal_records: {
+				Row: {
+					id: string;
+					user_id: string;
+					exercise_id: string;
+					exercise_name: string;
+					type: PRType;
+					value: number;
+					previous_value: number | null;
+					date: string;
+					workout_session_id: string;
+					created_at: string;
+					updated_at: string;
+				};
+				Insert: {
+					id: string;
+					user_id: string;
+					exercise_id: string;
+					exercise_name: string;
+					type: PRType;
+					value: number;
+					previous_value?: number | null;
+					date: string;
+					workout_session_id: string;
+					created_at?: string;
+					updated_at?: string;
+				};
+				Update: {
+					exercise_id?: string;
+					exercise_name?: string;
+					type?: PRType;
+					value?: number;
+					previous_value?: number | null;
+					date?: string;
+					workout_session_id?: string;
+					updated_at?: string;
+				};
+			};
+			body_weights: {
+				Row: {
+					id: string;
+					user_id: string;
+					date: string;
+					weight: number;
+					unit: WeightUnit;
+					created_at: string;
+					updated_at: string;
+				};
+				Insert: {
+					id: string;
+					user_id: string;
+					date: string;
+					weight: number;
+					unit?: WeightUnit;
+					created_at?: string;
+					updated_at?: string;
+				};
+				Update: {
+					date?: string;
+					weight?: number;
+					unit?: WeightUnit;
+					updated_at?: string;
+				};
+			};
 			coupons: {
 				Row: {
 					id: string;
@@ -357,6 +609,17 @@ export type Coupon = Database["public"]["Tables"]["coupons"]["Row"];
 export type CouponRedemption =
 	Database["public"]["Tables"]["coupon_redemptions"]["Row"];
 export type Payment = Database["public"]["Tables"]["payments"]["Row"];
+
+// Workout module helper types
+export type CustomExerciseRow =
+	Database["public"]["Tables"]["custom_exercises"]["Row"];
+export type WorkoutPlanRow =
+	Database["public"]["Tables"]["workout_plans"]["Row"];
+export type WorkoutSessionRow =
+	Database["public"]["Tables"]["workout_sessions"]["Row"];
+export type PersonalRecordRow =
+	Database["public"]["Tables"]["personal_records"]["Row"];
+export type BodyWeightRow = Database["public"]["Tables"]["body_weights"]["Row"];
 
 // Extended types with relations
 export type UserSubscriptionWithPlan = UserSubscription & {

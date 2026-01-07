@@ -4,6 +4,7 @@ import { useSubscriptionCheck } from "@/src/components/PremiumFeatureGate";
 import { SharedDrawer } from "@/src/components/SharedDrawer";
 import {
 	ActiveWorkoutScreen,
+	NutriPlan,
 	WorkoutDashboard,
 	WorkoutHistory,
 	WorkoutPlans,
@@ -32,11 +33,12 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 const { width } = Dimensions.get("window");
 
-type TabType = "dashboard" | "statistics" | "plans" | "history";
+type TabType = "dashboard" | "nutrition" | "statistics" | "plans" | "history";
 
 const tabs: { key: TabType; label: string; icon: string }[] = [
 	{ key: "dashboard", label: "Dashboard", icon: "home" },
-	{ key: "statistics", label: "Statistics", icon: "stats-chart" },
+	{ key: "nutrition", label: "Nutrition", icon: "nutrition" },
+	{ key: "statistics", label: "Stats", icon: "stats-chart" },
 	{ key: "plans", label: "Plans", icon: "clipboard" },
 	{ key: "history", label: "History", icon: "time" },
 ];
@@ -161,6 +163,8 @@ export default function WorkoutTrackerScreen() {
 						subscriptionCheck={subscriptionCheck}
 					/>
 				);
+			case "nutrition":
+				return <NutriPlan theme={theme} />;
 			case "statistics":
 				return (
 					<WorkoutStatistics

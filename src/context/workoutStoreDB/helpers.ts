@@ -5,6 +5,8 @@
 export const objectToSnakeCase = (obj: any): any => {
 	if (obj === null || obj === undefined) return obj;
 	if (Array.isArray(obj)) return obj.map(objectToSnakeCase);
+	// Handle Date objects - convert to ISO string for database
+	if (obj instanceof Date) return obj.toISOString();
 	if (typeof obj !== "object") return obj;
 
 	return Object.keys(obj).reduce((acc: any, key) => {

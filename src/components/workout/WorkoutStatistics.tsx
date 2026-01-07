@@ -4,12 +4,16 @@ import { MuscleBodyMap } from "@/src/components/muscle-map";
 import { SubscriptionCheckResult } from "@/src/components/PremiumFeatureGate";
 import { Theme } from "@/src/context/themeContext";
 import { useWorkoutStore } from "@/src/context/workoutStoreDB";
-import { MUSCLE_GROUP_INFO } from "@/src/data/exerciseDatabase";
+import {
+	EXERCISE_DATABASE,
+	MUSCLE_GROUP_INFO,
+} from "@/src/data/exerciseDatabase";
 import { MuscleGroup } from "@/src/types/workout";
 import Ionicons from "@expo/vector-icons/Ionicons";
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useRef, useState } from "react";
 import {
 	Dimensions,
+	PanResponder,
 	ScrollView,
 	StyleSheet,
 	Text,
@@ -40,9 +44,176 @@ export default function WorkoutStatistics({
 	const [timeRange, setTimeRange] = useState<"week" | "month" | "year" | "all">(
 		"month"
 	);
+	const [zoomLevel, setZoomLevel] = useState(1);
+	const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
+	const [isPanning, setIsPanning] = useState(false);
+	const panRef = useRef({ x: 0, y: 0 });
+	const scrollViewRef = useRef<ScrollView>(null);
+
+	// PanResponder for dragging the muscle map
+	const panResponder = useRef(
+		PanResponder.create({
+			onStartShouldSetPanResponderCapture: () => zoomLevel > 1,
+			onMoveShouldSetPanResponderCapture: () => zoomLevel > 1 && isPanning,
+			onPanResponderGrant: () => {
+				if (zoomLevel > 1) {
+					setIsPanning(true);
+					panRef.current = { x: panOffset.x, y: panOffset.y };
+				}
+			},
+			onPanResponderMove: (_, gestureState) => {
+				if (zoomLevel > 1 && isPanning) {
+					const maxPan = (zoomLevel - 1) * 150;
+					const newX = Math.max(
+						-maxPan,
+						Math.min(maxPan, panRef.current.x + gestureState.dx)
+					);
+					const newY = Math.max(
+						-maxPan,
+						Math.min(maxPan, panRef.current.y + gestureState.dy)
+					);
+					setPanOffset({ x: newX, y: newY });
+				}
+			},
+			onPanResponderRelease: () => {
+				setIsPanning(false);
+			},
+		})
+	).current;
+
+	// Reset pan when zoom resets
+	const handleResetZoom = () => {
+		setZoomLevel(1);
+		setPanOffset({ x: 0, y: 0 });
+	};
 
 	const stats = getWorkoutStats();
 	const styles = createStyles(theme);
+
+	// Calculate workout stats by category (Strength, Cardio, Yoga)
+	const categoryStats = useMemo(() => {
+		const now = new Date();
+		let startDate = new Date();
+		if (timeRange === "week") {
+			startDate.setDate(now.getDate() - 7);
+		} else if (timeRange === "month") {
+			startDate.setMonth(now.getMonth() - 1);
+		} else if (timeRange === "year") {
+			startDate.setFullYear(now.getFullYear() - 1);
+		} else {
+			startDate = new Date(0);
+		}
+
+		const filteredSessions = workoutSessions.filter(
+			(s) => s.isCompleted && new Date(s.date) >= startDate
+		);
+
+		const stats = {
+			strength: { sessions: 0, duration: 0, exercises: 0 },
+			cardio: { sessions: 0, duration: 0, exercises: 0 },
+			yoga: { sessions: 0, duration: 0, exercises: 0 },
+		};
+
+		filteredSessions.forEach((session) => {
+			let hasStrength = false;
+			let hasCardio = false;
+			let hasYoga = false;
+
+			session.exercises.forEach((ex) => {
+				// Look up exercise category from database
+				const dbExercise = EXERCISE_DATABASE.find(
+					(e) => e.id === ex.exerciseId
+				);
+				const category = dbExercise?.category || "strength";
+
+				if (category === "strength" || category === "calisthenics") {
+					hasStrength = true;
+					stats.strength.exercises += 1;
+				} else if (
+					category === "cardio" ||
+					category === "hiit" ||
+					category === "plyometrics"
+				) {
+					hasCardio = true;
+					stats.cardio.exercises += 1;
+				} else if (category === "flexibility") {
+					hasYoga = true;
+					stats.yoga.exercises += 1;
+				}
+			});
+
+			const duration = session.duration || 0;
+			if (hasStrength) {
+				stats.strength.sessions += 1;
+				stats.strength.duration += duration;
+			}
+			if (hasCardio) {
+				stats.cardio.sessions += 1;
+				stats.cardio.duration += duration;
+			}
+			if (hasYoga) {
+				stats.yoga.sessions += 1;
+				stats.yoga.duration += duration;
+			}
+		});
+
+		return stats;
+	}, [workoutSessions, timeRange]);
+
+	// Calculate weekly distribution from REAL data
+	const weeklyDistribution = useMemo(() => {
+		const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+		const distribution: { day: string; count: number; duration: number }[] =
+			days.map((d) => ({
+				day: d,
+				count: 0,
+				duration: 0,
+			}));
+
+		// Get workouts from the past week
+		const now = new Date();
+		const oneWeekAgo = new Date(now);
+		oneWeekAgo.setDate(now.getDate() - 7);
+
+		workoutSessions
+			.filter((s) => s.isCompleted && new Date(s.date) >= oneWeekAgo)
+			.forEach((session) => {
+				const date = new Date(session.date);
+				// getDay() returns 0 for Sunday, we want Monday = 0
+				const dayIndex = (date.getDay() + 6) % 7;
+				distribution[dayIndex].count += 1;
+				distribution[dayIndex].duration += session.duration || 0;
+			});
+
+		return distribution;
+	}, [workoutSessions]);
+
+	// Calculate this month's workout days from REAL data
+	const monthWorkoutDays = useMemo(() => {
+		const now = new Date();
+		const daysInMonth = new Date(
+			now.getFullYear(),
+			now.getMonth() + 1,
+			0
+		).getDate();
+		const workoutDays = new Set<number>();
+
+		workoutSessions
+			.filter((s) => {
+				const sessionDate = new Date(s.date);
+				return (
+					s.isCompleted &&
+					sessionDate.getMonth() === now.getMonth() &&
+					sessionDate.getFullYear() === now.getFullYear()
+				);
+			})
+			.forEach((session) => {
+				const date = new Date(session.date);
+				workoutDays.add(date.getDate());
+			});
+
+		return { daysInMonth, workoutDays };
+	}, [workoutSessions]);
 
 	// Calculate muscle group activity from REAL workout data
 	const muscleActivity = useMemo((): Record<MuscleGroup, number> => {
@@ -187,7 +358,12 @@ export default function WorkoutStatistics({
 	};
 
 	return (
-		<ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
+		<ScrollView
+			ref={scrollViewRef}
+			style={styles.container}
+			showsVerticalScrollIndicator={false}
+			scrollEnabled={!isPanning}
+		>
 			{/* Time Range Selector */}
 			<View style={styles.timeRangeContainer}>
 				{(["week", "month", "year", "all"] as const).map((range) => (
@@ -304,16 +480,112 @@ export default function WorkoutStatistics({
 				</View>
 
 				<View style={styles.muscleMapContainer}>
-					<MuscleBodyMap
-						gender={gender === "other" ? "male" : gender}
-						highlightedMuscles={displayedMuscleActivity}
-						onMusclePress={handleMusclePress}
-						width={width * 0.55}
-						height={400}
-						showLabels
-						theme={theme}
-						view={bodyView}
-					/>
+					{/* Zoomable Body Map Area */}
+					<View style={styles.muscleMapZoomArea} {...panResponder.panHandlers}>
+						<View
+							style={{
+								transform: [
+									{ scale: zoomLevel },
+									{ translateX: panOffset.x },
+									{ translateY: panOffset.y },
+								],
+							}}
+						>
+							<MuscleBodyMap
+								gender={gender === "other" ? "male" : gender}
+								highlightedMuscles={displayedMuscleActivity}
+								onMusclePress={handleMusclePress}
+								width={width * 0.55}
+								height={400}
+								showLabels
+								theme={theme}
+								view={bodyView}
+							/>
+						</View>
+
+						{/* Yoga/Cardio Activity Overlay */}
+						{(categoryStats.yoga.sessions > 0 ||
+							categoryStats.cardio.sessions > 0) && (
+							<View style={styles.activityOverlay}>
+								{categoryStats.cardio.sessions > 0 && (
+									<View
+										style={[
+											styles.activityBadge,
+											{
+												backgroundColor: theme.error + "20",
+												borderColor: theme.error,
+											},
+										]}
+									>
+										<Text style={styles.activityBadgeEmoji}>🏃</Text>
+										<Text
+											style={[styles.activityBadgeText, { color: theme.error }]}
+										>
+											{categoryStats.cardio.sessions} Cardio
+										</Text>
+									</View>
+								)}
+								{categoryStats.yoga.sessions > 0 && (
+									<View
+										style={[
+											styles.activityBadge,
+											{
+												backgroundColor: theme.success + "20",
+												borderColor: theme.success,
+											},
+										]}
+									>
+										<Text style={styles.activityBadgeEmoji}>🧘</Text>
+										<Text
+											style={[
+												styles.activityBadgeText,
+												{ color: theme.success },
+											]}
+										>
+											{categoryStats.yoga.sessions} Yoga
+										</Text>
+									</View>
+								)}
+							</View>
+						)}
+
+						{/* Zoom Controls - Bottom Right */}
+						<View style={styles.zoomControls}>
+							<TouchableOpacity
+								style={styles.zoomButton}
+								onPress={() => setZoomLevel(Math.min(zoomLevel + 0.2, 2))}
+							>
+								<Ionicons name="add" size={20} color={theme.text} />
+							</TouchableOpacity>
+							<Text style={styles.zoomText}>
+								{Math.round(zoomLevel * 100)}%
+							</Text>
+							<TouchableOpacity
+								style={styles.zoomButton}
+								onPress={() => setZoomLevel(Math.max(zoomLevel - 0.2, 0.6))}
+							>
+								<Ionicons name="remove" size={20} color={theme.text} />
+							</TouchableOpacity>
+							<TouchableOpacity
+								style={[styles.zoomButton, { marginLeft: 8 }]}
+								onPress={handleResetZoom}
+							>
+								<Ionicons
+									name="refresh"
+									size={16}
+									color={theme.textSecondary}
+								/>
+							</TouchableOpacity>
+						</View>
+
+						{/* Drag hint when zoomed */}
+						{zoomLevel > 1 && (
+							<View style={styles.dragHint}>
+								<Ionicons name="move" size={12} color={theme.textMuted} />
+								<Text style={styles.dragHintText}>Drag to pan</Text>
+							</View>
+						)}
+					</View>
 
 					{/* Muscle Legend */}
 					<View style={styles.muscleLegend}>
@@ -460,22 +732,29 @@ export default function WorkoutStatistics({
 			<View style={styles.distributionSection}>
 				<Text style={styles.sectionTitle}>Weekly Distribution</Text>
 				<View style={styles.weekDays}>
-					{["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((day, i) => {
-						const hasWorkout = Math.random() > 0.5; // Mock data
+					{weeklyDistribution.map((data, i) => {
+						const maxDuration = Math.max(
+							...weeklyDistribution.map((d) => d.duration),
+							1
+						);
+						const barHeight =
+							data.count > 0 ? 20 + (data.duration / maxDuration) * 60 : 10;
 						return (
-							<View key={day} style={styles.dayColumn}>
+							<View key={data.day} style={styles.dayColumn}>
 								<View
 									style={[
 										styles.dayBar,
 										{
-											height: hasWorkout ? 40 + Math.random() * 40 : 10,
-											backgroundColor: hasWorkout
-												? theme.primary
-												: theme.border,
+											height: barHeight,
+											backgroundColor:
+												data.count > 0 ? theme.primary : theme.border,
 										},
 									]}
 								/>
-								<Text style={styles.dayLabel}>{day}</Text>
+								{data.count > 0 && (
+									<Text style={styles.dayCount}>{data.count}</Text>
+								)}
+								<Text style={styles.dayLabel}>{data.day}</Text>
 							</View>
 						);
 					})}
@@ -486,8 +765,10 @@ export default function WorkoutStatistics({
 			<View style={styles.frequencySection}>
 				<Text style={styles.sectionTitle}>This Month</Text>
 				<View style={styles.frequencyGrid}>
-					{Array.from({ length: 30 }, (_, i) => {
-						const hasWorkout = Math.random() > 0.6;
+					{Array.from({ length: monthWorkoutDays.daysInMonth }, (_, i) => {
+						const dayNum = i + 1;
+						const hasWorkout = monthWorkoutDays.workoutDays.has(dayNum);
+						const isToday = dayNum === new Date().getDate();
 						return (
 							<View
 								key={i}
@@ -498,8 +779,18 @@ export default function WorkoutStatistics({
 											? theme.primary
 											: theme.surfaceLight,
 									},
+									isToday && styles.frequencyDotToday,
 								]}
-							/>
+							>
+								{isToday && (
+									<View
+										style={[
+											styles.todayIndicator,
+											{ backgroundColor: theme.warning },
+										]}
+									/>
+								)}
+							</View>
 						);
 					})}
 				</View>
@@ -507,6 +798,79 @@ export default function WorkoutStatistics({
 					<Text style={styles.frequencyLegendText}>
 						{stats.workoutsThisMonth} workouts this month
 					</Text>
+				</View>
+			</View>
+
+			{/* Workout Category Breakdown */}
+			<View style={styles.categorySection}>
+				<Text style={styles.sectionTitle}>Workout Types</Text>
+				<View style={styles.categoryGrid}>
+					<View
+						style={[
+							styles.categoryCard,
+							{ backgroundColor: theme.primary + "15" },
+						]}
+					>
+						<View
+							style={[
+								styles.categoryIcon,
+								{ backgroundColor: theme.primary + "30" },
+							]}
+						>
+							<Text style={styles.categoryEmoji}>💪</Text>
+						</View>
+						<Text style={styles.categoryName}>Strength</Text>
+						<Text style={[styles.categoryValue, { color: theme.primary }]}>
+							{categoryStats.strength.sessions} sessions
+						</Text>
+						<Text style={styles.categoryMeta}>
+							{categoryStats.strength.exercises} exercises
+						</Text>
+					</View>
+					<View
+						style={[
+							styles.categoryCard,
+							{ backgroundColor: theme.error + "15" },
+						]}
+					>
+						<View
+							style={[
+								styles.categoryIcon,
+								{ backgroundColor: theme.error + "30" },
+							]}
+						>
+							<Text style={styles.categoryEmoji}>🏃</Text>
+						</View>
+						<Text style={styles.categoryName}>Cardio</Text>
+						<Text style={[styles.categoryValue, { color: theme.error }]}>
+							{categoryStats.cardio.sessions} sessions
+						</Text>
+						<Text style={styles.categoryMeta}>
+							{categoryStats.cardio.exercises} exercises
+						</Text>
+					</View>
+					<View
+						style={[
+							styles.categoryCard,
+							{ backgroundColor: theme.success + "15" },
+						]}
+					>
+						<View
+							style={[
+								styles.categoryIcon,
+								{ backgroundColor: theme.success + "30" },
+							]}
+						>
+							<Text style={styles.categoryEmoji}>🧘</Text>
+						</View>
+						<Text style={styles.categoryName}>Yoga</Text>
+						<Text style={[styles.categoryValue, { color: theme.success }]}>
+							{categoryStats.yoga.sessions} sessions
+						</Text>
+						<Text style={styles.categoryMeta}>
+							{categoryStats.yoga.exercises} exercises
+						</Text>
+					</View>
 				</View>
 			</View>
 
@@ -657,6 +1021,7 @@ const createStyles = (theme: Theme) =>
 		},
 		legendItems: {
 			flexDirection: "row",
+			flexWrap: "wrap",
 			gap: 8,
 			marginBottom: 16,
 		},
@@ -868,6 +1233,22 @@ const createStyles = (theme: Theme) =>
 			width: 18,
 			height: 18,
 			borderRadius: 4,
+			justifyContent: "center" as const,
+			alignItems: "center" as const,
+		},
+		frequencyDotToday: {
+			borderWidth: 2,
+			borderColor: theme.warning,
+		},
+		todayIndicator: {
+			width: 6,
+			height: 6,
+			borderRadius: 3,
+		},
+		dayCount: {
+			fontSize: 8,
+			fontWeight: "600" as const,
+			color: theme.text,
 		},
 		frequencyLegend: {
 			marginTop: 8,
@@ -875,6 +1256,122 @@ const createStyles = (theme: Theme) =>
 		frequencyLegendText: {
 			fontSize: 12,
 			color: theme.textMuted,
-			textAlign: "center",
+			textAlign: "center" as const,
+		},
+		// Muscle map zoom area
+		muscleMapZoomArea: {
+			overflow: "hidden" as const,
+			borderRadius: 16,
+			backgroundColor: theme.surfaceLight,
+			minHeight: 420,
+			justifyContent: "center" as const,
+			alignItems: "center" as const,
+			position: "relative" as const,
+		},
+		// Activity overlay for yoga/cardio
+		activityOverlay: {
+			position: "absolute" as const,
+			top: 12,
+			left: 12,
+			gap: 8,
+		},
+		activityBadge: {
+			flexDirection: "row" as const,
+			alignItems: "center" as const,
+			paddingHorizontal: 10,
+			paddingVertical: 6,
+			borderRadius: 20,
+			borderWidth: 1,
+			gap: 6,
+		},
+		activityBadgeEmoji: {
+			fontSize: 14,
+		},
+		activityBadgeText: {
+			fontSize: 12,
+			fontWeight: "600" as const,
+		},
+		// Zoom controls
+		zoomControls: {
+			position: "absolute" as const,
+			right: 12,
+			bottom: 12,
+			flexDirection: "row" as const,
+			alignItems: "center" as const,
+			backgroundColor: theme.surface,
+			borderRadius: 8,
+			padding: 4,
+			zIndex: 10,
+		},
+		zoomButton: {
+			width: 28,
+			height: 28,
+			borderRadius: 6,
+			backgroundColor: theme.surfaceLight,
+			justifyContent: "center" as const,
+			alignItems: "center" as const,
+		},
+		zoomText: {
+			fontSize: 11,
+			color: theme.textMuted,
+			marginHorizontal: 8,
+			minWidth: 36,
+			textAlign: "center" as const,
+		},
+		// Category breakdown
+		categorySection: {
+			marginBottom: 24,
+		},
+		categoryGrid: {
+			flexDirection: "row" as const,
+			gap: 10,
+		},
+		categoryCard: {
+			flex: 1,
+			borderRadius: 14,
+			padding: 14,
+			alignItems: "center" as const,
+		},
+		categoryIcon: {
+			width: 44,
+			height: 44,
+			borderRadius: 12,
+			justifyContent: "center" as const,
+			alignItems: "center" as const,
+			marginBottom: 8,
+		},
+		categoryEmoji: {
+			fontSize: 22,
+		},
+		categoryName: {
+			fontSize: 12,
+			color: theme.textMuted,
+			marginBottom: 4,
+		},
+		categoryValue: {
+			fontSize: 14,
+			fontWeight: "700" as const,
+		},
+		categoryMeta: {
+			fontSize: 10,
+			color: theme.textMuted,
+			marginTop: 2,
+		},
+		// Drag hint
+		dragHint: {
+			position: "absolute" as const,
+			bottom: 12,
+			left: 12,
+			flexDirection: "row" as const,
+			alignItems: "center" as const,
+			backgroundColor: theme.surface + "CC",
+			paddingHorizontal: 8,
+			paddingVertical: 4,
+			borderRadius: 12,
+			gap: 4,
+		},
+		dragHintText: {
+			fontSize: 10,
+			color: theme.textMuted,
 		},
 	});

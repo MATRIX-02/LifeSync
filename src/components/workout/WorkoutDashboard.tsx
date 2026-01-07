@@ -68,6 +68,15 @@ export default function WorkoutDashboard({
 	const [selectedMuscle, setSelectedMuscle] = useState<MuscleGroup | "all">(
 		"all"
 	);
+	const [selectedCategory, setSelectedCategory] = useState<
+		| "all"
+		| "strength"
+		| "cardio"
+		| "flexibility"
+		| "hiit"
+		| "calisthenics"
+		| "plyometrics"
+	>("all");
 	const [exerciseSearch, setExerciseSearch] = useState("");
 
 	// Custom exercise form state
@@ -77,6 +86,14 @@ export default function WorkoutDashboard({
 	>([]);
 	const [customExerciseDescription, setCustomExerciseDescription] =
 		useState("");
+	const [customExerciseCategory, setCustomExerciseCategory] = useState<
+		| "strength"
+		| "cardio"
+		| "flexibility"
+		| "hiit"
+		| "calisthenics"
+		| "plyometrics"
+	>("strength");
 
 	// Rest timer state
 	const [restTime, setRestTime] = useState(90);
@@ -120,6 +137,14 @@ export default function WorkoutDashboard({
 	];
 
 	const handleStartWorkout = (planId?: string, planName?: string) => {
+		// Prevent starting a new workout if one is already active
+		if (currentSession) {
+			// Just open the active workout screen
+			if (onStartWorkout) {
+				onStartWorkout();
+			}
+			return;
+		}
 		startWorkout(planId, planName);
 		// Open active workout screen
 		if (onStartWorkout) {
@@ -200,6 +225,11 @@ export default function WorkoutDashboard({
 							ex.secondaryMuscles?.includes(selectedMuscle)
 				  );
 
+		// Filter by category
+		if (selectedCategory !== "all") {
+			exercises = exercises.filter((ex) => ex.category === selectedCategory);
+		}
+
 		if (exerciseSearch.trim()) {
 			const query = exerciseSearch.toLowerCase();
 			exercises = exercises.filter(
@@ -209,7 +239,7 @@ export default function WorkoutDashboard({
 			);
 		}
 		return exercises;
-	}, [selectedMuscle, exerciseSearch, customExercises]);
+	}, [selectedMuscle, selectedCategory, exerciseSearch, customExercises]);
 
 	const handleSaveWeight = () => {
 		const weight = parseFloat(newWeight);
@@ -240,7 +270,7 @@ export default function WorkoutDashboard({
 		const newExercise: any = {
 			id: `custom_${Date.now()}`,
 			name: customExerciseName.trim(),
-			category: "strength",
+			category: customExerciseCategory,
 			primaryMuscles: customExerciseMuscles,
 			secondaryMuscles: [],
 			targetMuscles: customExerciseMuscles,
@@ -258,6 +288,7 @@ export default function WorkoutDashboard({
 		setCustomExerciseName("");
 		setCustomExerciseMuscles([]);
 		setCustomExerciseDescription("");
+		setCustomExerciseCategory("strength");
 		setShowCreateExercise(false);
 		Alert.alert(
 			"Success! 💪",
@@ -419,7 +450,10 @@ export default function WorkoutDashboard({
 				</View>
 
 				{workoutPlans.length === 0 ? (
-					<TouchableOpacity style={styles.emptyCard}>
+					<TouchableOpacity
+						style={styles.emptyCard}
+						onPress={handleSeeAllPlans}
+					>
 						<Ionicons
 							name="add-circle-outline"
 							size={40}
@@ -629,6 +663,136 @@ export default function WorkoutDashboard({
 								);
 							})}
 						</ScrollView>
+
+						{/* Category Filter */}
+						<ScrollView
+							horizontal
+							showsHorizontalScrollIndicator={false}
+							style={styles.categoryFilter}
+							contentContainerStyle={styles.categoryFilterContent}
+						>
+							<TouchableOpacity
+								style={[
+									styles.categoryChip,
+									selectedCategory === "all" && styles.categoryChipActive,
+								]}
+								onPress={() => setSelectedCategory("all")}
+							>
+								<Text
+									style={[
+										styles.categoryChipText,
+										selectedCategory === "all" && styles.categoryChipTextActive,
+									]}
+								>
+									All Types
+								</Text>
+							</TouchableOpacity>
+							<TouchableOpacity
+								style={[
+									styles.categoryChip,
+									selectedCategory === "strength" && styles.categoryChipActive,
+								]}
+								onPress={() => setSelectedCategory("strength")}
+							>
+								<Text
+									style={[
+										styles.categoryChipText,
+										selectedCategory === "strength" &&
+											styles.categoryChipTextActive,
+									]}
+								>
+									💪 Strength
+								</Text>
+							</TouchableOpacity>
+							<TouchableOpacity
+								style={[
+									styles.categoryChip,
+									selectedCategory === "cardio" && styles.categoryChipActive,
+								]}
+								onPress={() => setSelectedCategory("cardio")}
+							>
+								<Text
+									style={[
+										styles.categoryChipText,
+										selectedCategory === "cardio" &&
+											styles.categoryChipTextActive,
+									]}
+								>
+									🏃 Cardio
+								</Text>
+							</TouchableOpacity>
+							<TouchableOpacity
+								style={[
+									styles.categoryChip,
+									selectedCategory === "flexibility" &&
+										styles.categoryChipActive,
+								]}
+								onPress={() => setSelectedCategory("flexibility")}
+							>
+								<Text
+									style={[
+										styles.categoryChipText,
+										selectedCategory === "flexibility" &&
+											styles.categoryChipTextActive,
+									]}
+								>
+									🧘 Yoga
+								</Text>
+							</TouchableOpacity>
+							<TouchableOpacity
+								style={[
+									styles.categoryChip,
+									selectedCategory === "hiit" && styles.categoryChipActive,
+								]}
+								onPress={() => setSelectedCategory("hiit")}
+							>
+								<Text
+									style={[
+										styles.categoryChipText,
+										selectedCategory === "hiit" &&
+											styles.categoryChipTextActive,
+									]}
+								>
+									⚡ HIIT
+								</Text>
+							</TouchableOpacity>
+							<TouchableOpacity
+								style={[
+									styles.categoryChip,
+									selectedCategory === "calisthenics" &&
+										styles.categoryChipActive,
+								]}
+								onPress={() => setSelectedCategory("calisthenics")}
+							>
+								<Text
+									style={[
+										styles.categoryChipText,
+										selectedCategory === "calisthenics" &&
+											styles.categoryChipTextActive,
+									]}
+								>
+									🤸 Calisthenics
+								</Text>
+							</TouchableOpacity>
+							<TouchableOpacity
+								style={[
+									styles.categoryChip,
+									selectedCategory === "plyometrics" &&
+										styles.categoryChipActive,
+								]}
+								onPress={() => setSelectedCategory("plyometrics")}
+							>
+								<Text
+									style={[
+										styles.categoryChipText,
+										selectedCategory === "plyometrics" &&
+											styles.categoryChipTextActive,
+									]}
+								>
+									🚀 Plyometrics
+								</Text>
+							</TouchableOpacity>
+						</ScrollView>
 					</View>
 
 					{/* Results Count */}
@@ -800,6 +964,121 @@ export default function WorkoutDashboard({
 								value={customExerciseName}
 								onChangeText={setCustomExerciseName}
 							/>
+						</View>
+
+						{/* Category */}
+						<View style={styles.formGroup}>
+							<Text style={styles.formLabel}>Category *</Text>
+							<View style={styles.categorySelector}>
+								<TouchableOpacity
+									style={[
+										styles.categorySelectorChip,
+										customExerciseCategory === "strength" &&
+											styles.categorySelectorChipActive,
+									]}
+									onPress={() => setCustomExerciseCategory("strength")}
+								>
+									<Text
+										style={[
+											styles.categorySelectorText,
+											customExerciseCategory === "strength" &&
+												styles.categorySelectorTextActive,
+										]}
+									>
+										💪 Strength
+									</Text>
+								</TouchableOpacity>
+								<TouchableOpacity
+									style={[
+										styles.categorySelectorChip,
+										customExerciseCategory === "cardio" &&
+											styles.categorySelectorChipActive,
+									]}
+									onPress={() => setCustomExerciseCategory("cardio")}
+								>
+									<Text
+										style={[
+											styles.categorySelectorText,
+											customExerciseCategory === "cardio" &&
+												styles.categorySelectorTextActive,
+										]}
+									>
+										🏃 Cardio
+									</Text>
+								</TouchableOpacity>
+								<TouchableOpacity
+									style={[
+										styles.categorySelectorChip,
+										customExerciseCategory === "flexibility" &&
+											styles.categorySelectorChipActive,
+									]}
+									onPress={() => setCustomExerciseCategory("flexibility")}
+								>
+									<Text
+										style={[
+											styles.categorySelectorText,
+											customExerciseCategory === "flexibility" &&
+												styles.categorySelectorTextActive,
+										]}
+									>
+										🧘 Yoga
+									</Text>
+								</TouchableOpacity>
+								<TouchableOpacity
+									style={[
+										styles.categorySelectorChip,
+										customExerciseCategory === "hiit" &&
+											styles.categorySelectorChipActive,
+									]}
+									onPress={() => setCustomExerciseCategory("hiit")}
+								>
+									<Text
+										style={[
+											styles.categorySelectorText,
+											customExerciseCategory === "hiit" &&
+												styles.categorySelectorTextActive,
+										]}
+									>
+										⚡ HIIT
+									</Text>
+								</TouchableOpacity>
+								<TouchableOpacity
+									style={[
+										styles.categorySelectorChip,
+										customExerciseCategory === "calisthenics" &&
+											styles.categorySelectorChipActive,
+									]}
+									onPress={() => setCustomExerciseCategory("calisthenics")}
+								>
+									<Text
+										style={[
+											styles.categorySelectorText,
+											customExerciseCategory === "calisthenics" &&
+												styles.categorySelectorTextActive,
+										]}
+									>
+										🤸 Calisthenics
+									</Text>
+								</TouchableOpacity>
+								<TouchableOpacity
+									style={[
+										styles.categorySelectorChip,
+										customExerciseCategory === "plyometrics" &&
+											styles.categorySelectorChipActive,
+									]}
+									onPress={() => setCustomExerciseCategory("plyometrics")}
+								>
+									<Text
+										style={[
+											styles.categorySelectorText,
+											customExerciseCategory === "plyometrics" &&
+												styles.categorySelectorTextActive,
+										]}
+									>
+										🚀 Plyometrics
+									</Text>
+								</TouchableOpacity>
+							</View>
 						</View>
 
 						{/* Target Muscles */}
@@ -1561,6 +1840,32 @@ const createStyles = (theme: Theme) =>
 			color: "#FFFFFF",
 			fontWeight: "600",
 		},
+		categoryFilter: {
+			marginTop: 8,
+			maxHeight: 44,
+		},
+		categoryFilterContent: {
+			paddingHorizontal: 16,
+			gap: 8,
+		},
+		categoryChip: {
+			paddingHorizontal: 14,
+			paddingVertical: 9,
+			borderRadius: 22,
+			backgroundColor: theme.background,
+		},
+		categoryChipActive: {
+			backgroundColor: theme.primary,
+		},
+		categoryChipText: {
+			fontSize: 13,
+			fontWeight: "500",
+			color: theme.text,
+		},
+		categoryChipTextActive: {
+			color: "#FFFFFF",
+			fontWeight: "600",
+		},
 		exerciseResultsHeader: {
 			paddingHorizontal: 20,
 			paddingVertical: 16,
@@ -1754,6 +2059,29 @@ const createStyles = (theme: Theme) =>
 			color: theme.text,
 		},
 		muscleSelectorTextActive: {
+			color: "#FFFFFF",
+			fontWeight: "600",
+		},
+		// Category Selector
+		categorySelector: {
+			flexDirection: "row",
+			flexWrap: "wrap",
+			gap: 8,
+		},
+		categorySelectorChip: {
+			paddingHorizontal: 14,
+			paddingVertical: 8,
+			borderRadius: 20,
+			backgroundColor: theme.surface,
+		},
+		categorySelectorChipActive: {
+			backgroundColor: theme.primary,
+		},
+		categorySelectorText: {
+			fontSize: 13,
+			color: theme.text,
+		},
+		categorySelectorTextActive: {
 			color: "#FFFFFF",
 			fontWeight: "600",
 		},
