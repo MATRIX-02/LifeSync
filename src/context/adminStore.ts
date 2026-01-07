@@ -135,12 +135,25 @@ export const useAdminStore = create<AdminStore>((set, get) => ({
 
 			// Filter subscriptions to only show active ones (client-side filter)
 			// This is needed because Supabase doesn't support filtering nested relations directly
-			const filteredData = (data || []).map((user: any) => ({
-				...user,
-				user_subscriptions: (user.user_subscriptions || []).filter(
-					(sub: any) => sub.status === "active"
-				),
-			}));
+			// user_subscriptions might be null, array, or object depending on the join result
+			const filteredData = (data || []).map((user: any) => {
+				let subscriptions = user.user_subscriptions;
+
+				// Handle different possible structures
+				if (!subscriptions) {
+					subscriptions = [];
+				} else if (!Array.isArray(subscriptions)) {
+					// If it's an object (single subscription), wrap it in an array
+					subscriptions = [subscriptions];
+				}
+
+				return {
+					...user,
+					user_subscriptions: subscriptions.filter(
+						(sub: any) => sub && sub.status === "active"
+					),
+				};
+			});
 
 			set({
 				users: filteredData as ProfileWithSubscription[],

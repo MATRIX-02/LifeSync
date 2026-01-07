@@ -4,6 +4,7 @@ import * as Linking from "expo-linking";
 import * as WebBrowser from "expo-web-browser";
 import { create } from "zustand";
 import { supabase } from "../config/supabase";
+import { NotificationService } from "../services/notificationService";
 import { Profile, UserSubscriptionWithPlan } from "../types/database";
 
 // Enable dismissing the browser after auth
@@ -107,6 +108,10 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
 				// Setup realtime listeners for profile and subscription changes
 				console.log("🔐 [Initialize] Setting up realtime listeners...");
 				get().setupRealtimeListeners();
+
+				// Register push token for notifications
+				console.log("🔐 [Initialize] Registering push token...");
+				NotificationService.registerPushToken(session.user.id);
 			} else {
 				console.log("ℹ️ [Initialize] No saved session found");
 			}
@@ -222,15 +227,35 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
 	signInWithEmail: async (email: string, password: string) => {
 		set({ isLoading: true, error: null });
 		try {
-			const { error } = await supabase.auth.signInWithPassword({
+			console.log("🔵 [Email Sign-In] Starting email sign-in for:", email);
+			const { data, error } = await supabase.auth.signInWithPassword({
 				email,
 				password,
 			});
 
 			if (error) {
+				console.log("🔴 [Email Sign-In] Error:", error.message);
 				set({ error: error.message });
 				return { error };
 			}
+
+			console.log("🟢 [Email Sign-In] Auth successful, fetching profile...");
+
+			// Set session and user
+			if (data.session) {
+				set({ session: data.session, user: data.session.user });
+			}
+
+			// Fetch profile and subscription
+			try {
+				await Promise.all([get().fetchProfile(), get().fetchSubscription()]);
+				console.log("🟢 [Email Sign-In] Profile and subscription fetched!");
+			} catch (fetchErr) {
+				console.log("⚠️ [Email Sign-In] Fetch error (non-fatal):", fetchErr);
+			}
+
+			// Setup realtime listeners
+			get().setupRealtimeListeners();
 
 			return { error: null };
 		} finally {
@@ -386,14 +411,21 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
 							await new Promise((resolve) => setTimeout(resolve, 500));
 
 							// Now fetch profile and subscription
-							console.log("🔵 [Google Sign-In] Fetching profile...");
+							console.log(
+								"🔵 [Google Sign-In] About to fetch profile and subscription..."
+							);
+							console.log("🔵 [Google Sign-In] Current user:", get().user?.id);
 							try {
-								await Promise.all([
-									get().fetchProfile(),
-									get().fetchSubscription(),
-								]);
+								console.log("🔵 [Google Sign-In] Calling fetchProfile()...");
+								const profilePromise = get().fetchProfile();
 								console.log(
-									"🟢 [Google Sign-In] Profile fetched successfully!"
+									"🔵 [Google Sign-In] Calling fetchSubscription()..."
+								);
+								const subscriptionPromise = get().fetchSubscription();
+
+								await Promise.all([profilePromise, subscriptionPromise]);
+								console.log(
+									"🟢 [Google Sign-In] Profile and subscription fetched successfully!"
 								);
 							} catch (fetchErr) {
 								console.log(
@@ -449,22 +481,30 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
 				const { data: sessionData } = await supabase.auth.getSession();
 				if (sessionData.session) {
 					console.log("🟢 [Google Sign-In] Session found after dismiss!");
+
+					// Update session and user, but keep isLoading=true until profile is fetched
 					set({
 						session: sessionData.session,
 						user: sessionData.session.user,
-						isLoading: false,
+						// isLoading remains true until profile is fetched
 					});
 
-					// Fetch profile
+					// Fetch profile BEFORE setting isLoading to false
+					console.log("🔵 [Google Sign-In] Fetching profile after dismiss...");
 					try {
 						await Promise.all([
 							get().fetchProfile(),
 							get().fetchSubscription(),
 						]);
+						console.log(
+							"🟢 [Google Sign-In] Profile fetched successfully after dismiss!"
+						);
 					} catch (fetchErr) {
 						console.log("⚠️ [Google Sign-In] Fetch error:", fetchErr);
 					}
 
+					// NOW set isLoading to false
+					set({ isLoading: false });
 					get().setupRealtimeListeners();
 					return { error: null };
 				} else {
@@ -612,8 +652,67 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
 			if (error) throw error;
 
 			if (data) {
-				console.log("🟢 [fetchProfile] Profile found, setting state");
-				set({ profile: data });
+				const profileData = data as Profile;
+				console.log("🟢 [fetchProfile] Profile found");
+				console.log("🟢 [fetchProfile] Profile details:", {
+					id: profileData.id,
+					full_name: profileData.full_name,
+					email: profileData.email,
+					avatar_url: !!profileData.avatar_url,
+					created_at: profileData.created_at,
+				});
+
+				// Check if we should update profile with Google metadata (avatar, name)
+				// This syncs Google data to profile when user logs in via Google
+				const googleMetadata = user.user_metadata as
+					| { avatar_url?: string; full_name?: string; name?: string }
+					| undefined;
+				const hasGoogleAvatar =
+					googleMetadata?.avatar_url && !profileData.avatar_url;
+				const hasGoogleName =
+					googleMetadata?.full_name && !profileData.full_name;
+
+				console.log("🔵 [fetchProfile] Google metadata check:", {
+					hasGoogleAvatar,
+					hasGoogleName,
+					googleName: googleMetadata?.full_name,
+					googleAvatar: !!googleMetadata?.avatar_url,
+					profileName: profileData.full_name,
+					profileAvatar: !!profileData.avatar_url,
+				});
+
+				if (hasGoogleAvatar || hasGoogleName) {
+					console.log(
+						"🔵 [fetchProfile] Syncing Google metadata to profile..."
+					);
+					const updates: Partial<Profile> = {};
+					if (hasGoogleAvatar) updates.avatar_url = googleMetadata.avatar_url;
+					if (hasGoogleName) updates.full_name = googleMetadata.full_name;
+
+					const { data: updatedProfile, error: updateError } = await (
+						supabase.from("profiles") as any
+					)
+						.update({ ...updates, updated_at: new Date().toISOString() })
+						.eq("id", user.id)
+						.select()
+						.single();
+
+					if (!updateError && updatedProfile) {
+						console.log("🟢 [fetchProfile] Profile updated with Google data:", {
+							full_name: (updatedProfile as any).full_name,
+							avatar_url: !!(updatedProfile as any).avatar_url,
+						});
+						set({ profile: updatedProfile as Profile });
+						return;
+					} else {
+						console.warn(
+							"⚠️ [fetchProfile] Failed to sync Google metadata:",
+							updateError
+						);
+					}
+				}
+
+				set({ profile: profileData });
 			} else {
 				console.log(
 					"🔵 [fetchProfile] Profile not found for user:",
@@ -631,7 +730,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
 					is_active: true,
 				};
 
-				console.log("🔵 [fetchProfile] Creating new profile...");
+				console.log("🔵 [fetchProfile] Creating new profile with:", newProfile);
 				const { data: createdProfile, error: createError } = await (
 					supabase.from("profiles") as any
 				)
@@ -643,17 +742,48 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
 					// If it's a duplicate key error, profile was created by database trigger - fetch it
 					if (createError.code === "23505") {
 						console.log(
-							"🔵 [fetchProfile] Profile already exists (created by database trigger), fetching..."
+							"🔵 [fetchProfile] Profile already exists (created by database trigger), retrying fetch..."
 						);
-						const { data: existingProfile } = await supabase
-							.from("profiles")
-							.select("*")
-							.eq("id", user.id)
-							.single();
-						if (existingProfile) {
-							console.log("🟢 [fetchProfile] Profile fetched successfully");
-							set({ profile: existingProfile });
+
+						// Retry with backoff - the database trigger might still be running
+						let retryCount = 0;
+						let fetchedProfile = null;
+						while (retryCount < 3 && !fetchedProfile) {
+							await new Promise((resolve) =>
+								setTimeout(resolve, Math.pow(2, retryCount) * 500)
+							);
+							retryCount++;
+							console.log(`🔵 [fetchProfile] Retry ${retryCount}/3...`);
+
+							const { data: existingProfile } = await supabase
+								.from("profiles")
+								.select("*")
+								.eq("id", user.id)
+								.single();
+
+							if (existingProfile) {
+								const existingProfileData = existingProfile as Profile;
+								console.log(
+									"🟢 [fetchProfile] Profile fetched successfully on retry",
+									retryCount
+								);
+								console.log("🟢 [fetchProfile] Retrieved profile:", {
+									full_name: existingProfileData.full_name,
+									avatar_url: !!existingProfileData.avatar_url,
+									created_at: existingProfileData.created_at,
+								});
+								fetchedProfile = existingProfileData;
+								break;
+							}
+						}
+
+						if (fetchedProfile) {
+							set({ profile: fetchedProfile });
 							return;
+						} else {
+							console.error(
+								"🔴 [fetchProfile] Failed to fetch profile after retries"
+							);
 						}
 					} else {
 						// Only log as error if it's NOT a duplicate key error
@@ -666,9 +796,11 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
 				} else if (createdProfile) {
 					console.log(
 						"🟢 [fetchProfile] Profile created successfully for user:",
-						user.id
+						user.id,
+						"with full_name:",
+						(createdProfile as any).full_name
 					);
-					set({ profile: createdProfile });
+					set({ profile: createdProfile as Profile });
 				}
 			}
 		} catch (error) {

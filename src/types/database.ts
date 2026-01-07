@@ -30,6 +30,7 @@ export interface Database {
 					bio: string | null;
 					role: UserRole;
 					is_active: boolean;
+					expo_push_token: string | null;
 					created_at: string;
 					updated_at: string;
 				};
@@ -41,6 +42,7 @@ export interface Database {
 					bio?: string | null;
 					role?: UserRole;
 					is_active?: boolean;
+					expo_push_token?: string | null;
 					created_at?: string;
 					updated_at?: string;
 				};
@@ -52,6 +54,7 @@ export interface Database {
 					bio?: string | null;
 					role?: UserRole;
 					is_active?: boolean;
+					expo_push_token?: string | null;
 					updated_at?: string;
 				};
 			};

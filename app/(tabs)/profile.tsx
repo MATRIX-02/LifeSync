@@ -46,7 +46,11 @@ export default function ProfileScreen() {
 		signOut,
 		user,
 	} = useAuthStore();
-	const { getActiveHabits, getOverallStats } = useHabitStore();
+	const {
+		getActiveHabits,
+		getOverallStats,
+		isLoading: habitsLoading,
+	} = useHabitStore();
 	const {
 		fitnessProfile,
 		setFitnessProfile,
@@ -368,11 +372,17 @@ export default function ProfileScreen() {
 
 	const getMemberSince = () => {
 		if (authProfile?.created_at) {
-			return new Date(authProfile.created_at).toLocaleDateString("en-US", {
-				month: "long",
-				year: "numeric",
-			});
+			const date = new Date(authProfile.created_at).toLocaleDateString(
+				"en-US",
+				{
+					month: "long",
+					year: "numeric",
+				}
+			);
+			console.log("📅 [ProfileScreen] Member since:", date);
+			return date;
 		}
+		console.log("📅 [ProfileScreen] Member since: Just now (no created_at)");
 		return "Just now";
 	};
 

@@ -19,7 +19,7 @@ import {
 export default function SubscriptionScreen() {
 	const { theme } = useTheme();
 	const router = useRouter();
-	const { user, subscription, fetchSubscription } = useAuthStore();
+	const { user, profile, subscription, fetchSubscription } = useAuthStore();
 	const {
 		plans,
 		currentCoupon,
@@ -106,7 +106,7 @@ export default function SubscriptionScreen() {
 					selectedPlan.name,
 					billingCycle,
 					user.email,
-					user.user_metadata?.full_name || "User",
+					profile?.full_name || user.user_metadata?.full_name || "User",
 					currentCoupon?.id
 				);
 
@@ -153,14 +153,12 @@ export default function SubscriptionScreen() {
 									selectedPlan.name,
 									billingCycle,
 									user.email || "",
-									user.user_metadata?.full_name || "User",
+									profile?.full_name || user.user_metadata?.full_name || "User",
 									phone,
 									currentCoupon?.id
 								);
 
 								if (!error && order) {
-									// In a real app, you would open the PhonePe payment link
-									// For now, we simulate a successful payment
 									Alert.alert(
 										"PhonePe Payment",
 										`Payment link created for ₹${finalPrice.toFixed(

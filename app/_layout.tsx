@@ -5,6 +5,7 @@ import {
 	ThemeProvider as NavigationThemeProvider,
 } from "@react-navigation/native";
 import { useFonts } from "expo-font";
+import * as Notifications from "expo-notifications";
 import { Stack, useRouter, useSegments } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import { useEffect, useState } from "react";
@@ -125,6 +126,7 @@ function RootLayoutNav() {
 	const { isDark, theme } = useTheme();
 	const {
 		user,
+		profile,
 		isLoading: authLoading,
 		initialize: initializeAuth,
 	} = useAuthStore();
@@ -149,6 +151,28 @@ function RootLayoutNav() {
 		init();
 	}, []);
 
+	// Set up notification response listener (when user taps notification)
+	useEffect(() => {
+		const subscription = Notifications.addNotificationResponseReceivedListener(
+			(response) => {
+				const data = response.notification.request.content.data;
+
+				// Handle group invitation notification
+				if (data?.type === "group_invitation") {
+					// Navigate to finance module to show the group invitations
+					router.push({
+						pathname: "/(tabs)/finance",
+						params: { showInvitations: "true" },
+					});
+				}
+			}
+		);
+
+		return () => {
+			subscription.remove();
+		};
+	}, [router]);
+
 	// Handle auth state and route protection
 	useEffect(() => {
 		if (!isInitialized || authLoading) return;
@@ -162,11 +186,12 @@ function RootLayoutNav() {
 		if (!user && !inAuthGroup) {
 			// Redirect to login if not authenticated
 			router.replace("/auth/login");
-		} else if (user && inAuthGroup) {
-			// Redirect to home if authenticated and trying to access auth screens
+		} else if (user && profile && inAuthGroup) {
+			// Redirect to home if authenticated WITH profile loaded and trying to access auth screens
+			// Wait for profile to be loaded before navigating away from auth screens
 			router.replace("/(tabs)");
 		}
-	}, [user, segments, isInitialized, authLoading]);
+	}, [user, profile, segments, isInitialized, authLoading]);
 
 	// Show loading screen while initializing
 	if (!isInitialized || (authLoading && isSupabaseConfigured())) {

@@ -1,8 +1,130 @@
-import * as Notifications from "expo-notifications";
+import Constants from "expo-constants";
 import * as Device from "expo-device";
+import * as Notifications from "expo-notifications";
 import { Platform } from "react-native";
+import { supabase } from "../config/supabase";
 
 export class NotificationService {
+	// Get and register the Expo Push Token for the current user
+	static async registerPushToken(userId: string): Promise<string | null> {
+		if (!Device.isDevice) {
+			console.warn("Push notifications only work on physical devices");
+			return null;
+		}
+
+		try {
+			// Get permission first
+			const { status: existingStatus } =
+				await Notifications.getPermissionsAsync();
+			let finalStatus = existingStatus;
+
+			if (existingStatus !== "granted") {
+				const { status } = await Notifications.requestPermissionsAsync();
+				finalStatus = status;
+			}
+
+			if (finalStatus !== "granted") {
+				console.warn("Push notification permission not granted");
+				return null;
+			}
+
+			// Get the Expo Push Token
+			const projectId = Constants.expoConfig?.extra?.eas?.projectId;
+			const tokenData = await Notifications.getExpoPushTokenAsync({
+				projectId: projectId,
+			});
+			const pushToken = tokenData.data;
+
+			console.log("📱 Expo Push Token:", pushToken);
+
+			// Save to user's profile in Supabase
+			const { error } = await (supabase.from("profiles") as any)
+				.update({ expo_push_token: pushToken })
+				.eq("id", userId);
+
+			if (error) {
+				console.error("Error saving push token:", error);
+			} else {
+				console.log("✅ Push token saved to profile");
+			}
+
+			return pushToken;
+		} catch (error) {
+			console.error("Error registering push token:", error);
+			return null;
+		}
+	}
+
+	// Send push notification to a specific user by their user ID
+	static async sendPushNotificationToUser(
+		targetUserId: string,
+		title: string,
+		body: string,
+		data?: Record<string, any>
+	): Promise<boolean> {
+		try {
+			// Get the target user's push token from Supabase
+			const { data: profile, error } = await supabase
+				.from("profiles")
+				.select("expo_push_token")
+				.eq("id", targetUserId)
+				.single();
+
+			if (error || !profile?.expo_push_token) {
+				console.warn(
+					`No push token found for user ${targetUserId}:`,
+					error?.message
+				);
+				return false;
+			}
+
+			const pushToken = profile.expo_push_token;
+
+			// Send via Expo Push API
+			const message = {
+				to: pushToken,
+				sound: "default",
+				title,
+				body,
+				data: data || {},
+			};
+
+			const response = await fetch("https://exp.host/--/api/v2/push/send", {
+				method: "POST",
+				headers: {
+					Accept: "application/json",
+					"Accept-encoding": "gzip, deflate",
+					"Content-Type": "application/json",
+				},
+				body: JSON.stringify(message),
+			});
+
+			const result = await response.json();
+
+			if (result.data?.status === "ok") {
+				console.log(`✅ Push notification sent to user ${targetUserId}`);
+				return true;
+			} else {
+				console.error("Push notification error:", result);
+				return false;
+			}
+		} catch (error) {
+			console.error("Error sending push notification:", error);
+			return false;
+		}
+	}
+
+	// Clear push token on logout
+	static async clearPushToken(userId: string): Promise<void> {
+		try {
+			await (supabase.from("profiles") as any)
+				.update({ expo_push_token: null })
+				.eq("id", userId);
+			console.log("🗑️ Push token cleared from profile");
+		} catch (error) {
+			console.error("Error clearing push token:", error);
+		}
+	}
 	static async requestPermissions(): Promise<boolean> {
 		if (!Device.isDevice) {
 			console.warn("Notifications only work on physical devices");

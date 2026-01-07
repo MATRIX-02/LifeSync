@@ -46,7 +46,7 @@ export default function SettingsScreen() {
 	const workoutStore = useWorkoutStore();
 	const financeStore = useFinanceStore();
 	const moduleStore = useModuleStore();
-	const { user } = useAuthStore();
+	const { user, isAdmin } = useAuthStore();
 
 	const [notificationsEnabled, setNotificationsEnabled] = useState(true);
 	const [soundEnabled, setSoundEnabled] = useState(true);
@@ -849,59 +849,6 @@ export default function SettingsScreen() {
 								/>
 							}
 						/>
-
-						<View style={styles.divider} />
-
-						<TouchableOpacity
-							style={styles.settingRow}
-							onPress={async () => {
-								try {
-									const granted =
-										await NotificationService.requestPermissions();
-									if (!granted) {
-										Alert.alert(
-											"Permission Denied",
-											"Please enable notifications in your device settings."
-										);
-										return;
-									}
-									await NotificationService.scheduleInstantNotification(
-										"🔔 Test Notification",
-										"Notifications are working! Your habit reminders will appear like this.",
-										{ type: "test" }
-									);
-									Alert.alert(
-										"Success!",
-										"A test notification has been sent. Check your notification tray!"
-									);
-								} catch (error) {
-									Alert.alert(
-										"Error",
-										"Failed to send notification. Make sure you're on a real device, not Expo Go."
-									);
-								}
-							}}
-						>
-							<View
-								style={[
-									styles.settingIcon,
-									{ backgroundColor: theme.primary + "20" },
-								]}
-							>
-								<Ionicons name="send" size={20} color={theme.primary} />
-							</View>
-							<View style={styles.settingContent}>
-								<Text style={styles.settingLabel}>Test Notification</Text>
-								<Text style={styles.settingDescription}>
-									Send a test to verify notifications work
-								</Text>
-							</View>
-							<Ionicons
-								name="chevron-forward"
-								size={20}
-								color={theme.textMuted}
-							/>
-						</TouchableOpacity>
 					</View>
 				</View>
 
@@ -1482,39 +1429,159 @@ export default function SettingsScreen() {
 					)}
 				</View>
 
-				{/* Developer Section */}
-				<View style={styles.section}>
-					<Text style={styles.sectionTitle}>DEVELOPER</Text>
+				{/* Developer Section - Admin Only */}
+				{isAdmin() && (
+					<View style={styles.section}>
+						<Text style={styles.sectionTitle}>DEVELOPER</Text>
 
-					<View style={styles.settingCard}>
-						<TouchableOpacity
-							style={styles.settingRow}
-							onPress={handleShowScheduledReminders}
-						>
-							<View
-								style={[
-									styles.settingIcon,
-									{ backgroundColor: "#8B5CF6" + "20" },
-								]}
+						<View style={styles.settingCard}>
+							<TouchableOpacity
+								style={styles.settingRow}
+								onPress={handleShowScheduledReminders}
 							>
-								<Ionicons name="bug" size={20} color="#8B5CF6" />
-							</View>
-							<View style={styles.settingContent}>
-								<Text style={styles.settingLabel}>
-									View Scheduled Reminders
-								</Text>
-								<Text style={styles.settingDescription}>
-									Debug: View all scheduled notifications
-								</Text>
-							</View>
-							<Ionicons
-								name="chevron-forward"
-								size={20}
-								color={theme.textMuted}
-							/>
-						</TouchableOpacity>
+								<View
+									style={[
+										styles.settingIcon,
+										{ backgroundColor: "#8B5CF6" + "20" },
+									]}
+								>
+									<Ionicons name="bug" size={20} color="#8B5CF6" />
+								</View>
+								<View style={styles.settingContent}>
+									<Text style={styles.settingLabel}>
+										View Scheduled Reminders
+									</Text>
+									<Text style={styles.settingDescription}>
+										Debug: View all scheduled notifications
+									</Text>
+								</View>
+								<Ionicons
+									name="chevron-forward"
+									size={20}
+									color={theme.textMuted}
+								/>
+							</TouchableOpacity>
+
+							<View style={styles.divider} />
+
+							<TouchableOpacity
+								style={styles.settingRow}
+								onPress={async () => {
+									try {
+										const granted =
+											await NotificationService.requestPermissions();
+										if (!granted) {
+											Alert.alert(
+												"Permission Denied",
+												"Please enable notifications in your device settings."
+											);
+											return;
+										}
+										await NotificationService.scheduleInstantNotification(
+											"🔔 Test Notification",
+											"Notifications are working! Your habit reminders will appear like this.",
+											{ type: "test" }
+										);
+										Alert.alert(
+											"Success!",
+											"A test notification has been sent. Check your notification tray!"
+										);
+									} catch (error) {
+										Alert.alert(
+											"Error",
+											"Failed to send notification. Make sure you're on a real device, not Expo Go."
+										);
+									}
+								}}
+							>
+								<View
+									style={[
+										styles.settingIcon,
+										{ backgroundColor: theme.primary + "20" },
+									]}
+								>
+									<Ionicons name="send" size={20} color={theme.primary} />
+								</View>
+								<View style={styles.settingContent}>
+									<Text style={styles.settingLabel}>Test Notification</Text>
+									<Text style={styles.settingDescription}>
+										Send a test push notification
+									</Text>
+								</View>
+								<Ionicons
+									name="chevron-forward"
+									size={20}
+									color={theme.textMuted}
+								/>
+							</TouchableOpacity>
+
+							<View style={styles.divider} />
+
+							<TouchableOpacity
+								style={styles.settingRow}
+								onPress={async () => {
+									try {
+										const granted =
+											await NotificationService.requestPermissions();
+										if (!granted) {
+											Alert.alert(
+												"Permission Denied",
+												"Please enable notifications in your device settings."
+											);
+											return;
+										}
+										await NotificationService.scheduleInstantNotification(
+											"Group Invitation",
+											'Test User invited you to join "Test Group" group',
+											{
+												type: "group_invitation",
+												groupId: "test-group-id",
+												groupName: "Test Group",
+												invitedByName: "Test User",
+												invitedByUserId: "test-user-id",
+											}
+										);
+										Alert.alert(
+											"Success!",
+											"A test invite notification has been sent. Tap it to test navigation to invitations!"
+										);
+									} catch (error) {
+										Alert.alert(
+											"Error",
+											"Failed to send notification. Make sure you're on a real device, not Expo Go."
+										);
+									}
+								}}
+							>
+								<View
+									style={[
+										styles.settingIcon,
+										{ backgroundColor: theme.warning + "20" },
+									]}
+								>
+									<Ionicons
+										name="people-outline"
+										size={20}
+										color={theme.warning}
+									/>
+								</View>
+								<View style={styles.settingContent}>
+									<Text style={styles.settingLabel}>
+										Test Invite Notification
+									</Text>
+									<Text style={styles.settingDescription}>
+										Test group invitation notification flow
+									</Text>
+								</View>
+								<Ionicons
+									name="chevron-forward"
+									size={20}
+									color={theme.textMuted}
+								/>
+							</TouchableOpacity>
+						</View>
 					</View>
-				</View>
+				)}
 
 				{/* About Section */}
 				<View style={styles.section}>
@@ -1536,7 +1603,7 @@ export default function SettingsScreen() {
 							</View>
 							<View style={styles.settingContent}>
 								<Text style={styles.settingLabel}>App Version</Text>
-								<Text style={styles.settingDescription}>1.0.0 (Build 1)</Text>
+								<Text style={styles.settingDescription}>2.1.0 (Build 2)</Text>
 							</View>
 						</View>
 
@@ -1552,7 +1619,7 @@ export default function SettingsScreen() {
 								<Ionicons name="code-slash" size={20} color={theme.accent} />
 							</View>
 							<View style={styles.settingContent}>
-								<Text style={styles.settingLabel}>Made with ❤️</Text>
+								<Text style={styles.settingLabel}>Made with ❤️ by Mayank</Text>
 								<Text style={styles.settingDescription}>
 									For personal productivity
 								</Text>

@@ -3,6 +3,7 @@
 
 import { useAuthStore } from "@/src/context/authStore";
 import { Theme } from "@/src/context/themeContext";
+import { NotificationService } from "@/src/services/notificationService";
 import * as SplitWiseService from "@/src/services/splitwiseService";
 import {
 	ExpenseCategory,
@@ -11,6 +12,7 @@ import {
 	SplitGroup,
 } from "@/src/types/finance";
 import Ionicons from "@expo/vector-icons/Ionicons";
+import { useLocalSearchParams } from "expo-router";
 import React, { useCallback, useEffect, useState } from "react";
 import {
 	ActivityIndicator,
@@ -97,6 +99,9 @@ const GROUP_COLORS = COLORS;
 
 function SplitWiseNew({ theme, currency, onOpenDrawer }: SplitWiseProps) {
 	const { user, profile } = useAuthStore();
+	const { showInvitations: showInvitationsParam } = useLocalSearchParams<{
+		showInvitations?: string;
+	}>();
 	const styles = createStyles(theme);
 
 	// State - Groups
@@ -223,6 +228,13 @@ function SplitWiseNew({ theme, currency, onOpenDrawer }: SplitWiseProps) {
 	useEffect(() => {
 		loadData();
 	}, [loadData]);
+
+	// Auto-open invitations modal when navigated from notification
+	useEffect(() => {
+		if (showInvitationsParam === "true") {
+			setShowInvitations(true);
+		}
+	}, [showInvitationsParam]);
 
 	// Subscribe to real-time updates
 	useEffect(() => {
@@ -438,6 +450,25 @@ function SplitWiseNew({ theme, currency, onOpenDrawer }: SplitWiseProps) {
 		if (error) {
 			Alert.alert("Error", error);
 		} else {
+			// Send push notification to the invited user (not to yourself)
+			try {
+				await NotificationService.sendPushNotificationToUser(
+					inviteeUserId, // Send to the invited user, not current user
+					"Group Invitation",
+					`${currentUserName} invited you to join "${selectedGroup.name}" group`,
+					{
+						type: "group_invitation",
+						groupId: selectedGroup.id,
+						groupName: selectedGroup.name,
+						invitedByName: currentUserName,
+						invitedByUserId: currentUserId,
+					}
+				);
+			} catch (notificationError) {
+				console.error("Error sending push notification:", notificationError);
+				// Don't fail the invitation if notification fails
+			}
+
 			Alert.alert("Success", `Invitation sent to ${inviteeName}`);
 			setSearchQuery("");
 			setSearchResults([]);
