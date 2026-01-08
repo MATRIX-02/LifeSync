@@ -1,5 +1,5 @@
 // Budget Manager - Create and manage budgets with progress tracking
-
+import { Alert } from "@/src/components/CustomAlert";
 import { SubscriptionCheckResult } from "@/src/components/PremiumFeatureGate";
 import { useFinanceStore } from "@/src/context/financeStoreDB";
 import {
@@ -15,7 +15,6 @@ import Ionicons from "@expo/vector-icons/Ionicons";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import React, { useMemo, useState } from "react";
 import {
-	Alert,
 	Modal,
 	Platform,
 	ScrollView,

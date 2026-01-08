@@ -1,6 +1,7 @@
 // SplitWise - Group expense splitting
 // Redesigned with cleaner, more intuitive UI
 
+import { Alert } from "@/src/components/CustomAlert";
 import { useAuthStore } from "@/src/context/authStore";
 import { useFinanceStore } from "@/src/context/financeStoreDB";
 import { Theme } from "@/src/context/themeContext";
@@ -8,7 +9,6 @@ import { GroupMember, SplitGroup } from "@/src/types/finance";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import React, { useState } from "react";
 import {
-	Alert,
 	Modal,
 	ScrollView,
 	StyleSheet,

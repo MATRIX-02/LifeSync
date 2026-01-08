@@ -8,11 +8,20 @@ import {
 	SplitExpense,
 	SplitGroup,
 } from "@/src/types/finance";
+import { NotificationService } from "./notificationService";
 
 // ============== HELPER FUNCTIONS ==============
 
-const generateId = () =>
-	`${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+// Generate RFC4122 v4 UUID string
+const generateId = (): string => {
+	// Lightweight UUIDv4 generator using Math.random().
+	// This produces a UUID string acceptable to Postgres `uuid` columns.
+	return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+		const r = (Math.random() * 16) | 0;
+		const v = c === "x" ? r : (r & 0x3) | 0x8;
+		return v.toString(16);
+	});
+};
 
 // Convert camelCase to snake_case
 const toSnakeCase = (str: string) =>
@@ -59,10 +68,9 @@ export const createSplitGroup = async (
 	}
 ): Promise<{ data: SplitGroup | null; error: string | null }> => {
 	try {
-		const groupId = generateId();
 		const now = new Date().toISOString();
 
-		// Create the creator as the first member
+		// Create the creator as the first member (client-generated uuid for member id)
 		const creatorMember: GroupMember = {
 			id: generateId(),
 			name: userName,
@@ -72,8 +80,49 @@ export const createSplitGroup = async (
 			joinedAt: now,
 		};
 
+		// Save to Supabase and let the DB generate the group `id` (uses default gen_random_uuid())
+		const { data: insertedGroup, error: insertError } = await (
+			supabase.from("split_groups") as any
+		)
+			.insert({
+				// omit `id` so Postgres uses the column default (gen_random_uuid())
+				user_id: userId,
+				name: groupData.name,
+				description: groupData.description,
+				color: groupData.color,
+				icon: groupData.icon,
+				members: JSON.stringify([creatorMember]),
+				expenses: JSON.stringify([]),
+				settlements: JSON.stringify([]),
+				total_expenses: 0,
+				created_at: now,
+				updated_at: now,
+				is_archived: false,
+			})
+			.select()
+			.maybeSingle();
+
+		if (insertError || !insertedGroup)
+			throw insertError || new Error("Failed to insert group");
+
+		const dbGroupId: string = insertedGroup.id;
+
+		// Also add to group_members table for multi-user access; let DB generate its PK id
+		const { error: memberInsertError } = await (
+			supabase.from("split_group_members") as any
+		).insert({
+			id: generateId(),
+			group_id: dbGroupId,
+			user_id: userId,
+			member_id: creatorMember.id,
+			role: "admin",
+			joined_at: now,
+		});
+
+		if (memberInsertError) throw memberInsertError;
+
 		const newGroup: SplitGroup = {
-			id: groupId,
+			id: dbGroupId,
 			name: groupData.name,
 			description: groupData.description,
 			color: groupData.color,
@@ -87,35 +136,6 @@ export const createSplitGroup = async (
 			updatedAt: now,
 			isArchived: false,
 		};
-
-		// Save to Supabase
-		const { error } = await (supabase.from("split_groups") as any).insert({
-			id: groupId,
-			user_id: userId,
-			name: groupData.name,
-			description: groupData.description,
-			color: groupData.color,
-			icon: groupData.icon,
-			members: JSON.stringify([creatorMember]),
-			expenses: JSON.stringify([]),
-			settlements: JSON.stringify([]),
-			total_expenses: 0,
-			created_at: now,
-			updated_at: now,
-			is_archived: false,
-		});
-
-		if (error) throw error;
-
-		// Also add to group_members table for multi-user access
-		await (supabase.from("split_group_members") as any).insert({
-			id: generateId(),
-			group_id: groupId,
-			user_id: userId,
-			member_id: creatorMember.id,
-			role: "admin",
-			joined_at: now,
-		});
 
 		return { data: newGroup, error: null };
 	} catch (error: any) {
@@ -164,6 +184,12 @@ export const deleteSplitGroup = async (
 	groupId: string
 ): Promise<{ error: string | null }> => {
 	try {
+		// Attempt to cancel any scheduled local notifications related to this group
+		try {
+			await NotificationService.cancelGroupNotifications(groupId);
+		} catch (nErr) {
+			console.warn("Failed to cancel group notifications:", nErr);
+		}
 		// Delete group members first
 		await (supabase.from("split_group_members") as any)
 			.delete()
@@ -202,7 +228,20 @@ export const fetchUserGroups = async (
 
 		const groupIds = (membershipData || []).map((m: any) => m.group_id);
 
-		if (groupIds.length === 0) {
+		// Ensure we only pass valid UUIDs to Postgres. Older records may have
+		// non-UUID IDs (timestamp_based) from earlier versions of the app.
+		const uuidRegex =
+			/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+		const validGroupIds = groupIds.filter((id: string) => uuidRegex.test(id));
+		const invalidGroupIds = groupIds.filter(
+			(id: string) => !uuidRegex.test(id)
+		);
+
+		if (invalidGroupIds.length > 0) {
+			console.warn("Ignoring invalid group IDs (non-UUID):", invalidGroupIds);
+		}
+
+		if (validGroupIds.length === 0) {
 			return { data: [], error: null };
 		}
 
@@ -211,7 +250,7 @@ export const fetchUserGroups = async (
 			supabase.from("split_groups") as any
 		)
 			.select("*")
-			.in("id", groupIds)
+			.in("id", validGroupIds)
 			.eq("is_archived", false)
 			.order("updated_at", { ascending: false });
 

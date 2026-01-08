@@ -3,6 +3,7 @@
  * Shows detected transactions and allows user to add them to finance tracker
  */
 
+import { Alert } from "@/src/components/CustomAlert";
 import { useFinanceStore } from "@/src/context/financeStoreDB";
 import {
 	ExpenseCategory,
@@ -15,7 +16,6 @@ import { EXPENSE_CATEGORIES, INCOME_CATEGORIES } from "@/src/types/finance";
 import { Ionicons } from "@expo/vector-icons";
 import React, { useEffect, useState } from "react";
 import {
-	Alert,
 	Modal,
 	Platform,
 	ScrollView,

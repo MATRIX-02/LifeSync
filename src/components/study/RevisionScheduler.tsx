@@ -139,27 +139,27 @@ export default function RevisionScheduler({
 		setShowDeckModal(true);
 	};
 
-	const saveDeck = async () => {
-		if (!deckName.trim()) {
-			Alert.alert("Error", "Please enter a deck name");
-			return;
-		}
+	// const saveDeck = async () => {
+	// 	if (!deckName.trim()) {
+	// 		Alert.alert("Error", "Please enter a deck name");
+	// 		return;
+	// 	}
 
-		const deckData = {
-			name: deckName.trim(),
-			description: deckDescription.trim() || undefined,
-			goalId: selectedGoalId,
-			subjectId: selectedSubjectId,
-		};
+	// 	const deckData = {
+	// 		name: deckName.trim(),
+	// 		description: deckDescription.trim() || undefined,
+	// 		goalId: selectedGoalId,
+	// 		subjectId: selectedSubjectId,
+	// 	};
 
-		if (editingDeck) {
-			await updateFlashcardDeck(editingDeck.id, deckData);
-		} else {
-			await addFlashcardDeck(deckData);
-		}
+	// 	if (editingDeck) {
+	// 		await updateFlashcardDeck(editingDeck.id, deckData);
+	// 	} else {
+	// 		await addFlashcardDeck(deckData);
+	// 	}
 
-		setShowDeckModal(false);
-	};
+	// 	setShowDeckModal(false);
+	// };
 
 	const confirmDeleteDeck = (deck: FlashcardDeck) => {
 		Alert.alert(
@@ -191,6 +191,40 @@ export default function RevisionScheduler({
 		setCardBack(card.back);
 		setCardTags(card.tags?.join(", ") || "");
 		setShowCardModal(true);
+	};
+	const saveDeck = async () => {
+		if (!deckName.trim()) {
+			Alert.alert("Error", "Please enter a deck name");
+			return;
+		}
+
+		const deckData = {
+			name: deckName.trim(),
+			description: deckDescription.trim() || undefined,
+			goalId: selectedGoalId,
+			subjectId: selectedSubjectId,
+		};
+
+		if (editingDeck) {
+			await updateFlashcardDeck(editingDeck.id, deckData);
+			// Update local selected deck immediately so UI reflects changes
+			// Prefer fresh deck from store; fallback to merging fields.
+			const updated = flashcardDecks.find((d) => d.id === editingDeck.id);
+			if (updated) {
+				setSelectedDeck(updated);
+			} else {
+				setSelectedDeck((prev) =>
+					prev && prev.id === editingDeck.id ? { ...prev, ...deckData } : prev
+				);
+			}
+		} else {
+			await addFlashcardDeck(deckData);
+			// If a new deck was added, try to set it as selected (find by name fallback)
+			const created = flashcardDecks.find((d) => d.name === deckData.name);
+			if (created) setSelectedDeck(created);
+		}
+
+		setShowDeckModal(false);
 	};
 
 	const saveCard = async () => {
@@ -359,12 +393,23 @@ export default function RevisionScheduler({
 					<TouchableOpacity onPress={() => setSelectedDeck(null)}>
 						<Ionicons name="arrow-back" size={24} color={theme.text} />
 					</TouchableOpacity>
-					<Text style={styles.deckDetailTitle}>{selectedDeck.name}</Text>
+					<View style={{ flex: 1, alignItems: "center" }}>
+						<Text style={styles.deckDetailTitle} numberOfLines={1}>
+							{selectedDeck.name}
+						</Text>
+					</View>
+
 					<TouchableOpacity onPress={() => openEditDeck(selectedDeck)}>
 						<Ionicons name="pencil" size={22} color={theme.primary} />
 					</TouchableOpacity>
 				</View>
-
+				<View style={{ width: "100%", marginBottom: 16 }}>
+					{selectedDeck.description ? (
+						<Text style={styles.deckDetailSubtitle} numberOfLines={2}>
+							{selectedDeck.description}
+						</Text>
+					) : null}
+				</View>
 				<View style={styles.deckStats}>
 					<View style={styles.deckStatItem}>
 						<Text style={styles.deckStatValue}>{deckCards.length}</Text>
@@ -457,6 +502,143 @@ export default function RevisionScheduler({
 					)}
 					<View style={{ height: 100 }} />
 				</ScrollView>
+
+				<Modal visible={showDeckModal} animationType="slide" transparent>
+					<View style={styles.modalOverlay}>
+						<View style={styles.modalContent}>
+							<View style={styles.modalHeader}>
+								<Text style={styles.modalTitle}>
+									{editingDeck ? "Edit Deck" : "New Deck"}
+								</Text>
+								<TouchableOpacity onPress={() => setShowDeckModal(false)}>
+									<Ionicons name="close" size={24} color={theme.text} />
+								</TouchableOpacity>
+							</View>
+
+							<ScrollView showsVerticalScrollIndicator={false}>
+								<Text style={styles.inputLabel}>Deck Name *</Text>
+								<TextInput
+									style={styles.input}
+									value={deckName}
+									onChangeText={setDeckName}
+									placeholder="e.g., Physics Chapter 1"
+									placeholderTextColor={theme.textMuted}
+								/>
+
+								<Text style={styles.inputLabel}>Description</Text>
+								<TextInput
+									style={[styles.input, styles.multilineInput]}
+									value={deckDescription}
+									onChangeText={setDeckDescription}
+									placeholder="What's this deck about?"
+									placeholderTextColor={theme.textMuted}
+									multiline
+								/>
+
+								<Text style={styles.inputLabel}>Link to Goal (Optional)</Text>
+								<ScrollView horizontal showsHorizontalScrollIndicator={false}>
+									<TouchableOpacity
+										style={[
+											styles.goalOption,
+											!selectedGoalId && styles.goalOptionActive,
+										]}
+										onPress={() => {
+											setSelectedGoalId(undefined);
+											setSelectedSubjectId(undefined);
+										}}
+									>
+										<Text
+											style={[
+												styles.goalOptionText,
+												!selectedGoalId && styles.goalOptionTextActive,
+											]}
+										>
+											No Goal
+										</Text>
+									</TouchableOpacity>
+									{activeGoals.map((goal) => (
+										<TouchableOpacity
+											key={goal.id}
+											style={[
+												styles.goalOption,
+												selectedGoalId === goal.id && styles.goalOptionActive,
+											]}
+											onPress={() => {
+												setSelectedGoalId(goal.id);
+												setSelectedSubjectId(undefined);
+											}}
+										>
+											<View
+												style={[
+													styles.goalDot,
+													{ backgroundColor: goal.color || theme.primary },
+												]}
+											/>
+											<Text
+												style={[
+													styles.goalOptionText,
+													selectedGoalId === goal.id &&
+														styles.goalOptionTextActive,
+												]}
+											>
+												{goal.name}
+											</Text>
+										</TouchableOpacity>
+									))}
+								</ScrollView>
+
+								{goalSubjects.length > 0 && (
+									<>
+										<Text style={styles.inputLabel}>
+											Link to Subject (Optional)
+										</Text>
+										<View style={styles.subjectGrid}>
+											{goalSubjects.map((subject) => (
+												<TouchableOpacity
+													key={subject.id}
+													style={[
+														styles.subjectOption,
+														selectedSubjectId === subject.id &&
+															styles.subjectOptionActive,
+													]}
+													onPress={() => setSelectedSubjectId(subject.id)}
+												>
+													<Ionicons
+														name={(subject.icon as any) || "book"}
+														size={18}
+														color={
+															selectedSubjectId === subject.id
+																? "#fff"
+																: subject.color || theme.text
+														}
+													/>
+													<Text
+														style={[
+															styles.subjectOptionText,
+															selectedSubjectId === subject.id &&
+																styles.subjectOptionTextActive,
+														]}
+													>
+														{subject.name}
+													</Text>
+												</TouchableOpacity>
+											))}
+										</View>
+									</>
+								)}
+
+								<TouchableOpacity
+									style={styles.submitButton}
+									onPress={saveDeck}
+								>
+									<Text style={styles.submitButtonText}>
+										{editingDeck ? "Save Changes" : "Create Deck"}
+									</Text>
+								</TouchableOpacity>
+							</ScrollView>
+						</View>
+					</View>
+				</Modal>
 
 				{/* Add/Edit Card Modal */}
 				<Modal visible={showCardModal} animationType="slide" transparent>
@@ -947,6 +1129,7 @@ const createStyles = (theme: Theme) =>
 			alignItems: "center",
 			justifyContent: "space-between",
 			padding: 16,
+			paddingBottom: 0,
 		},
 		deckDetailTitle: {
 			fontSize: 18,
@@ -954,6 +1137,13 @@ const createStyles = (theme: Theme) =>
 			color: theme.text,
 			flex: 1,
 			textAlign: "center",
+		},
+		deckDetailSubtitle: {
+			fontSize: 13,
+			color: theme.textSecondary,
+			marginTop: 4,
+			textAlign: "center",
+			paddingHorizontal: 12,
 		},
 		deckStats: {
 			flexDirection: "row",

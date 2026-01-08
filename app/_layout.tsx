@@ -17,6 +17,7 @@ import { AlertProvider } from "@/src/components/CustomAlert";
 import { isSupabaseConfigured } from "@/src/config/supabase";
 import { useAuthStore } from "@/src/context/authStore";
 import { useHabitStore } from "@/src/context/habitStoreDB";
+import { useModuleStore } from "@/src/context/moduleContext";
 import { ThemeProvider, useTheme } from "@/src/context/themeContext";
 import { useNavigationPersistence } from "@/src/hooks/useNavigationPersistence";
 import { useSyncManager } from "@/src/hooks/useSyncManager";
@@ -25,7 +26,7 @@ import { NotificationService } from "@/src/services/notificationService";
 
 export {
 	// Catch any errors thrown by the Layout component.
-	ErrorBoundary,
+	ErrorBoundary
 } from "expo-router";
 
 export const unstable_settings = {

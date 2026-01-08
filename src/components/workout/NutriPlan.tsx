@@ -16,6 +16,7 @@ import type {
 	MealType,
 } from "@/src/types/nutrition";
 import Ionicons from "@expo/vector-icons/Ionicons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import React, { useEffect, useMemo, useState } from "react";
 import {
 	Dimensions,
@@ -139,6 +140,60 @@ export default function NutriPlan({ theme }: NutriPlanProps) {
 		useState(false);
 	const [showCustomWaterModal, setShowCustomWaterModal] = useState(false);
 	const [customWaterAmount, setCustomWaterAmount] = useState("");
+
+	// Load persisted toggle or fallback to scheduled notifications
+	useEffect(() => {
+		let mounted = true;
+		(async () => {
+			try {
+				const stored = await AsyncStorage.getItem("waterRemindersEnabled");
+				if (mounted && stored !== null) {
+					setWaterRemindersEnabled(stored === "true");
+					// If persisted ON but no scheduled notifications exist, try to reschedule
+					if (stored === "true") {
+						try {
+							const scheduled =
+								await NotificationService.getAllScheduledNotifications();
+							const hasWater = scheduled.some(
+								(s) =>
+									s.content?.data?.type === "water_reminder" ||
+									s.content?.data?.type === "water_reminder_single"
+							);
+							if (!hasWater) {
+								const granted = await NotificationService.requestPermissions();
+								if (granted) {
+									await NotificationService.scheduleWaterReminders(
+										dailySummary.waterGoal,
+										7,
+										22
+									);
+									console.log(
+										"Auto-rescheduled water reminders from persisted flag"
+									);
+								}
+							}
+						} catch (e) {
+							console.error("Error during auto-reschedule:", e);
+						}
+					}
+					return;
+				}
+				const scheduled =
+					await NotificationService.getAllScheduledNotifications();
+				const hasWater = scheduled.some(
+					(s) =>
+						s.content?.data?.type === "water_reminder" ||
+						s.content?.data?.type === "water_reminder_single"
+				);
+				if (mounted) setWaterRemindersEnabled(hasWater);
+			} catch (err) {
+				console.error("Error checking stored/scheduled water reminders:", err);
+			}
+		})();
+		return () => {
+			mounted = false;
+		};
+	}, []);
 
 	// Hydration tips array for random display
 	const hydrationTips = [
@@ -2501,7 +2556,7 @@ export default function NutriPlan({ theme }: NutriPlanProps) {
 
 			{/* Header */}
 			<View style={styles.header}>
-				<Text style={styles.headerTitle}>🍎 NutriPlan</Text>
+				<Text style={styles.headerTitle}>NutriPlan</Text>
 				<Text style={styles.headerSubtitle}>
 					Track meals, hydration & gut health
 				</Text>
@@ -3123,6 +3178,14 @@ export default function NutriPlan({ theme }: NutriPlanProps) {
 								onPress={async () => {
 									const newState = !waterRemindersEnabled;
 									setWaterRemindersEnabled(newState);
+									try {
+										await AsyncStorage.setItem(
+											"waterRemindersEnabled",
+											JSON.stringify(newState)
+										);
+									} catch (e) {
+										console.error("Error persisting waterRemindersEnabled:", e);
+									}
 
 									if (newState) {
 										// Schedule water reminders

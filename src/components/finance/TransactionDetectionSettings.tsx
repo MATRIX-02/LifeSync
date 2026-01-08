@@ -3,12 +3,12 @@
  * Allows users to configure auto-detection of transactions from notifications and SMS
  */
 
+import { Alert } from "@/src/components/CustomAlert";
 import { Theme, useTheme } from "@/src/context/themeContext";
 import { useTransactionDetectionStore } from "@/src/context/transactionDetectionStore";
 import { Ionicons } from "@expo/vector-icons";
 import React, { useEffect, useState } from "react";
 import {
-	Alert,
 	Linking,
 	Platform,
 	ScrollView,

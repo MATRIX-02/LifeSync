@@ -463,6 +463,25 @@ export class NotificationService {
 		}
 	}
 
+	// Cancel scheduled notifications related to a split/group by group ID
+	static async cancelGroupNotifications(groupId: string): Promise<void> {
+		const scheduled = await this.getAllScheduledNotifications();
+		for (const notif of scheduled) {
+			const data = notif.content.data || {};
+			// check common keys used for group-related notifications
+			if (
+				data?.groupId === groupId ||
+				data?.group_id === groupId ||
+				data?.splitGroupId === groupId
+			) {
+				await this.cancelNotification(notif.identifier);
+				console.log(
+					`🗑️ Cancelled group notification: ${notif.identifier} for group ${groupId}`
+				);
+			}
+		}
+	}
+
 	// ============ HYDRATION NOTIFICATIONS ============
 
 	// Schedule water reminder notifications throughout the day

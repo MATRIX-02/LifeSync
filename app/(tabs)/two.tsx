@@ -340,7 +340,45 @@ export default function SettingsScreen() {
 		try {
 			const reminders =
 				await NotificationService.getAllScheduledNotifications();
-			setScheduledNotifications(reminders);
+
+			// Helper to compute next-occurrence timestamp for a notification trigger
+			const getNextTriggerTime = (notif: any): number => {
+				try {
+					const trig = notif.trigger || {};
+					const now = Date.now();
+					// Daily trigger (some platforms use 'daily' string, others numeric code 0)
+					if (trig.type === "daily" || trig.type === 0) {
+						const hour = Number(trig.hour ?? 0);
+						const minute = Number(trig.minute ?? 0);
+						const cand = new Date();
+						cand.setHours(hour, minute, 0, 0);
+						if (cand.getTime() <= now) cand.setDate(cand.getDate() + 1);
+						return cand.getTime();
+					}
+
+					// Specific date trigger
+					if (trig.date) {
+						const d = new Date(trig.date);
+						if (!isNaN(d.getTime())) return d.getTime();
+					}
+
+					// Time-interval trigger
+					if (trig.seconds) {
+						return now + Number(trig.seconds) * 1000;
+					}
+
+					// Fallback: sort by identifier stable order
+					return Number.MAX_SAFE_INTEGER;
+				} catch (e) {
+					return Number.MAX_SAFE_INTEGER;
+				}
+			};
+
+			const sorted = reminders.slice().sort((a: any, b: any) => {
+				return getNextTriggerTime(a) - getNextTriggerTime(b);
+			});
+
+			setScheduledNotifications(sorted);
 			setShowDeveloper(true);
 		} catch (error) {
 			Alert.alert("Error", "Failed to fetch scheduled reminders");

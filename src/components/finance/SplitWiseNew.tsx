@@ -1,6 +1,7 @@
 // SplitWise - Enhanced Group Expense Splitting with Real User Support
 // Part 1: Imports, Types, Constants, and Component Setup
 
+import { Alert } from "@/src/components/CustomAlert";
 import { useAuthStore } from "@/src/context/authStore";
 import { Theme } from "@/src/context/themeContext";
 import { NotificationService } from "@/src/services/notificationService";
@@ -16,7 +17,6 @@ import { useLocalSearchParams } from "expo-router";
 import React, { useCallback, useEffect, useState } from "react";
 import {
 	ActivityIndicator,
-	Alert,
 	Dimensions,
 	Modal,
 	RefreshControl,
@@ -119,6 +119,7 @@ function SplitWiseNew({ theme, currency, onOpenDrawer }: SplitWiseProps) {
 
 	// State - Modals
 	const [showCreateGroup, setShowCreateGroup] = useState(false);
+	const [showEditGroup, setShowEditGroup] = useState(false);
 	const [showAddMember, setShowAddMember] = useState(false);
 	const [showInviteUser, setShowInviteUser] = useState(false);
 	const [showAddExpense, setShowAddExpense] = useState(false);
@@ -170,7 +171,7 @@ function SplitWiseNew({ theme, currency, onOpenDrawer }: SplitWiseProps) {
 	// ============== DATA FETCHING ==============
 
 	const fetchGroups = useCallback(async () => {
-		if (!currentUserId) return;
+		if (!currentUserId) return [] as SplitGroup[];
 
 		try {
 			const { data, error } = await SplitWiseService.fetchUserGroups(
@@ -178,7 +179,7 @@ function SplitWiseNew({ theme, currency, onOpenDrawer }: SplitWiseProps) {
 			);
 			if (error) {
 				console.error("Error fetching groups:", error);
-				return;
+				return [] as SplitGroup[];
 			}
 
 			// Update isCurrentUser flag for each member
@@ -191,8 +192,10 @@ function SplitWiseNew({ theme, currency, onOpenDrawer }: SplitWiseProps) {
 			}));
 
 			setGroups(updatedGroups);
+			return updatedGroups;
 		} catch (error) {
 			console.error("Error fetching groups:", error);
+			return [] as SplitGroup[];
 		}
 	}, [currentUserId]);
 
@@ -346,6 +349,47 @@ function SplitWiseNew({ theme, currency, onOpenDrawer }: SplitWiseProps) {
 		setIsLoading(false);
 	};
 
+	const handleOpenEditGroup = () => {
+		if (!selectedGroup) return;
+		setGroupForm({
+			name: selectedGroup.name || "",
+			description: selectedGroup.description || "",
+			color: selectedGroup.color || COLORS[0],
+			type: "group",
+		});
+		setShowEditGroup(true);
+	};
+
+	const handleSaveEditGroup = async () => {
+		if (!selectedGroup) return;
+		if (!groupForm.name.trim()) {
+			Alert.alert("Error", "Please enter a group name");
+			return;
+		}
+
+		setIsLoading(true);
+		const { error } = await SplitWiseService.updateSplitGroup(
+			selectedGroup.id,
+			{
+				name: groupForm.name.trim(),
+				description: groupForm.description.trim(),
+				color: groupForm.color,
+			}
+		);
+
+		if (error) {
+			Alert.alert("Error", error);
+		} else {
+			// Refresh groups and selected group
+			const updatedGroups = await fetchGroups();
+			const updated =
+				updatedGroups.find((g) => g.id === selectedGroup.id) || null;
+			setSelectedGroup(updated);
+			setShowEditGroup(false);
+		}
+		setIsLoading(false);
+	};
+
 	const handleDeleteGroup = async () => {
 		if (!selectedGroup) return;
 
@@ -389,10 +433,10 @@ function SplitWiseNew({ theme, currency, onOpenDrawer }: SplitWiseProps) {
 		if (error) {
 			Alert.alert("Error", error);
 		} else if (data) {
-			// Refresh group data
-			await fetchGroups();
+			// Refresh group data and use returned groups so UI updates immediately
+			const updatedGroups = await fetchGroups();
 			if (selectedGroup) {
-				const updated = groups.find((g) => g.id === selectedGroup.id);
+				const updated = updatedGroups?.find((g) => g.id === selectedGroup.id);
 				if (updated) setSelectedGroup(updated);
 			}
 			setMemberName("");
@@ -540,8 +584,10 @@ function SplitWiseNew({ theme, currency, onOpenDrawer }: SplitWiseProps) {
 								);
 								setSelectedGroup(null);
 							} else {
-								await fetchGroups();
-								const updated = groups.find((g) => g.id === selectedGroup.id);
+								const updatedGroups = await fetchGroups();
+								const updated = updatedGroups.find(
+									(g) => g.id === selectedGroup.id
+								);
 								if (updated) setSelectedGroup(updated);
 							}
 						}
@@ -576,28 +622,91 @@ function SplitWiseNew({ theme, currency, onOpenDrawer }: SplitWiseProps) {
 			const perPerson = amount / members.length;
 			splits = members.map((m) => ({ memberId: m.id, amount: perPerson }));
 		} else if (expenseForm.splitType === "exact") {
+			// Exact amounts must sum to total amount
 			splits = members.map((m) => ({
 				memberId: m.id,
 				amount: parseFloat(expenseForm.customSplits[m.id] || "0"),
 			}));
+
+			const totalSplit = splits.reduce(
+				(s, x) => s + (isNaN(x.amount) ? 0 : x.amount),
+				0
+			);
+			if (Math.abs(totalSplit - amount) > 0.005) {
+				Alert.alert(
+					"Error",
+					"Exact splits must add up exactly to the total amount"
+				);
+				return;
+			}
 		} else if (expenseForm.splitType === "percentage") {
-			splits = members.map((m) => ({
+			// Percentages must add to 100. Convert to amounts and handle rounding
+			const percents = members.map((m) => ({
 				memberId: m.id,
-				amount:
-					(parseFloat(expenseForm.customSplits[m.id] || "0") / 100) * amount,
+				percent: parseFloat(expenseForm.customSplits[m.id] || "0") || 0,
 			}));
+			const totalPercent = percents.reduce((s, p) => s + p.percent, 0);
+			if (Math.abs(totalPercent - 100) > 0.01) {
+				Alert.alert("Error", "Percentages must add up to 100%");
+				return;
+			}
+
+			// Calculate amounts with two-decimal rounding and distribute remainder
+			let computed: { memberId: string; amount: number }[] = percents.map(
+				(p) => ({
+					memberId: p.memberId,
+					amount: Math.floor((p.percent / 100) * amount * 100) / 100,
+				})
+			);
+			let sumComputed = computed.reduce((s, c) => s + c.amount, 0);
+			let remainder = Math.round((amount - sumComputed) * 100) / 100;
+			// Distribute remainder cents starting from first member
+			for (let i = 0; remainder > 0.001 && i < computed.length; i++) {
+				computed[i].amount =
+					Math.round((computed[i].amount + 0.01) * 100) / 100;
+				remainder =
+					Math.round(
+						(amount - computed.reduce((s, c) => s + c.amount, 0)) * 100
+					) / 100;
+			}
+			splits = computed;
 		} else if (expenseForm.splitType === "shares") {
 			const totalShares = members.reduce(
 				(sum: number, m) =>
-					sum + parseFloat(expenseForm.customSplits[m.id] || "1"),
+					sum + (parseFloat(expenseForm.customSplits[m.id] || "1") || 0),
 				0
 			);
-			splits = members.map((m) => ({
+			if (totalShares <= 0) {
+				Alert.alert("Error", "Total shares must be greater than zero");
+				return;
+			}
+
+			// Calculate amounts, handle rounding remainder
+			let computedShares = members.map((m) => ({
 				memberId: m.id,
 				amount:
-					(parseFloat(expenseForm.customSplits[m.id] || "1") / totalShares) *
-					amount,
+					Math.floor(
+						((parseFloat(expenseForm.customSplits[m.id] || "1") || 0) /
+							totalShares) *
+							amount *
+							100
+					) / 100,
 			}));
+			let sumSharesAmount = computedShares.reduce((s, c) => s + c.amount, 0);
+			let remainderShares = Math.round((amount - sumSharesAmount) * 100) / 100;
+			for (
+				let i = 0;
+				remainderShares > 0.001 && i < computedShares.length;
+				i++
+			) {
+				computedShares[i].amount =
+					Math.round((computedShares[i].amount + 0.01) * 100) / 100;
+				remainderShares =
+					Math.round(
+						(amount - computedShares.reduce((s, c) => s + c.amount, 0)) * 100
+					) / 100;
+			}
+			splits = computedShares;
 		}
 
 		const { error } = await SplitWiseService.addExpense(selectedGroup.id, {
@@ -614,8 +723,8 @@ function SplitWiseNew({ theme, currency, onOpenDrawer }: SplitWiseProps) {
 		if (error) {
 			Alert.alert("Error", error);
 		} else {
-			await fetchGroups();
-			const updated = groups.find((g) => g.id === selectedGroup.id);
+			const updatedGroups = await fetchGroups();
+			const updated = updatedGroups.find((g) => g.id === selectedGroup.id);
 			if (updated) setSelectedGroup(updated);
 
 			setExpenseForm({
@@ -649,8 +758,10 @@ function SplitWiseNew({ theme, currency, onOpenDrawer }: SplitWiseProps) {
 						if (error) {
 							Alert.alert("Error", error);
 						} else {
-							await fetchGroups();
-							const updated = groups.find((g) => g.id === selectedGroup.id);
+							const updatedGroups = await fetchGroups();
+							const updated = updatedGroups.find(
+								(g) => g.id === selectedGroup.id
+							);
 							if (updated) setSelectedGroup(updated);
 						}
 					},
@@ -687,8 +798,8 @@ function SplitWiseNew({ theme, currency, onOpenDrawer }: SplitWiseProps) {
 		if (error) {
 			Alert.alert("Error", error);
 		} else {
-			await fetchGroups();
-			const updated = groups.find((g) => g.id === selectedGroup.id);
+			const updatedGroups = await fetchGroups();
+			const updated = updatedGroups.find((g) => g.id === selectedGroup.id);
 			if (updated) setSelectedGroup(updated);
 
 			setSettlementForm({ from: "", to: "", amount: "", note: "" });
@@ -751,6 +862,7 @@ function SplitWiseNew({ theme, currency, onOpenDrawer }: SplitWiseProps) {
 						});
 						setShowSettlement(true);
 					}}
+					onEdit={handleOpenEditGroup}
 					calculateBalances={calculateBalances}
 					calculateDebts={calculateDebts}
 					formatAmount={formatAmount}
@@ -780,6 +892,19 @@ function SplitWiseNew({ theme, currency, onOpenDrawer }: SplitWiseProps) {
 				groupForm={groupForm}
 				setGroupForm={setGroupForm}
 				onCreate={handleCreateGroup}
+				theme={theme}
+				styles={styles}
+			/>
+
+			{/* Edit Group - reuse modal */}
+			<CreateGroupModal
+				visible={showEditGroup}
+				onClose={() => setShowEditGroup(false)}
+				groupForm={groupForm}
+				setGroupForm={setGroupForm}
+				onCreate={handleCreateGroup}
+				isEditing={true}
+				onSave={handleSaveEditGroup}
 				theme={theme}
 				styles={styles}
 			/>
@@ -1045,6 +1170,7 @@ interface GroupDetailViewProps {
 	formatAmount: (value: number) => string;
 	getInitials: (name: string) => string;
 	styles: any;
+	onEdit: () => void;
 }
 
 const GroupDetailView: React.FC<GroupDetailViewProps> = ({
@@ -1067,6 +1193,7 @@ const GroupDetailView: React.FC<GroupDetailViewProps> = ({
 	formatAmount,
 	getInitials,
 	styles,
+	onEdit,
 }) => {
 	const members = group.members || [];
 	const expenses = group.expenses || [];
@@ -1096,9 +1223,14 @@ const GroupDetailView: React.FC<GroupDetailViewProps> = ({
 					)}
 				</View>
 				{isAdmin && (
-					<TouchableOpacity onPress={onDelete}>
-						<Ionicons name="trash-outline" size={22} color={theme.error} />
-					</TouchableOpacity>
+					<>
+						<TouchableOpacity onPress={onEdit} style={{ marginRight: 12 }}>
+							<Ionicons name="pencil-outline" size={20} color={theme.primary} />
+						</TouchableOpacity>
+						<TouchableOpacity onPress={onDelete}>
+							<Ionicons name="trash-outline" size={22} color={theme.error} />
+						</TouchableOpacity>
+					</>
 				)}
 			</View>
 
@@ -1549,6 +1681,8 @@ interface CreateGroupModalProps {
 	>;
 	theme: Theme;
 	styles: any;
+	isEditing?: boolean;
+	onSave?: () => void;
 }
 
 const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
@@ -1559,6 +1693,8 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
 	setGroupForm,
 	theme,
 	styles,
+	isEditing,
+	onSave,
 }) => (
 	<SafeAreaView>
 		<Modal
@@ -1571,9 +1707,13 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
 					<TouchableOpacity onPress={onClose}>
 						<Text style={styles.modalCancel}>Cancel</Text>
 					</TouchableOpacity>
-					<Text style={styles.modalTitle}>Create Group</Text>
-					<TouchableOpacity onPress={onCreate}>
-						<Text style={styles.modalSave}>Create</Text>
+					<Text style={styles.modalTitle}>
+						{isEditing ? "Edit Group" : "Create Group"}
+					</Text>
+					<TouchableOpacity onPress={isEditing ? onSave : onCreate}>
+						<Text style={styles.modalSave}>
+							{isEditing ? "Save" : "Create"}
+						</Text>
 					</TouchableOpacity>
 				</View>
 
@@ -1888,6 +2028,142 @@ const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
 	const amount = parseFloat(expenseForm.amount) || 0;
 	const splitAmount = members.length > 0 ? amount / members.length : 0;
 
+	// Helpers for parsing
+	const parseNum = (v: string) => {
+		const n = parseFloat(v);
+		return isNaN(n) ? 0 : n;
+	};
+
+	const handleExactChange = (memberId: string, text: string) => {
+		// clamp input to not exceed amount when possible and auto-fill for two members
+		const updated = { ...expenseForm.customSplits, [memberId]: text };
+		const vals = members.map((m) => ({
+			id: m.id,
+			v: parseNum(updated[m.id] || "0"),
+		}));
+		const totalEntered = vals.reduce((s, x) => s + x.v, 0);
+		// If only two members, auto-fill the other
+		if (members.length === 2) {
+			const other = members.find((m) => m.id !== memberId)!;
+			let edited = parseNum(text);
+			if (edited > amount) edited = amount;
+			const otherVal = Math.max(0, Math.round((amount - edited) * 100) / 100);
+			setExpenseForm((prev) => ({
+				...prev,
+				customSplits: {
+					...prev.customSplits,
+					[memberId]: edited.toString(),
+					[other.id]: otherVal.toFixed(2),
+				},
+			}));
+			return;
+		}
+
+		// For >2 members, just clamp edited value so total doesn't exceed amount
+		const editedVal = parseNum(text);
+		const sumOthers = vals.reduce(
+			(s, x) => s + (x.id === memberId ? 0 : x.v),
+			0
+		);
+		let newEdited = editedVal;
+		if (sumOthers + newEdited > amount)
+			newEdited = Math.max(0, amount - sumOthers);
+		setExpenseForm((prev) => ({
+			...prev,
+			customSplits: {
+				...prev.customSplits,
+				[memberId]: newEdited.toFixed(2),
+			},
+		}));
+	};
+
+	const handlePercentageChange = (memberId: string, text: string) => {
+		const updated = { ...expenseForm.customSplits, [memberId]: text };
+		const vals = members.map((m) => ({
+			id: m.id,
+			v: parseNum(updated[m.id] || "0"),
+		}));
+		const totalEntered = vals.reduce((s, x) => s + x.v, 0);
+		if (members.length === 2) {
+			const other = members.find((m) => m.id !== memberId)!;
+			let edited = parseNum(text);
+			if (edited > 100) edited = 100;
+			const otherVal = Math.max(0, Math.round((100 - edited) * 100) / 100);
+			setExpenseForm((prev) => ({
+				...prev,
+				customSplits: {
+					...prev.customSplits,
+					[memberId]: edited.toString(),
+					[other.id]: otherVal.toString(),
+				},
+			}));
+			return;
+		}
+
+		// For >2, clamp to not exceed 100
+		let editedVal = parseNum(text);
+		const sumOthers = vals.reduce(
+			(s, x) => s + (x.id === memberId ? 0 : x.v),
+			0
+		);
+		if (sumOthers + editedVal > 100) editedVal = Math.max(0, 100 - sumOthers);
+		setExpenseForm((prev) => ({
+			...prev,
+			customSplits: {
+				...prev.customSplits,
+				[memberId]: editedVal.toString(),
+			},
+		}));
+	};
+
+	const handleSharesChange = (memberId: string, text: string) => {
+		// shares must be non-negative integers or decimals; leave as entered but ensure >=0
+		let edited = parseNum(text);
+		if (edited < 0) edited = 0;
+		setExpenseForm((prev) => ({
+			...prev,
+			customSplits: {
+				...prev.customSplits,
+				[memberId]: String(edited),
+			},
+		}));
+	};
+
+	const validateAndAdd = () => {
+		// Perform final validation: amount>0 & paidBy set handled by parent, but ensure splits sum correctly
+		if (expenseForm.splitType === "exact") {
+			const total = members.reduce(
+				(s, m) => s + parseNum(expenseForm.customSplits[m.id] || "0"),
+				0
+			);
+			if (Math.abs(total - amount) > 0.005) {
+				Alert.alert("Error", "Exact splits must add up to the total amount");
+				return;
+			}
+		} else if (expenseForm.splitType === "percentage") {
+			const total = members.reduce(
+				(s, m) => s + parseNum(expenseForm.customSplits[m.id] || "0"),
+				0
+			);
+			if (Math.abs(total - 100) > 0.01) {
+				Alert.alert("Error", "Percentages must add up to 100%");
+				return;
+			}
+		} else if (expenseForm.splitType === "shares") {
+			const totalShares = members.reduce(
+				(s, m) => s + (parseNum(expenseForm.customSplits[m.id] || "1") || 0),
+				0
+			);
+			if (totalShares <= 0) {
+				Alert.alert("Error", "Total shares must be greater than zero");
+				return;
+			}
+		}
+
+		// All good — call parent add handler
+		onAdd();
+	};
+
 	return (
 		<Modal
 			visible={visible}
@@ -1900,7 +2176,7 @@ const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
 						<Text style={styles.modalCancel}>Cancel</Text>
 					</TouchableOpacity>
 					<Text style={styles.modalTitle}>Add Expense</Text>
-					<TouchableOpacity onPress={onAdd}>
+					<TouchableOpacity onPress={validateAndAdd}>
 						<Text style={styles.modalSave}>Add</Text>
 					</TouchableOpacity>
 				</View>
@@ -2087,13 +2363,7 @@ const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
 											placeholderTextColor={theme.textMuted}
 											value={expenseForm.customSplits[member.id] || ""}
 											onChangeText={(text) =>
-												setExpenseForm((prev) => ({
-													...prev,
-													customSplits: {
-														...prev.customSplits,
-														[member.id]: text,
-													},
-												}))
+												handleExactChange(member.id, text)
 											}
 											keyboardType="decimal-pad"
 										/>
@@ -2118,13 +2388,7 @@ const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
 											placeholderTextColor={theme.textMuted}
 											value={expenseForm.customSplits[member.id] || ""}
 											onChangeText={(text) =>
-												setExpenseForm((prev) => ({
-													...prev,
-													customSplits: {
-														...prev.customSplits,
-														[member.id]: text,
-													},
-												}))
+												handlePercentageChange(member.id, text)
 											}
 											keyboardType="number-pad"
 										/>
@@ -2152,13 +2416,7 @@ const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
 											placeholderTextColor={theme.textMuted}
 											value={expenseForm.customSplits[member.id] || "1"}
 											onChangeText={(text) =>
-												setExpenseForm((prev) => ({
-													...prev,
-													customSplits: {
-														...prev.customSplits,
-														[member.id]: text,
-													},
-												}))
+												handleSharesChange(member.id, text)
 											}
 											keyboardType="number-pad"
 										/>
@@ -2922,6 +3180,8 @@ const createStyles = (theme: Theme) =>
 		},
 		expenseCardRight: {
 			alignItems: "flex-end",
+			// ensure there's room for the delete button positioned absolutely
+			paddingRight: 44,
 		},
 		expenseCardAmount: {
 			fontSize: 16,

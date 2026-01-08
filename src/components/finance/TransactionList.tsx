@@ -1,5 +1,6 @@
 // Transaction List - Full transaction history with filters
 
+import { Alert } from "@/src/components/CustomAlert";
 import { SubscriptionCheckResult } from "@/src/components/PremiumFeatureGate";
 import { useFinanceStore } from "@/src/context/financeStoreDB";
 import {
@@ -12,7 +13,6 @@ import { EXPENSE_CATEGORIES, INCOME_CATEGORIES } from "@/src/types/finance";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import React, { useMemo, useState } from "react";
 import {
-	Alert,
 	FlatList,
 	Modal,
 	ScrollView,
