@@ -1,3 +1,4 @@
+import { Alert } from "@/src/components/CustomAlert";
 import { useHabitStore } from "@/src/context/habitStoreDB";
 import { Theme, useColors, useTheme } from "@/src/context/themeContext";
 import { FrequencyType, HabitType, TargetType } from "@/src/types";
@@ -6,7 +7,6 @@ import DateTimePicker from "@react-native-community/datetimepicker";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
-	Alert,
 	Animated,
 	Dimensions,
 	Modal,

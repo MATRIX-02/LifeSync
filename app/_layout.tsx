@@ -13,6 +13,7 @@ import { ActivityIndicator, StatusBar, View } from "react-native";
 import "react-native-reanimated";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
+import { AlertProvider } from "@/src/components/CustomAlert";
 import { isSupabaseConfigured } from "@/src/config/supabase";
 import { useAuthStore } from "@/src/context/authStore";
 import { useHabitStore } from "@/src/context/habitStoreDB";
@@ -115,8 +116,10 @@ export default function RootLayout() {
 	return (
 		<SafeAreaProvider>
 			<ThemeProvider>
-				<StatusBar translucent={false} />
-				<RootLayoutNav />
+				<AlertProvider>
+					<StatusBar translucent={false} />
+					<RootLayoutNav />
+				</AlertProvider>
 			</ThemeProvider>
 		</SafeAreaProvider>
 	);

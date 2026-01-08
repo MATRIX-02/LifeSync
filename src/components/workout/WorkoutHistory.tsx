@@ -1,5 +1,6 @@
 // Workout History - View past workout sessions
 
+import { Alert } from "@/src/components/CustomAlert";
 import { SubscriptionCheckResult } from "@/src/components/PremiumFeatureGate";
 import { Theme } from "@/src/context/themeContext";
 import { useWorkoutStore } from "@/src/context/workoutStoreDB";
@@ -8,7 +9,6 @@ import { MuscleGroup, WorkoutSession } from "@/src/types/workout";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import React, { useMemo, useState } from "react";
 import {
-	Alert,
 	SectionList,
 	StyleSheet,
 	Text,

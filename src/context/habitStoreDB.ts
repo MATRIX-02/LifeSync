@@ -180,7 +180,7 @@ interface HabitStoreDB {
 	}) => Promise<void>;
 
 	// Clear
-	clearAllData: () => void;
+	clearAllData: () => Promise<void>;
 }
 
 const defaultSettings: AppSettings = {
@@ -804,12 +804,32 @@ export const useHabitStore = create<HabitStoreDB>()((set, get) => ({
 		}
 	},
 
-	clearAllData: () =>
-		set({
-			habits: [],
-			logs: [],
-			profile: null,
-			settings: defaultSettings,
-			stats: new Map(),
-		}),
+	clearAllData: async () => {
+		const { userId } = get();
+		if (!userId) {
+			console.error("No user ID - cannot clear data");
+			return;
+		}
+		console.log("🗑️ Clearing habit data for user:", userId);
+
+		try {
+			// Delete from database with user_id filter
+			await Promise.all([
+				supabase.from("habit_logs").delete().eq("user_id", userId),
+				supabase.from("user_habits").delete().eq("user_id", userId),
+			]);
+
+			// Clear local state
+			set({
+				habits: [],
+				logs: [],
+				profile: null,
+				settings: defaultSettings,
+				stats: new Map(),
+			});
+			console.log("✅ Habit data cleared");
+		} catch (error: any) {
+			console.error("❌ Failed to clear habit data:", error);
+		}
+	},
 }));

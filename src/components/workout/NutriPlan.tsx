@@ -1,11 +1,13 @@
 // NutriPlan - Comprehensive Meal & Nutrition Tracker
 // Features: Meal logging, Food search, Gut health, Hydration, Fasting, Insights
 
+import { Alert } from "@/src/components/CustomAlert";
 import { supabase } from "@/src/config/supabase";
 import { useAuthStore } from "@/src/context/authStore";
 import { useNutritionStore } from "@/src/context/nutritionStoreDB";
 import { Theme } from "@/src/context/themeContext";
 import { getFoodRecommendations, searchFoods } from "@/src/data/mealDatabase";
+import { NotificationService } from "@/src/services/notificationService";
 import type {
 	BristolStoolType,
 	FastingType,
@@ -16,7 +18,6 @@ import type {
 import Ionicons from "@expo/vector-icons/Ionicons";
 import React, { useEffect, useMemo, useState } from "react";
 import {
-	Alert,
 	Dimensions,
 	FlatList,
 	Modal,
@@ -28,6 +29,7 @@ import {
 	TouchableOpacity,
 	View,
 } from "react-native";
+import Svg, { Circle, G } from "react-native-svg";
 import { FastingTab } from "./nutriplan/FastingTab";
 import { GutHealthTab } from "./nutriplan/GutHealthTab";
 import { InsightsTab } from "./nutriplan/InsightsTab";
@@ -35,7 +37,6 @@ import {
 	BRISTOL_SCALE_INFO,
 	FASTING_PRESETS,
 	GUT_SYMPTOMS,
-	WATER_AMOUNTS,
 } from "./nutriplan/constants";
 import type { FoodWithQuantity, SubTab } from "./nutriplan/types";
 
@@ -131,6 +132,39 @@ export default function NutriPlan({ theme }: NutriPlanProps) {
 	// Goal setup state
 	const [showGoalSetupModal, setShowGoalSetupModal] = useState(false);
 	const [selectedGoal, setSelectedGoal] = useState<string>("maintenance");
+
+	// Water reminder state
+	const [waterRemindersEnabled, setWaterRemindersEnabled] = useState(false);
+	const [showReminderSettingsModal, setShowReminderSettingsModal] =
+		useState(false);
+	const [showCustomWaterModal, setShowCustomWaterModal] = useState(false);
+	const [customWaterAmount, setCustomWaterAmount] = useState("");
+
+	// Hydration tips array for random display
+	const hydrationTips = [
+		"Drink your glass of water slowly with some small sips",
+		"Start your day with a glass of water upon waking",
+		"Carry a water bottle with you throughout the day",
+		"Set reminders to drink water every hour",
+		"Drink a glass of water before each meal",
+		"Add lemon or cucumber for a refreshing twist",
+		"Drink more water during exercise and hot weather",
+		"Listen to your body - drink when you're thirsty",
+		"Water helps maintain energy levels throughout the day",
+		"Stay hydrated for better focus and concentration",
+	];
+	const [currentTipIndex, setCurrentTipIndex] = useState(() =>
+		Math.floor(Math.random() * hydrationTips.length)
+	);
+
+	// Get today's water logs for history display
+	const todayWaterLogs = useMemo(() => {
+		return store.getHydrationByDate(new Date()).sort((a, b) => {
+			const timeA = new Date(a.timestamp).getTime();
+			const timeB = new Date(b.timestamp).getTime();
+			return timeB - timeA; // Most recent first
+		});
+	}, [store.hydrationLogs]);
 
 	// Calculate preview goals for a specific goal type
 	const calculatePreviewGoals = (goalType: string) => {
@@ -850,21 +884,32 @@ export default function NutriPlan({ theme }: NutriPlanProps) {
 			preset?.type === "custom" ? customFastingHours : preset?.hours || 16;
 
 		await store.startFast(selectedFastingType, hours);
+
+		// Schedule fasting milestone notifications
+		await NotificationService.startFastingTimerNotification(
+			preset?.label || selectedFastingType,
+			hours,
+			new Date()
+		);
+
 		setShowFastingModal(false);
-		Alert.alert("Fasting Started", `Your ${hours} hour fast has begun!`);
+		Alert.success(
+			"Fasting Started",
+			`Your ${hours} hour fast has begun! You'll receive milestone notifications.`
+		);
 	};
 
 	const handleEndFast = async () => {
-		Alert.alert("End Fast", "Are you sure you want to end your fast?", [
-			{ text: "Cancel", style: "cancel" },
-			{
-				text: "End Fast",
-				onPress: async () => {
-					await store.endFast();
-					Alert.alert("Fast Completed", "Great job completing your fast!");
-				},
-			},
-		]);
+		Alert.confirm(
+			"End Fast",
+			"Are you sure you want to end your fast?",
+			async () => {
+				await store.endFast();
+				// Cancel any pending fasting notifications
+				await NotificationService.cancelFastingNotifications();
+				Alert.success("Fast Completed", "Great job completing your fast! 🎉");
+			}
+		);
 	};
 
 	const handleLogWater = async (amount: number) => {
@@ -1292,230 +1337,662 @@ export default function NutriPlan({ theme }: NutriPlanProps) {
 		);
 		const remainingWater = Math.max(0, dailySummary.waterGoal - todayWater);
 
+		// Circular progress calculations
+		const circleSize = width * 0.65;
+		const strokeWidth = 12;
+		const radius = (circleSize - strokeWidth) / 2;
+		const circumference = 2 * Math.PI * radius;
+		const progressOffset =
+			circumference - (waterProgress / 100) * circumference;
+
+		// Format time for water logs
+		const formatTime = (timestamp: Date | string) => {
+			const date = timestamp instanceof Date ? timestamp : new Date(timestamp);
+			return date.toLocaleTimeString("en-US", {
+				hour: "numeric",
+				minute: "2-digit",
+				hour12: true,
+			});
+		};
+
+		// Calculate next reminder time
+		const getNextReminderTime = () => {
+			const now = new Date();
+			const glassesLeft = Math.ceil(remainingWater / 250);
+			if (glassesLeft <= 0) return null;
+
+			const hoursLeft = 22 - now.getHours(); // Until 10 PM
+			if (hoursLeft <= 0) return null;
+
+			const minutesInterval = Math.floor((hoursLeft * 60) / glassesLeft);
+			const nextTime = new Date(now.getTime() + minutesInterval * 60 * 1000);
+			return formatTime(nextTime);
+		};
+
 		return (
-			<ScrollView showsVerticalScrollIndicator={false}>
-				{/* Water Progress Card */}
-				<View style={styles.card}>
-					<View style={styles.waterContainer}>
-						<Ionicons
-							name="water"
-							size={56}
-							color={waterProgress >= 100 ? theme.success : theme.primary}
-						/>
-						<Text style={styles.waterAmount}>
-							{(todayWater / 1000).toFixed(2)}L
-						</Text>
-						<Text style={styles.waterLabel}>
-							of {(dailySummary.waterGoal / 1000).toFixed(1)}L daily goal
-						</Text>
-
-						{/* Progress Bar */}
-						<View style={[styles.progressBar, { width: "85%", marginTop: 16 }]}>
-							<View
-								style={[
-									styles.progressFill,
-									{
-										width: `${waterProgress}%`,
-										backgroundColor:
-											waterProgress >= 100 ? theme.success : "#4FC3F7",
-									},
-								]}
-							/>
-						</View>
-
-						{/* Status Text */}
+			<ScrollView showsVerticalScrollIndicator={false} style={{ flex: 1 }}>
+				{/* Mascot with Tip */}
+				<View
+					style={{
+						flexDirection: "row",
+						alignItems: "center",
+						paddingHorizontal: 16,
+						marginBottom: 8,
+					}}
+				>
+					<Text style={{ fontSize: 40 }}>💧</Text>
+					<View
+						style={{
+							flex: 1,
+							backgroundColor: isDark ? "#2A2A3E" : "#F0F4FF",
+							borderRadius: 16,
+							padding: 12,
+							marginLeft: 8,
+						}}
+					>
 						<Text
 							style={{
-								color: waterProgress >= 100 ? theme.success : theme.textMuted,
+								color: theme.textSecondary,
 								fontSize: 13,
-								fontWeight: "600",
-								marginTop: 12,
+								fontStyle: "italic",
 							}}
 						>
-							{waterProgress >= 100
-								? "🎉 Goal Achieved!"
-								: `${(remainingWater / 1000).toFixed(2)}L remaining`}
+							{hydrationTips[currentTipIndex]}
 						</Text>
+					</View>
+				</View>
 
-						{/* Action Buttons */}
+				{/* Main Circular Progress */}
+				<View
+					style={{
+						alignItems: "center",
+						justifyContent: "center",
+						marginVertical: 16,
+					}}
+				>
+					<View
+						style={{
+							width: circleSize,
+							height: circleSize,
+							alignItems: "center",
+							justifyContent: "center",
+						}}
+					>
+						{/* SVG Circle Progress */}
+						<Svg
+							width={circleSize}
+							height={circleSize}
+							style={{ position: "absolute" }}
+						>
+							<G rotation="-90" origin={`${circleSize / 2}, ${circleSize / 2}`}>
+								{/* Background Circle */}
+								<Circle
+									cx={circleSize / 2}
+									cy={circleSize / 2}
+									r={radius}
+									stroke={isDark ? "#2A2A3E" : "#E8E8E8"}
+									strokeWidth={strokeWidth}
+									fill="none"
+								/>
+								{/* Progress Circle */}
+								<Circle
+									cx={circleSize / 2}
+									cy={circleSize / 2}
+									r={radius}
+									stroke={waterProgress >= 100 ? "#4ADE80" : "#A78BFA"}
+									strokeWidth={strokeWidth}
+									fill="none"
+									strokeDasharray={circumference}
+									strokeDashoffset={progressOffset}
+									strokeLinecap="round"
+								/>
+							</G>
+						</Svg>
+
+						{/* Center Content */}
+						<View
+							style={{
+								alignItems: "center",
+								justifyContent: "center",
+								backgroundColor: isDark ? "#1A1A2E" : "#FFFFFF",
+								width: circleSize - strokeWidth * 4,
+								height: circleSize - strokeWidth * 4,
+								borderRadius: (circleSize - strokeWidth * 4) / 2,
+							}}
+						>
+							<View style={{ flexDirection: "row", alignItems: "baseline" }}>
+								<Text
+									style={{
+										fontSize: 42,
+										fontWeight: "700",
+										color: "#A78BFA",
+									}}
+								>
+									{todayWater}
+								</Text>
+								<Text
+									style={{
+										fontSize: 18,
+										fontWeight: "500",
+										color: theme.textSecondary,
+									}}
+								>
+									/{dailySummary.waterGoal}ml
+								</Text>
+							</View>
+							<Text
+								style={{
+									fontSize: 14,
+									color: theme.textSecondary,
+									marginTop: 4,
+								}}
+							>
+								Daily Drink Target
+							</Text>
+						</View>
+
+						{/* Decorative water drops */}
+						<View
+							style={{
+								position: "absolute",
+								top: 20,
+								right: 20,
+							}}
+						>
+							<Text style={{ fontSize: 16, opacity: 0.6 }}>💧</Text>
+						</View>
+					</View>
+				</View>
+
+				{/* Quick Add Water Button */}
+				<View
+					style={{
+						alignItems: "center",
+						marginBottom: 16,
+					}}
+				>
+					{/* Water Wave Effect Background */}
+					<View
+						style={{
+							backgroundColor: isDark ? "#E8F4FD20" : "#E8F4FD",
+							borderRadius: 20,
+							padding: 24,
+							paddingBottom: 32,
+							alignItems: "center",
+							width: width * 0.5,
+						}}
+					>
+						<Text
+							style={{
+								color: "#A78BFA",
+								fontSize: 14,
+								fontWeight: "600",
+								marginBottom: 8,
+							}}
+						>
+							200 ml
+						</Text>
+						<TouchableOpacity
+							onPress={() => handleLogWater(200)}
+							style={{
+								width: 70,
+								height: 70,
+								backgroundColor: isDark ? "#3A2D5E" : "#2D1B4E",
+								borderRadius: 12,
+								alignItems: "center",
+								justifyContent: "center",
+								shadowColor: "#A78BFA",
+								shadowOffset: { width: 0, height: 4 },
+								shadowOpacity: 0.3,
+								shadowRadius: 8,
+								elevation: 8,
+							}}
+						>
+							<Ionicons name="add" size={32} color="#FFFFFF" />
+						</TouchableOpacity>
+					</View>
+					<Text
+						style={{
+							color: theme.textSecondary,
+							fontSize: 12,
+							marginTop: 8,
+						}}
+					>
+						↑ Confirm that you have just drunk water
+					</Text>
+				</View>
+
+				{/* Quick Actions Row */}
+				<View
+					style={{
+						flexDirection: "row",
+						justifyContent: "space-around",
+						paddingHorizontal: 16,
+						marginBottom: 16,
+					}}
+				>
+					{/* Set Goal */}
+					<TouchableOpacity
+						onPress={() => setShowWaterGoalModal(true)}
+						style={{
+							alignItems: "center",
+							padding: 12,
+						}}
+					>
+						<View
+							style={{
+								width: 50,
+								height: 50,
+								borderRadius: 25,
+								backgroundColor: isDark ? "#2A2A3E" : "#F0F0F0",
+								alignItems: "center",
+								justifyContent: "center",
+								marginBottom: 4,
+							}}
+						>
+							<Ionicons name="flag" size={24} color={theme.primary} />
+						</View>
+						<Text style={{ color: theme.textSecondary, fontSize: 11 }}>
+							Set Goal
+						</Text>
+					</TouchableOpacity>
+
+					{/* Reminders */}
+					<TouchableOpacity
+						onPress={() => setShowReminderSettingsModal(true)}
+						style={{
+							alignItems: "center",
+							padding: 12,
+						}}
+					>
+						<View
+							style={{
+								width: 50,
+								height: 50,
+								borderRadius: 25,
+								backgroundColor: waterRemindersEnabled
+									? theme.primary + "20"
+									: isDark
+									? "#2A2A3E"
+									: "#F0F0F0",
+								alignItems: "center",
+								justifyContent: "center",
+								marginBottom: 4,
+							}}
+						>
+							<Ionicons
+								name={
+									waterRemindersEnabled
+										? "notifications"
+										: "notifications-outline"
+								}
+								size={24}
+								color={
+									waterRemindersEnabled ? theme.primary : theme.textSecondary
+								}
+							/>
+						</View>
+						<Text style={{ color: theme.textSecondary, fontSize: 11 }}>
+							Reminders
+						</Text>
+					</TouchableOpacity>
+
+					{/* Reset */}
+					<TouchableOpacity
+						onPress={handleResetWater}
+						disabled={todayWater === 0}
+						style={{
+							alignItems: "center",
+							padding: 12,
+							opacity: todayWater === 0 ? 0.5 : 1,
+						}}
+					>
+						<View
+							style={{
+								width: 50,
+								height: 50,
+								borderRadius: 25,
+								backgroundColor: isDark ? "#2A2A3E" : "#F0F0F0",
+								alignItems: "center",
+								justifyContent: "center",
+								marginBottom: 4,
+							}}
+						>
+							<Ionicons name="refresh" size={24} color={theme.error} />
+						</View>
+						<Text style={{ color: theme.textSecondary, fontSize: 11 }}>
+							Reset
+						</Text>
+					</TouchableOpacity>
+
+					{/* Custom Amount */}
+					<TouchableOpacity
+						onPress={() => {
+							setCustomWaterAmount("");
+							setShowCustomWaterModal(true);
+						}}
+						style={{
+							alignItems: "center",
+							padding: 12,
+						}}
+					>
+						<View
+							style={{
+								width: 50,
+								height: 50,
+								borderRadius: 25,
+								backgroundColor: isDark ? "#2A2A3E" : "#F0F0F0",
+								alignItems: "center",
+								justifyContent: "center",
+								marginBottom: 4,
+							}}
+						>
+							<Ionicons name="water" size={24} color="#4FC3F7" />
+						</View>
+						<Text style={{ color: theme.textSecondary, fontSize: 11 }}>
+							Custom
+						</Text>
+					</TouchableOpacity>
+				</View>
+
+				{/* Today's Records */}
+				<View
+					style={{
+						paddingHorizontal: 16,
+						marginBottom: 20,
+					}}
+				>
+					<View
+						style={{
+							flexDirection: "row",
+							justifyContent: "space-between",
+							alignItems: "center",
+							marginBottom: 12,
+						}}
+					>
+						<Text
+							style={{
+								fontSize: 16,
+								fontWeight: "600",
+								color: theme.text,
+							}}
+						>
+							Today's records
+						</Text>
+						<TouchableOpacity onPress={() => handleLogWater(250)}>
+							<Ionicons name="add-circle" size={28} color={theme.primary} />
+						</TouchableOpacity>
+					</View>
+
+					{/* Next Reminder */}
+					{waterRemindersEnabled && getNextReminderTime() && (
 						<View
 							style={{
 								flexDirection: "row",
-								gap: 12,
-								marginTop: 20,
-								width: "100%",
+								alignItems: "center",
+								paddingVertical: 16,
+								borderBottomWidth: 1,
+								borderBottomColor: theme.border,
 							}}
 						>
-							<TouchableOpacity
+							<View
 								style={{
-									flex: 1,
-									paddingVertical: 12,
-									paddingHorizontal: 16,
-									backgroundColor: theme.primary + "15",
-									borderRadius: 12,
-									flexDirection: "row",
+									width: 32,
+									height: 32,
+									borderRadius: 16,
+									backgroundColor: theme.primary + "20",
 									alignItems: "center",
 									justifyContent: "center",
-									gap: 6,
+									marginRight: 16,
 								}}
-								onPress={() => setShowWaterGoalModal(true)}
 							>
-								<Ionicons name="flag" size={18} color={theme.primary} />
-								<Text
-									style={{
-										color: theme.primary,
-										fontSize: 14,
-										fontWeight: "600",
-									}}
-								>
-									Set Goal
-								</Text>
-							</TouchableOpacity>
-							<TouchableOpacity
-								onPress={handleResetWater}
-								disabled={todayWater === 0}
+								<Ionicons name="time-outline" size={18} color={theme.primary} />
+							</View>
+							<View
 								style={{
-									flex: 1,
-									paddingVertical: 12,
-									paddingHorizontal: 16,
-									backgroundColor:
-										todayWater === 0 ? theme.surface : theme.error + "15",
-									borderRadius: 12,
-									flexDirection: "row",
-									alignItems: "center",
-									justifyContent: "center",
-									gap: 6,
-									opacity: todayWater === 0 ? 0.5 : 1,
+									borderLeftWidth: 2,
+									borderLeftColor: theme.border,
+									height: 40,
+									position: "absolute",
+									left: 15,
+									top: 48,
 								}}
-							>
-								<Ionicons
-									name="refresh"
-									size={18}
-									color={todayWater === 0 ? theme.textMuted : theme.error}
-								/>
+							/>
+							<View style={{ flex: 1 }}>
 								<Text
 									style={{
-										color: todayWater === 0 ? theme.textMuted : theme.error,
 										fontSize: 14,
 										fontWeight: "600",
+										color: theme.text,
 									}}
 								>
-									Reset
+									{getNextReminderTime()}
 								</Text>
-							</TouchableOpacity>
+								<Text
+									style={{
+										fontSize: 12,
+										color: theme.textSecondary,
+									}}
+								>
+									Next time
+								</Text>
+							</View>
+							<Text
+								style={{
+									fontSize: 14,
+									color: theme.textSecondary,
+								}}
+							>
+								200 ml
+							</Text>
 						</View>
-					</View>
+					)}
+
+					{/* Water Logs */}
+					{todayWaterLogs.length === 0 ? (
+						<View
+							style={{
+								alignItems: "center",
+								paddingVertical: 32,
+							}}
+						>
+							<Ionicons
+								name="water-outline"
+								size={48}
+								color={theme.textSecondary}
+							/>
+							<Text
+								style={{
+									color: theme.textSecondary,
+									marginTop: 8,
+								}}
+							>
+								No water logged today
+							</Text>
+							<Text
+								style={{
+									color: theme.textMuted,
+									fontSize: 12,
+									marginTop: 4,
+								}}
+							>
+								Tap the cup above to start tracking
+							</Text>
+						</View>
+					) : (
+						todayWaterLogs.slice(0, 10).map((log, index) => (
+							<View
+								key={log.id}
+								style={{
+									flexDirection: "row",
+									alignItems: "center",
+									paddingVertical: 12,
+									borderBottomWidth: index < todayWaterLogs.length - 1 ? 1 : 0,
+									borderBottomColor: theme.border,
+								}}
+							>
+								<View
+									style={{
+										width: 32,
+										height: 32,
+										marginRight: 16,
+										alignItems: "center",
+										justifyContent: "center",
+									}}
+								>
+									<Text style={{ fontSize: 20 }}>💧</Text>
+									{index < todayWaterLogs.length - 1 && (
+										<View
+											style={{
+												position: "absolute",
+												top: 32,
+												width: 2,
+												height: 20,
+												backgroundColor: theme.border,
+											}}
+										/>
+									)}
+								</View>
+								<View style={{ flex: 1 }}>
+									<Text
+										style={{
+											fontSize: 14,
+											fontWeight: "500",
+											color: theme.text,
+										}}
+									>
+										{formatTime(log.timestamp)}
+									</Text>
+								</View>
+								<Text
+									style={{
+										fontSize: 14,
+										color: theme.textSecondary,
+										marginRight: 8,
+									}}
+								>
+									{log.amount} ml
+								</Text>
+								<TouchableOpacity
+									onPress={() => {
+										Alert.confirm(
+											"Delete Entry",
+											"Remove this water entry?",
+											async () => {
+												await store.deleteHydrationLog(log.id);
+											}
+										);
+									}}
+								>
+									<Ionicons
+										name="trash"
+										size={18}
+										color={theme.textSecondary}
+									/>
+								</TouchableOpacity>
+							</View>
+						))
+					)}
 				</View>
 
-				{/* Quick Add Card */}
-				<View style={styles.card}>
-					<Text style={styles.cardTitle}>Quick Add Water</Text>
+				{/* Quick Add Buttons */}
+				<View
+					style={{
+						paddingHorizontal: 16,
+						marginBottom: 20,
+					}}
+				>
+					<Text
+						style={{
+							fontSize: 14,
+							fontWeight: "600",
+							color: theme.textSecondary,
+							marginBottom: 12,
+						}}
+					>
+						Quick Add
+					</Text>
 					<View
 						style={{
 							flexDirection: "row",
 							flexWrap: "wrap",
-							gap: 12,
-							marginTop: 12,
+							gap: 8,
 						}}
 					>
-						{WATER_AMOUNTS.map((item) => (
+						{[100, 150, 200, 250, 300, 500].map((amount) => (
 							<TouchableOpacity
-								key={item.amount}
+								key={amount}
+								onPress={() => handleLogWater(amount)}
 								style={{
-									flex: 1,
-									minWidth: "45%",
-									backgroundColor: theme.primary + "10",
-									borderRadius: 12,
-									paddingVertical: 16,
-									paddingHorizontal: 12,
-									alignItems: "center",
-									gap: 8,
+									paddingVertical: 10,
+									paddingHorizontal: 16,
+									backgroundColor: isDark ? "#2A2A3E" : "#F5F5F5",
+									borderRadius: 20,
 								}}
-								onPress={() => handleLogWater(item.amount)}
 							>
-								<Ionicons
-									name={item.icon as any}
-									size={28}
-									color={theme.primary}
-								/>
 								<Text
 									style={{
 										color: theme.text,
-										fontSize: 16,
-										fontWeight: "700",
-									}}
-								>
-									{item.amount}ml
-								</Text>
-								<Text
-									style={{
-										color: theme.textMuted,
-										fontSize: 12,
+										fontSize: 13,
 										fontWeight: "500",
 									}}
 								>
-									{item.label}
-								</Text>
-							</TouchableOpacity>
-						))}
-					</View>
-
-					{/* Minus Buttons for Undo */}
-					<View
-						style={{
-							flexDirection: "row",
-							flexWrap: "wrap",
-							gap: 12,
-							marginTop: 12,
-						}}
-					>
-						{WATER_AMOUNTS.map((item) => (
-							<TouchableOpacity
-								key={`minus-${item.amount}`}
-								style={{
-									flex: 1,
-									minWidth: "45%",
-									backgroundColor:
-										todayWater === 0 ? theme.surface : theme.error + "10",
-									borderRadius: 12,
-									paddingVertical: 12,
-									paddingHorizontal: 12,
-									alignItems: "center",
-									flexDirection: "row",
-									justifyContent: "center",
-									gap: 6,
-									opacity: todayWater === 0 ? 0.5 : 1,
-								}}
-								onPress={() => handleLogWater(-item.amount)}
-								disabled={todayWater === 0}
-							>
-								<Ionicons
-									name="remove-circle"
-									size={20}
-									color={todayWater === 0 ? theme.textMuted : theme.error}
-								/>
-								<Text
-									style={{
-										color: todayWater === 0 ? theme.textMuted : theme.error,
-										fontSize: 14,
-										fontWeight: "600",
-									}}
-								>
-									-{item.amount}ml
+									{amount} ml
 								</Text>
 							</TouchableOpacity>
 						))}
 					</View>
 				</View>
 
-				{/* Hydration Tips */}
-				<View style={styles.card}>
-					<Text style={styles.cardTitle}>💡 Hydration Tips</Text>
-					<Text style={{ color: theme.textSecondary, lineHeight: 22 }}>
-						• Drink water first thing in the morning{"\n"}• Keep a water bottle
-						at your desk{"\n"}• Drink before you feel thirsty{"\n"}• Add lemon
-						or cucumber for flavor{"\n"}• Increase intake during exercise
-					</Text>
+				{/* Stats Card */}
+				<View style={[styles.card, { marginHorizontal: 16, marginBottom: 20 }]}>
+					<Text style={styles.cardTitle}>📊 Today's Stats</Text>
+					<View
+						style={{
+							flexDirection: "row",
+							justifyContent: "space-around",
+							marginTop: 8,
+						}}
+					>
+						<View style={{ alignItems: "center" }}>
+							<Text
+								style={{
+									fontSize: 24,
+									fontWeight: "700",
+									color: theme.primary,
+								}}
+							>
+								{todayWaterLogs.length}
+							</Text>
+							<Text style={{ fontSize: 12, color: theme.textSecondary }}>
+								Glasses
+							</Text>
+						</View>
+						<View style={{ alignItems: "center" }}>
+							<Text
+								style={{
+									fontSize: 24,
+									fontWeight: "700",
+									color: waterProgress >= 100 ? "#4ADE80" : theme.text,
+								}}
+							>
+								{Math.round(waterProgress)}%
+							</Text>
+							<Text style={{ fontSize: 12, color: theme.textSecondary }}>
+								Progress
+							</Text>
+						</View>
+						<View style={{ alignItems: "center" }}>
+							<Text
+								style={{ fontSize: 24, fontWeight: "700", color: theme.text }}
+							>
+								{Math.ceil(remainingWater / 250)}
+							</Text>
+							<Text style={{ fontSize: 12, color: theme.textSecondary }}>
+								Glasses Left
+							</Text>
+						</View>
+					</View>
 				</View>
 			</ScrollView>
 		);
@@ -2594,6 +3071,378 @@ export default function NutriPlan({ theme }: NutriPlanProps) {
 								</TouchableOpacity>
 							</View>
 						</ScrollView>
+					</View>
+				</View>
+			</Modal>
+
+			{/* Water Reminder Settings Modal */}
+			<Modal
+				visible={showReminderSettingsModal}
+				transparent
+				animationType="slide"
+				onRequestClose={() => setShowReminderSettingsModal(false)}
+			>
+				<View style={styles.modalOverlay}>
+					<View style={styles.modalContent}>
+						<View style={styles.modalHeader}>
+							<Text style={styles.modalTitle}>💧 Water Reminders</Text>
+							<TouchableOpacity
+								onPress={() => setShowReminderSettingsModal(false)}
+							>
+								<Ionicons name="close" size={24} color={theme.text} />
+							</TouchableOpacity>
+						</View>
+
+						<ScrollView
+							style={styles.modalBody}
+							showsVerticalScrollIndicator={false}
+						>
+							<Text
+								style={{
+									fontSize: 13,
+									color: theme.textSecondary,
+									marginBottom: 20,
+									lineHeight: 20,
+								}}
+							>
+								Get gentle reminders throughout the day to stay hydrated.
+								Reminders are automatically calculated based on your water goal.
+							</Text>
+
+							{/* Enable/Disable Toggle */}
+							<TouchableOpacity
+								style={{
+									flexDirection: "row",
+									justifyContent: "space-between",
+									alignItems: "center",
+									backgroundColor: theme.surface,
+									padding: 16,
+									borderRadius: 12,
+									marginBottom: 16,
+								}}
+								onPress={async () => {
+									const newState = !waterRemindersEnabled;
+									setWaterRemindersEnabled(newState);
+
+									if (newState) {
+										// Schedule water reminders
+										await NotificationService.scheduleWaterReminders(
+											dailySummary.waterGoal,
+											7, // Wake up at 7 AM
+											22 // Sleep at 10 PM
+										);
+										Alert.success(
+											"Reminders Enabled",
+											"You'll receive water reminders throughout the day!"
+										);
+									} else {
+										// Cancel all water reminders
+										await NotificationService.cancelWaterReminders();
+										Alert.info(
+											"Reminders Disabled",
+											"Water reminders have been turned off."
+										);
+									}
+								}}
+							>
+								<View style={{ flex: 1 }}>
+									<Text
+										style={{
+											fontSize: 16,
+											fontWeight: "600",
+											color: theme.text,
+										}}
+									>
+										Enable Reminders
+									</Text>
+									<Text
+										style={{
+											fontSize: 12,
+											color: theme.textSecondary,
+											marginTop: 4,
+										}}
+									>
+										Get notified to drink water regularly
+									</Text>
+								</View>
+								<View
+									style={{
+										width: 50,
+										height: 30,
+										borderRadius: 15,
+										backgroundColor: waterRemindersEnabled
+											? theme.primary
+											: theme.border,
+										justifyContent: "center",
+										paddingHorizontal: 2,
+									}}
+								>
+									<View
+										style={{
+											width: 26,
+											height: 26,
+											borderRadius: 13,
+											backgroundColor: "#FFFFFF",
+											alignSelf: waterRemindersEnabled
+												? "flex-end"
+												: "flex-start",
+										}}
+									/>
+								</View>
+							</TouchableOpacity>
+
+							{/* How it works */}
+							<View
+								style={{
+									backgroundColor: isDark ? "#2A2A3E" : "#F0F4FF",
+									padding: 16,
+									borderRadius: 12,
+									marginBottom: 16,
+								}}
+							>
+								<Text
+									style={{
+										fontSize: 14,
+										fontWeight: "600",
+										color: theme.text,
+										marginBottom: 8,
+									}}
+								>
+									How it works
+								</Text>
+								<View style={{ gap: 8 }}>
+									<View style={{ flexDirection: "row", alignItems: "center" }}>
+										<Text style={{ fontSize: 16, marginRight: 8 }}>⏰</Text>
+										<Text
+											style={{
+												color: theme.textSecondary,
+												fontSize: 13,
+												flex: 1,
+											}}
+										>
+											Reminders from 7 AM to 10 PM
+										</Text>
+									</View>
+									<View style={{ flexDirection: "row", alignItems: "center" }}>
+										<Text style={{ fontSize: 16, marginRight: 8 }}>🎯</Text>
+										<Text
+											style={{
+												color: theme.textSecondary,
+												fontSize: 13,
+												flex: 1,
+											}}
+										>
+											Frequency based on your {dailySummary.waterGoal}ml goal
+										</Text>
+									</View>
+									<View style={{ flexDirection: "row", alignItems: "center" }}>
+										<Text style={{ fontSize: 16, marginRight: 8 }}>💧</Text>
+										<Text
+											style={{
+												color: theme.textSecondary,
+												fontSize: 13,
+												flex: 1,
+											}}
+										>
+											~{Math.ceil(dailySummary.waterGoal / 250)} reminders per
+											day
+										</Text>
+									</View>
+								</View>
+							</View>
+
+							{/* Quick Reminder Button */}
+							<TouchableOpacity
+								style={{
+									backgroundColor: theme.primary + "15",
+									padding: 16,
+									borderRadius: 12,
+									flexDirection: "row",
+									alignItems: "center",
+									marginBottom: 16,
+								}}
+								onPress={async () => {
+									await NotificationService.scheduleNextWaterReminder(
+										30,
+										"Time to drink some water! Stay hydrated! 💧"
+									);
+									Alert.success(
+										"Reminder Set",
+										"You'll be reminded in 30 minutes!"
+									);
+								}}
+							>
+								<View
+									style={{
+										width: 40,
+										height: 40,
+										borderRadius: 20,
+										backgroundColor: theme.primary + "20",
+										alignItems: "center",
+										justifyContent: "center",
+										marginRight: 12,
+									}}
+								>
+									<Ionicons name="alarm" size={20} color={theme.primary} />
+								</View>
+								<View style={{ flex: 1 }}>
+									<Text
+										style={{
+											fontSize: 14,
+											fontWeight: "600",
+											color: theme.text,
+										}}
+									>
+										Remind me in 30 minutes
+									</Text>
+									<Text
+										style={{
+											fontSize: 12,
+											color: theme.textSecondary,
+										}}
+									>
+										Get a one-time water reminder
+									</Text>
+								</View>
+								<Ionicons
+									name="chevron-forward"
+									size={20}
+									color={theme.textSecondary}
+								/>
+							</TouchableOpacity>
+
+							{/* Tips */}
+							<View
+								style={{
+									backgroundColor: theme.surface,
+									padding: 16,
+									borderRadius: 12,
+								}}
+							>
+								<Text
+									style={{
+										fontSize: 14,
+										fontWeight: "600",
+										color: theme.text,
+										marginBottom: 8,
+									}}
+								>
+									💡 Hydration Tips
+								</Text>
+								<Text
+									style={{
+										color: theme.textSecondary,
+										fontSize: 13,
+										lineHeight: 20,
+									}}
+								>
+									• Drink water when you wake up{"\n"}• Have a glass before each
+									meal{"\n"}• Keep a water bottle at your desk{"\n"}• Drink more
+									during exercise{"\n"}• Add fruits for natural flavor
+								</Text>
+							</View>
+
+							{/* Close Button */}
+							<TouchableOpacity
+								style={{
+									backgroundColor: theme.primary,
+									paddingVertical: 14,
+									borderRadius: 12,
+									alignItems: "center",
+									marginTop: 20,
+								}}
+								onPress={() => setShowReminderSettingsModal(false)}
+							>
+								<Text
+									style={{ color: "#FFF", fontWeight: "600", fontSize: 16 }}
+								>
+									Done
+								</Text>
+							</TouchableOpacity>
+						</ScrollView>
+					</View>
+				</View>
+			</Modal>
+
+			{/* Custom Water Amount Modal */}
+			<Modal
+				visible={showCustomWaterModal}
+				transparent
+				animationType="fade"
+				onRequestClose={() => setShowCustomWaterModal(false)}
+			>
+				<View style={styles.modalOverlay}>
+					<View style={[styles.modalContent, { maxHeight: 300 }]}>
+						<View style={styles.modalHeader}>
+							<Text style={styles.modalTitle}>💧 Custom Amount</Text>
+							<TouchableOpacity onPress={() => setShowCustomWaterModal(false)}>
+								<Ionicons name="close" size={24} color={theme.text} />
+							</TouchableOpacity>
+						</View>
+						<View style={styles.modalBody}>
+							<Text
+								style={{
+									fontSize: 13,
+									color: theme.textSecondary,
+									marginBottom: 16,
+								}}
+							>
+								Enter the amount of water you drank (in ml)
+							</Text>
+							<TextInput
+								style={styles.input}
+								placeholder="e.g., 350"
+								placeholderTextColor={theme.textSecondary}
+								value={customWaterAmount}
+								onChangeText={setCustomWaterAmount}
+								keyboardType="numeric"
+								autoFocus
+							/>
+							<View style={{ flexDirection: "row", gap: 12, marginTop: 16 }}>
+								<TouchableOpacity
+									style={{
+										flex: 1,
+										paddingVertical: 14,
+										backgroundColor: theme.surface,
+										borderRadius: 12,
+										alignItems: "center",
+										borderWidth: 1,
+										borderColor: theme.border,
+									}}
+									onPress={() => setShowCustomWaterModal(false)}
+								>
+									<Text style={{ color: theme.text, fontWeight: "600" }}>
+										Cancel
+									</Text>
+								</TouchableOpacity>
+								<TouchableOpacity
+									style={{
+										flex: 1,
+										paddingVertical: 14,
+										backgroundColor: theme.primary,
+										borderRadius: 12,
+										alignItems: "center",
+									}}
+									onPress={() => {
+										const amount = parseInt(customWaterAmount);
+										if (!isNaN(amount) && amount > 0 && amount <= 5000) {
+											handleLogWater(amount);
+											setShowCustomWaterModal(false);
+											setCustomWaterAmount("");
+										} else {
+											Alert.error(
+												"Invalid Amount",
+												"Please enter a valid amount between 1-5000ml"
+											);
+										}
+									}}
+								>
+									<Text style={{ color: "#FFF", fontWeight: "600" }}>
+										Add Water
+									</Text>
+								</TouchableOpacity>
+							</View>
+						</View>
 					</View>
 				</View>
 			</Modal>

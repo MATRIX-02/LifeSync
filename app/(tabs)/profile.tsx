@@ -1,3 +1,4 @@
+import { Alert } from "@/src/components/CustomAlert";
 import { MuscleBodyMap } from "@/src/components/muscle-map";
 import { supabase } from "@/src/config/supabase";
 import { useAuthStore } from "@/src/context/authStore";
@@ -19,7 +20,6 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useMemo, useState } from "react";
 import {
 	ActionSheetIOS,
-	Alert,
 	Dimensions,
 	Image,
 	Platform,

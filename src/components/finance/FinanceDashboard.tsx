@@ -1,5 +1,5 @@
 // Finance Dashboard - Main overview with quick actions
-
+import { Alert } from "@/src/components/CustomAlert";
 import { SubscriptionCheckResult } from "@/src/components/PremiumFeatureGate";
 import { useFinanceStore } from "@/src/context/financeStoreDB";
 import { Theme } from "@/src/context/themeContext";
@@ -16,7 +16,6 @@ import {
 import Ionicons from "@expo/vector-icons/Ionicons";
 import React, { useMemo, useState } from "react";
 import {
-	Alert,
 	Dimensions,
 	Modal,
 	ScrollView,

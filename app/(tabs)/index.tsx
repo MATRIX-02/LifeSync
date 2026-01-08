@@ -1,3 +1,4 @@
+import { Alert } from "@/src/components/CustomAlert";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import DateTimePicker from "@react-native-community/datetimepicker";
@@ -9,7 +10,6 @@ import React, {
 	useState,
 } from "react";
 import {
-	Alert,
 	Animated,
 	Dimensions,
 	Image,
@@ -975,8 +975,10 @@ const HabitGridItem: React.FC<HabitGridItemProps> = ({
 	isDark,
 	zoomLevel = 1,
 }) => {
-	// Fixed to 30 days view
-	const selectedPeriod = "30d";
+	// State for infinite scrolling - number of extra weeks to load to the left
+	const [extraWeeks, setExtraWeeks] = useState(0);
+	const scrollViewRef = useRef<ScrollView>(null);
+	const [hasScrolledToEnd, setHasScrolledToEnd] = useState(false);
 
 	const today = useMemo(() => {
 		const d = new Date();
@@ -989,17 +991,17 @@ const HabitGridItem: React.FC<HabitGridItemProps> = ({
 	const cellGap = 2;
 
 	// Calculate cell size based on zoom level
-	// Base sizes: min=6, max=12
-	// Zoom range: 0.5 (3px) to 2.0 (24px)
-	const baseCellSize = 9; // Middle ground
+	const baseCellSize = 9;
 	const cellSize = Math.round(baseCellSize * zoomLevel);
 
-	// Calculate how many weeks fit with the current cell size
-	const numWeeks = Math.max(
+	// Base number of weeks that fit on screen
+	const baseWeeks = Math.max(
 		4,
 		Math.floor((availableWidth + cellGap) / (cellSize + cellGap))
 	);
 
+	// Total weeks including extra loaded weeks
+	const numWeeks = baseWeeks + extraWeeks;
 	const totalDays = numWeeks * 7;
 	const weekWidth = cellSize + cellGap;
 
@@ -1012,7 +1014,6 @@ const HabitGridItem: React.FC<HabitGridItemProps> = ({
 		const todayDayOfWeek = today.getDay(); // 0 = Sunday
 
 		// Calculate how many days back we need to go
-		// We want complete weeks, ending on today's position
 		const completeWeeks = numWeeks - 1;
 		const daysToGoBack = completeWeeks * 7 + todayDayOfWeek;
 
@@ -1036,7 +1037,6 @@ const HabitGridItem: React.FC<HabitGridItemProps> = ({
 
 		// Add any remaining days in the last partial week
 		if (currentWeek.length > 0) {
-			// Fill remaining slots with null (future days)
 			while (currentWeek.length < 7) {
 				currentWeek.push(null);
 			}
@@ -1048,7 +1048,6 @@ const HabitGridItem: React.FC<HabitGridItemProps> = ({
 		let lastMonth = -1;
 
 		weeks.forEach((week, weekIdx) => {
-			// Find the first valid day in the week to determine month
 			const firstDay = week.find((d) => d !== null);
 			if (firstDay) {
 				const month = firstDay.getMonth();
@@ -1065,17 +1064,57 @@ const HabitGridItem: React.FC<HabitGridItemProps> = ({
 		return { weeks, monthLabels, allDates: result };
 	}, [today, numWeeks]);
 
-	// Calculate progress for the selected period
-	const periodProgress = useMemo(() => {
-		const validDates = allDates.filter((d) => d <= today);
-		if (validDates.length === 0) return 0;
+	// Scroll to end (most recent) on initial render and when extra weeks change
+	useEffect(() => {
+		if (scrollViewRef.current && !hasScrolledToEnd) {
+			// Small delay to ensure content is rendered
+			setTimeout(() => {
+				scrollViewRef.current?.scrollToEnd({ animated: false });
+				setHasScrolledToEnd(true);
+			}, 50);
+		}
+	}, [hasScrolledToEnd]);
 
-		const completedCount = validDates.filter((date) =>
+	// When extraWeeks changes, maintain scroll position
+	const prevExtraWeeksRef = useRef(extraWeeks);
+	useEffect(() => {
+		if (extraWeeks > prevExtraWeeksRef.current && scrollViewRef.current) {
+			// Calculate how much content was added
+			const addedWeeks = extraWeeks - prevExtraWeeksRef.current;
+			const addedWidth = addedWeeks * weekWidth;
+			// Scroll to maintain position (content was added at the start)
+			setTimeout(() => {
+				scrollViewRef.current?.scrollTo({ x: addedWidth, animated: false });
+			}, 10);
+		}
+		prevExtraWeeksRef.current = extraWeeks;
+	}, [extraWeeks, weekWidth]);
+
+	// Handle scroll to load more weeks when reaching the left edge
+	const handleScroll = useCallback((event: any) => {
+		const { contentOffset } = event.nativeEvent;
+		// If scrolled near the left edge (within 50px), load more weeks
+		if (contentOffset.x < 50) {
+			setExtraWeeks((prev) => prev + 8); // Load 8 more weeks at a time
+		}
+	}, []);
+
+	// Calculate progress for visible period (last 30 days for consistency)
+	const periodProgress = useMemo(() => {
+		// Always calculate for last 30 days regardless of scroll
+		const last30Days: Date[] = [];
+		for (let i = 29; i >= 0; i--) {
+			const date = new Date(today);
+			date.setDate(date.getDate() - i);
+			last30Days.push(date);
+		}
+
+		const completedCount = last30Days.filter((date) =>
 			isHabitCompletedOnDate(habit.id, date)
 		).length;
 
-		return Math.round((completedCount / validDates.length) * 100);
-	}, [allDates, today, habit.id, isHabitCompletedOnDate, logsLength]);
+		return Math.round((completedCount / 30) * 100);
+	}, [today, habit.id, isHabitCompletedOnDate, logsLength]);
 
 	// Get color for a date cell
 	const getCellColor = (date: Date | null): string => {
@@ -1091,11 +1130,6 @@ const HabitGridItem: React.FC<HabitGridItemProps> = ({
 		return date.toDateString() === today.toDateString();
 	};
 
-	// Get period label for display
-	const getPeriodLabel = () => {
-		return `last ${totalDays} days`;
-	};
-
 	return (
 		<View
 			style={{
@@ -1109,7 +1143,7 @@ const HabitGridItem: React.FC<HabitGridItemProps> = ({
 			<View
 				style={{ flexDirection: "row", alignItems: "center", marginBottom: 8 }}
 			>
-				{/* Habit icon with progress ring - now shows period progress */}
+				{/* Habit icon with progress ring - shows last 30 days progress */}
 				<ProgressRing
 					progress={periodProgress}
 					size={32}
@@ -1154,59 +1188,76 @@ const HabitGridItem: React.FC<HabitGridItemProps> = ({
 				</TouchableOpacity>
 			</View>
 
-			{/* Month labels positioned above grid */}
-			<View style={{ flexDirection: "row", marginBottom: 4, height: 12 }}>
-				{monthLabels.map((label, idx) => (
-					<Text
-						key={idx}
-						style={{
-							fontSize: 9,
-							color: theme.textMuted,
-							position: "absolute",
-							left: label.weekIdx * weekWidth,
-						}}
-					>
-						{label.month}
-					</Text>
-				))}
-			</View>
-
-			{/* Contribution grid - centered if smaller than available width */}
-			<View
-				style={{
-					alignItems: gridWidth < availableWidth ? "flex-start" : "center",
+			{/* Horizontally scrollable grid container */}
+			<ScrollView
+				ref={scrollViewRef}
+				horizontal
+				showsHorizontalScrollIndicator={false}
+				onScroll={handleScroll}
+				scrollEventThrottle={100}
+				contentContainerStyle={{
+					paddingRight: 8,
 				}}
 			>
-				<View style={{ flexDirection: "row", gap: cellGap }}>
-					{weeks.map((week, weekIdx) => (
-						<View
-							key={weekIdx}
-							style={{ flexDirection: "column", gap: cellGap }}
-						>
-							{week.map((date, dayIdx) => (
-								<TouchableOpacity
-									key={dayIdx}
-									onPress={() => date && date <= today && onToggleDate(date)}
-									disabled={!date || date > today}
-									style={{
-										width: cellSize,
-										height: cellSize,
-										backgroundColor: getCellColor(date),
-										borderRadius: cellSize > 6 ? 2 : 1,
-										borderWidth: isToday(date) ? 1 : 0,
-										borderColor: isToday(date) ? habit.color : "transparent",
-									}}
-								/>
-							))}
-						</View>
-					))}
+				<View>
+					{/* Month labels positioned above grid */}
+					<View style={{ flexDirection: "row", marginBottom: 4, height: 12 }}>
+						{monthLabels.map((label, idx) => (
+							<Text
+								key={`${label.month}-${label.weekIdx}`}
+								style={{
+									fontSize: 9,
+									color: theme.textMuted,
+									position: "absolute",
+									left: label.weekIdx * weekWidth,
+								}}
+							>
+								{label.month}
+							</Text>
+						))}
+					</View>
+
+					{/* Contribution grid */}
+					<View style={{ flexDirection: "row", gap: cellGap }}>
+						{weeks.map((week, weekIdx) => (
+							<View
+								key={weekIdx}
+								style={{ flexDirection: "column", gap: cellGap }}
+							>
+								{week.map((date, dayIdx) => (
+									<TouchableOpacity
+										key={dayIdx}
+										onPress={() => date && date <= today && onToggleDate(date)}
+										disabled={!date || date > today}
+										style={{
+											width: cellSize,
+											height: cellSize,
+											backgroundColor: getCellColor(date),
+											borderRadius: cellSize > 6 ? 2 : 1,
+											borderWidth: isToday(date) ? 1 : 0,
+											borderColor: isToday(date) ? habit.color : "transparent",
+										}}
+									/>
+								))}
+							</View>
+						))}
+					</View>
 				</View>
-			</View>
+			</ScrollView>
 
 			{/* Progress text */}
-			<View style={{ marginTop: 6 }}>
+			<View
+				style={{
+					marginTop: 6,
+					flexDirection: "row",
+					justifyContent: "space-between",
+				}}
+			>
 				<Text style={{ fontSize: 10, color: theme.textMuted }}>
-					{periodProgress}% {getPeriodLabel()}
+					{periodProgress}% last 30 days
+				</Text>
+				<Text style={{ fontSize: 9, color: theme.textMuted }}>
+					← swipe for more
 				</Text>
 			</View>
 		</View>

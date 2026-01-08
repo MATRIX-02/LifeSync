@@ -1,3 +1,4 @@
+import { Alert } from "@/src/components/CustomAlert";
 import { useAuthStore } from "@/src/context/authStore";
 import { useSubscriptionStore } from "@/src/context/subscriptionStore";
 import { useTheme } from "@/src/context/themeContext";
@@ -7,7 +8,6 @@ import { useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
 	ActivityIndicator,
-	Alert,
 	ScrollView,
 	StyleSheet,
 	Text,

@@ -1,3 +1,4 @@
+import { Alert } from "@/src/components/CustomAlert";
 import { useAuthStore } from "@/src/context/authStore";
 import { useFinanceStore } from "@/src/context/financeStoreDB";
 import { useHabitStore } from "@/src/context/habitStoreDB";
@@ -9,7 +10,12 @@ import { NotificationService } from "@/src/services/notificationService";
 import {
 	deleteAllCloudData,
 	getSyncStatus,
+	syncAllToCloud,
+	syncFinanceToCloud,
+	syncHabitsToCloud,
 	SyncModule,
+	syncStudyToCloud,
+	syncWorkoutsToCloud,
 } from "@/src/services/syncService";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import * as DocumentPicker from "expo-document-picker";
@@ -19,7 +25,6 @@ import * as Sharing from "expo-sharing";
 import React, { useEffect, useState } from "react";
 import {
 	ActivityIndicator,
-	Alert,
 	Image,
 	Linking,
 	Modal,
@@ -101,12 +106,116 @@ export default function SettingsScreen() {
 			return;
 		}
 
-		// All modules are now database-first - no manual sync needed
-		Alert.alert(
-			"Database-First",
-			"Your data is automatically saved to the database in real-time. No manual sync needed!"
-		);
-		return;
+		setIsSyncing(module);
+		try {
+			if (module === "all") {
+				const results = await syncAllToCloud(user.id, {
+					habits: {
+						habits: habitStore.habits,
+						logs: habitStore.logs,
+						settings: habitStore.settings,
+					},
+					workouts: {
+						fitnessProfile: workoutStore.fitnessProfile,
+						bodyMeasurements: workoutStore.bodyMeasurements,
+						bodyWeights: workoutStore.bodyWeights,
+						customExercises: workoutStore.customExercises,
+						workoutPlans: workoutStore.workoutPlans,
+						workoutSessions: workoutStore.workoutSessions,
+						personalRecords: workoutStore.personalRecords,
+					},
+					finance: {
+						accounts: financeStore.accounts,
+						transactions: financeStore.transactions,
+						recurringTransactions: financeStore.recurringTransactions,
+						budgets: financeStore.budgets,
+						savingsGoals: financeStore.savingsGoals,
+						billReminders: financeStore.billReminders,
+						debts: financeStore.debts,
+					},
+					study: {
+						studyGoals: studyStore.studyGoals,
+						subjects: studyStore.subjects,
+						studySessions: studyStore.studySessions,
+						flashcardDecks: studyStore.flashcardDecks,
+						flashcards: studyStore.flashcards,
+						revisionSchedule: studyStore.revisionSchedule,
+						mockTests: studyStore.mockTests,
+						dailyPlans: studyStore.dailyPlans,
+					},
+				});
+				const failed = results.filter((r) => !r.success);
+				if (failed.length > 0) {
+					Alert.alert(
+						"Partial Sync",
+						`Some modules failed to sync: ${failed
+							.map((f) => f.module)
+							.join(", ")}`
+					);
+				} else {
+					Alert.alert("Success", "All data synced to cloud!");
+				}
+			} else if (module === "habits") {
+				const result = await syncHabitsToCloud(user.id, {
+					habits: habitStore.habits,
+					logs: habitStore.logs,
+					settings: habitStore.settings,
+				});
+				if (!result.success) throw new Error(result.error);
+				Alert.alert("Success", "Habits synced to cloud!");
+			} else if (module === "workouts") {
+				const result = await syncWorkoutsToCloud(user.id, {
+					fitnessProfile: workoutStore.fitnessProfile,
+					bodyMeasurements: workoutStore.bodyMeasurements,
+					bodyWeights: workoutStore.bodyWeights,
+					customExercises: workoutStore.customExercises,
+					workoutPlans: workoutStore.workoutPlans,
+					workoutSessions: workoutStore.workoutSessions,
+					personalRecords: workoutStore.personalRecords,
+				});
+				if (!result.success) throw new Error(result.error);
+				Alert.alert("Success", "Workouts synced to cloud!");
+			} else if (module === "finance") {
+				const result = await syncFinanceToCloud(user.id, {
+					accounts: financeStore.accounts,
+					transactions: financeStore.transactions,
+					recurringTransactions: financeStore.recurringTransactions,
+					budgets: financeStore.budgets,
+					savingsGoals: financeStore.savingsGoals,
+					billReminders: financeStore.billReminders,
+					debts: financeStore.debts,
+					splitGroups: financeStore.splitGroups,
+					currency: financeStore.currency,
+				});
+				if (!result.success) throw new Error(result.error);
+				Alert.alert("Success", "Finance data synced to cloud!");
+			} else if (module === "study") {
+				const result = await syncStudyToCloud(user.id, {
+					studyGoals: studyStore.studyGoals,
+					subjects: studyStore.subjects,
+					studySessions: studyStore.studySessions,
+					flashcardDecks: studyStore.flashcardDecks,
+					flashcards: studyStore.flashcards,
+					revisionSchedule: studyStore.revisionSchedule,
+					mockTests: studyStore.mockTests,
+					dailyPlans: studyStore.dailyPlans,
+					studyNotes: studyStore.studyNotes,
+				});
+				if (!result.success) throw new Error(result.error);
+				Alert.alert("Success", "Study data synced to cloud!");
+			}
+
+			// Refresh sync status
+			const newStatus = await getSyncStatus(user.id);
+			setSyncStatus(newStatus);
+		} catch (error: any) {
+			Alert.alert(
+				"Sync Failed",
+				error.message || "Failed to sync data to cloud."
+			);
+		} finally {
+			setIsSyncing(null);
+		}
 	};
 
 	const handleRestoreFromCloud = async (module: SyncModule) => {
@@ -400,6 +509,11 @@ export default function SettingsScreen() {
 
 	// Clear module-specific data
 	const handleClearModuleData = (module: ModuleType) => {
+		if (!user?.id) {
+			Alert.alert("Sign In Required", "Please sign in to clear your data.");
+			return;
+		}
+
 		const moduleName =
 			module === "habits"
 				? "Habits"
@@ -417,17 +531,24 @@ export default function SettingsScreen() {
 				{
 					text: "Delete",
 					style: "destructive",
-					onPress: () => {
-						if (module === "habits") {
-							habitStore.clearAllData();
-						} else if (module === "workout") {
-							workoutStore.clearAllData();
-						} else if (module === "finance") {
-							financeStore.clearAllData();
-						} else if (module === "study") {
-							studyStore.clearAllData();
+					onPress: async () => {
+						try {
+							if (module === "habits") {
+								await habitStore.clearAllData();
+							} else if (module === "workout") {
+								await workoutStore.clearAllData();
+							} else if (module === "finance") {
+								await financeStore.clearAllData();
+							} else if (module === "study") {
+								await studyStore.clearAllData();
+							}
+							Alert.alert(
+								"Success",
+								`All ${moduleName} data has been cleared.`
+							);
+						} catch (error: any) {
+							Alert.alert("Error", `Failed to clear ${moduleName} data.`);
 						}
-						Alert.alert("Success", `All ${moduleName} data has been cleared.`);
 					},
 				},
 			]
@@ -584,6 +705,11 @@ export default function SettingsScreen() {
 
 	// Clear all data
 	const handleClearAllData = () => {
+		if (!user?.id) {
+			Alert.alert("Sign In Required", "Please sign in to clear your data.");
+			return;
+		}
+
 		Alert.alert(
 			"Clear All Data",
 			"This will permanently delete ALL your habits, workouts, finance, and study data. This action cannot be undone!",
@@ -592,14 +718,23 @@ export default function SettingsScreen() {
 				{
 					text: "Delete Everything",
 					style: "destructive",
-					onPress: () => {
-						// Clear all stores using their methods
-						habitStore.clearAllData();
-						workoutStore.clearAllData();
-						financeStore.clearAllData();
-						studyStore.clearAllData();
+					onPress: async () => {
+						try {
+							// Clear all stores using their methods (all now filter by user_id)
+							await Promise.all([
+								habitStore.clearAllData(),
+								workoutStore.clearAllData(),
+								financeStore.clearAllData(),
+								studyStore.clearAllData(),
+							]);
 
-						Alert.alert("Success", "All data has been cleared.");
+							Alert.alert("Success", "All data has been cleared.");
+						} catch (error: any) {
+							Alert.alert(
+								"Error",
+								"Failed to clear some data. Please try again."
+							);
+						}
 					},
 				},
 			]

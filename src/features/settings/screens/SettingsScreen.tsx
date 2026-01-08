@@ -1,7 +1,7 @@
+import { Alert } from "@/src/components/CustomAlert";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import React, { useState } from "react";
 import {
-	Alert,
 	ScrollView,
 	StyleSheet,
 	Text,

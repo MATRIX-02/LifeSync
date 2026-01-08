@@ -50,6 +50,29 @@ const objectToSnakeCase = (obj: any): any => {
 	return snakeCaseObj;
 };
 
+// Helper: Validate UUID format
+const isValidUUID = (id: string): boolean => {
+	if (!id || typeof id !== "string") return false;
+	const uuidRegex =
+		/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+	return uuidRegex.test(id);
+};
+
+// Helper: Generate a valid UUID v4
+const generateUUID = (): string => {
+	return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+		const r = (Math.random() * 16) | 0;
+		const v = c === "x" ? r : (r & 0x3) | 0x8;
+		return v.toString(16);
+	});
+};
+
+// Helper: Ensure ID is a valid UUID, generate new one if not
+const ensureValidUUID = (id: string): string => {
+	if (isValidUUID(id)) return id;
+	return generateUUID();
+};
+
 // Helper: Convert snake_case to camelCase
 const toCamelCase = (str: string): string => {
 	return str.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase());
@@ -219,7 +242,7 @@ export const syncHabitsToCloud = async (
 		}
 
 		// Upsert habits
-		if (habitsData.habits.length > 0) {
+		if (habitsData.habits && habitsData.habits.length > 0) {
 			const habitsWithUser = habitsData.habits.map((habit) => {
 				// Flatten frequency object to match database columns
 				const { frequency, ...restHabit } = habit;
@@ -256,7 +279,7 @@ export const syncHabitsToCloud = async (
 		}
 
 		// Upsert logs (batch in chunks to avoid payload limits)
-		if (habitsData.logs.length > 0) {
+		if (habitsData.logs && habitsData.logs.length > 0) {
 			const logsWithUser = habitsData.logs.map((log) =>
 				objectToSnakeCase({
 					...log,
@@ -374,31 +397,53 @@ export const syncWorkoutsToCloud = async (
 		}
 
 		// Sync workout plans
-		if (workoutData.workoutPlans.length > 0) {
-			const plansWithUser = workoutData.workoutPlans.map((plan) =>
-				objectToSnakeCase({
-					...plan,
-					user_id: userId,
-					exercises: JSON.stringify(plan.exercises || []),
-				})
-			);
+		if (workoutData.workoutPlans && workoutData.workoutPlans.length > 0) {
+			const plansWithUser = workoutData.workoutPlans
+				.filter((plan) => plan.id && isValidUUID(plan.id))
+				.map((plan) => {
+					// Only include fields that exist in the database schema
+					return {
+						id: plan.id,
+						user_id: userId,
+						name: plan.name,
+						description: plan.description || null,
+						exercises: JSON.stringify(plan.exercises || []),
+						is_active: plan.isActive || false,
+						created_at: plan.createdAt || new Date().toISOString(),
+						updated_at: plan.updatedAt || new Date().toISOString(),
+					};
+				});
 
-			const { error: plansError } = await (
-				supabase.from("workout_plans") as any
-			).upsert(plansWithUser, { onConflict: "id" });
+			if (plansWithUser.length > 0) {
+				const { error: plansError } = await (
+					supabase.from("workout_plans") as any
+				).upsert(plansWithUser, { onConflict: "id" });
 
-			if (plansError) throw plansError;
+				if (plansError) throw plansError;
+			}
 		}
 
-		// Sync workout sessions
-		if (workoutData.workoutSessions.length > 0) {
-			const sessionsWithUser = workoutData.workoutSessions.map((session) =>
-				objectToSnakeCase({
-					...session,
-					user_id: userId,
-					exercises: JSON.stringify(session.exercises || []),
-				})
-			);
+		// Sync workout sessions - explicitly map only valid DB columns, fix invalid UUIDs
+		if (workoutData.workoutSessions && workoutData.workoutSessions.length > 0) {
+			const sessionsWithUser = workoutData.workoutSessions.map((session) => ({
+				id: ensureValidUUID(session.id),
+				user_id: userId,
+				plan_id: session.planId ? ensureValidUUID(session.planId) : null,
+				plan_name: session.planName || null,
+				name: session.name,
+				date: session.date,
+				start_time: session.startTime,
+				end_time: session.endTime || session.endedAt || null,
+				duration: session.duration || 0,
+				exercises: JSON.stringify(session.exercises || []),
+				total_volume: session.totalVolume || 0,
+				mood: session.mood || null,
+				energy_level: session.energyLevel || null,
+				notes: session.notes || null,
+				is_completed: session.isCompleted ?? false,
+				created_at: session.createdAt || new Date().toISOString(),
+				updated_at: session.updatedAt || new Date().toISOString(),
+			}));
 
 			const chunkSize = 200;
 			for (let i = 0; i < sessionsWithUser.length; i += chunkSize) {
@@ -412,7 +457,7 @@ export const syncWorkoutsToCloud = async (
 		}
 
 		// Sync personal records
-		if (workoutData.personalRecords.length > 0) {
+		if (workoutData.personalRecords && workoutData.personalRecords.length > 0) {
 			const recordsWithUser = workoutData.personalRecords.map((record) =>
 				objectToSnakeCase({
 					...record,
@@ -428,7 +473,10 @@ export const syncWorkoutsToCloud = async (
 		}
 
 		// Sync body measurements
-		if (workoutData.bodyMeasurements.length > 0) {
+		if (
+			workoutData.bodyMeasurements &&
+			workoutData.bodyMeasurements.length > 0
+		) {
 			const measurementsWithUser = workoutData.bodyMeasurements.map((m) =>
 				objectToSnakeCase({
 					...m,
@@ -444,7 +492,7 @@ export const syncWorkoutsToCloud = async (
 		}
 
 		// Sync body weights
-		if (workoutData.bodyWeights.length > 0) {
+		if (workoutData.bodyWeights && workoutData.bodyWeights.length > 0) {
 			const weightsWithUser = workoutData.bodyWeights.map((w) =>
 				objectToSnakeCase({
 					...w,
@@ -460,7 +508,7 @@ export const syncWorkoutsToCloud = async (
 		}
 
 		// Sync custom exercises
-		if (workoutData.customExercises.length > 0) {
+		if (workoutData.customExercises && workoutData.customExercises.length > 0) {
 			const exercisesWithUser = workoutData.customExercises.map((e) =>
 				objectToSnakeCase({
 					...e,
@@ -609,11 +657,12 @@ export const syncFinanceToCloud = async (
 	}
 ): Promise<SyncResult> => {
 	try {
-		// Sync accounts
-		if (financeData.accounts.length > 0) {
+		// Sync accounts - fix invalid UUIDs
+		if (financeData.accounts && financeData.accounts.length > 0) {
 			const accountsWithUser = financeData.accounts.map((a) =>
 				objectToSnakeCase({
 					...a,
+					id: ensureValidUUID(a.id),
 					user_id: userId,
 				})
 			);
@@ -625,11 +674,13 @@ export const syncFinanceToCloud = async (
 			if (accountsError) throw accountsError;
 		}
 
-		// Sync transactions (batch)
-		if (financeData.transactions.length > 0) {
+		// Sync transactions (batch) - fix invalid UUIDs
+		if (financeData.transactions && financeData.transactions.length > 0) {
 			const transactionsWithUser = financeData.transactions.map((t) =>
 				objectToSnakeCase({
 					...t,
+					id: ensureValidUUID(t.id),
+					account_id: t.accountId ? ensureValidUUID(t.accountId) : null,
 					user_id: userId,
 				})
 			);
@@ -645,11 +696,16 @@ export const syncFinanceToCloud = async (
 			}
 		}
 
-		// Sync recurring transactions
-		if (financeData.recurringTransactions.length > 0) {
+		// Sync recurring transactions - fix invalid UUIDs
+		if (
+			financeData.recurringTransactions &&
+			financeData.recurringTransactions.length > 0
+		) {
 			const recurringWithUser = financeData.recurringTransactions.map((r) =>
 				objectToSnakeCase({
 					...r,
+					id: ensureValidUUID(r.id),
+					account_id: r.accountId ? ensureValidUUID(r.accountId) : null,
 					user_id: userId,
 				})
 			);
@@ -661,11 +717,12 @@ export const syncFinanceToCloud = async (
 			if (recurringError) throw recurringError;
 		}
 
-		// Sync budgets
-		if (financeData.budgets.length > 0) {
+		// Sync budgets - fix invalid UUIDs
+		if (financeData.budgets && financeData.budgets.length > 0) {
 			const budgetsWithUser = financeData.budgets.map((b) =>
 				objectToSnakeCase({
 					...b,
+					id: ensureValidUUID(b.id),
 					user_id: userId,
 				})
 			);
@@ -677,11 +734,12 @@ export const syncFinanceToCloud = async (
 			if (budgetsError) throw budgetsError;
 		}
 
-		// Sync savings goals
-		if (financeData.savingsGoals.length > 0) {
+		// Sync savings goals - fix invalid UUIDs
+		if (financeData.savingsGoals && financeData.savingsGoals.length > 0) {
 			const goalsWithUser = financeData.savingsGoals.map((g) =>
 				objectToSnakeCase({
 					...g,
+					id: ensureValidUUID(g.id),
 					user_id: userId,
 				})
 			);
@@ -693,11 +751,12 @@ export const syncFinanceToCloud = async (
 			if (goalsError) throw goalsError;
 		}
 
-		// Sync bill reminders
-		if (financeData.billReminders.length > 0) {
+		// Sync bill reminders - fix invalid UUIDs
+		if (financeData.billReminders && financeData.billReminders.length > 0) {
 			const remindersWithUser = financeData.billReminders.map((r) =>
 				objectToSnakeCase({
 					...r,
+					id: ensureValidUUID(r.id),
 					user_id: userId,
 				})
 			);
@@ -709,11 +768,12 @@ export const syncFinanceToCloud = async (
 			if (remindersError) throw remindersError;
 		}
 
-		// Sync debts
-		if (financeData.debts.length > 0) {
+		// Sync debts - fix invalid UUIDs
+		if (financeData.debts && financeData.debts.length > 0) {
 			const debtsWithUser = financeData.debts.map((d) =>
 				objectToSnakeCase({
 					...d,
+					id: ensureValidUUID(d.id),
 					user_id: userId,
 				})
 			);
@@ -725,11 +785,12 @@ export const syncFinanceToCloud = async (
 			if (debtsError) throw debtsError;
 		}
 
-		// Sync split groups
-		if (financeData.splitGroups.length > 0) {
+		// Sync split groups - fix invalid UUIDs
+		if (financeData.splitGroups && financeData.splitGroups.length > 0) {
 			const groupsWithUser = financeData.splitGroups.map((g) =>
 				objectToSnakeCase({
 					...g,
+					id: ensureValidUUID(g.id),
 					user_id: userId,
 					members: JSON.stringify(g.members || []),
 					expenses: JSON.stringify(g.expenses || []),
@@ -850,7 +911,7 @@ export const syncStudyToCloud = async (
 ): Promise<SyncResult> => {
 	try {
 		// Sync study goals
-		if (studyData.studyGoals.length > 0) {
+		if (studyData.studyGoals && studyData.studyGoals.length > 0) {
 			const goalsWithUser = studyData.studyGoals.map((g) =>
 				objectToSnakeCase({
 					...g,
@@ -866,7 +927,7 @@ export const syncStudyToCloud = async (
 		}
 
 		// Sync subjects
-		if (studyData.subjects.length > 0) {
+		if (studyData.subjects && studyData.subjects.length > 0) {
 			const subjectsWithUser = studyData.subjects.map((s) =>
 				objectToSnakeCase({
 					...s,
@@ -882,7 +943,7 @@ export const syncStudyToCloud = async (
 		}
 
 		// Sync study sessions
-		if (studyData.studySessions.length > 0) {
+		if (studyData.studySessions && studyData.studySessions.length > 0) {
 			const sessionsWithUser = studyData.studySessions.map((s) =>
 				objectToSnakeCase({
 					...s,
@@ -898,7 +959,7 @@ export const syncStudyToCloud = async (
 		}
 
 		// Sync flashcard decks
-		if (studyData.flashcardDecks.length > 0) {
+		if (studyData.flashcardDecks && studyData.flashcardDecks.length > 0) {
 			const decksWithUser = studyData.flashcardDecks.map((d) =>
 				objectToSnakeCase({
 					...d,
@@ -914,7 +975,7 @@ export const syncStudyToCloud = async (
 		}
 
 		// Sync flashcards
-		if (studyData.flashcards.length > 0) {
+		if (studyData.flashcards && studyData.flashcards.length > 0) {
 			const cardsWithUser = studyData.flashcards.map((c) =>
 				objectToSnakeCase({
 					...c,
@@ -930,7 +991,7 @@ export const syncStudyToCloud = async (
 		}
 
 		// Sync revision schedule
-		if (studyData.revisionSchedule.length > 0) {
+		if (studyData.revisionSchedule && studyData.revisionSchedule.length > 0) {
 			const revisionWithUser = studyData.revisionSchedule.map((r) =>
 				objectToSnakeCase({
 					...r,
@@ -946,7 +1007,7 @@ export const syncStudyToCloud = async (
 		}
 
 		// Sync mock tests
-		if (studyData.mockTests.length > 0) {
+		if (studyData.mockTests && studyData.mockTests.length > 0) {
 			const testsWithUser = studyData.mockTests.map((t) =>
 				objectToSnakeCase({
 					...t,
@@ -962,7 +1023,7 @@ export const syncStudyToCloud = async (
 		}
 
 		// Sync daily plans
-		if (studyData.dailyPlans.length > 0) {
+		if (studyData.dailyPlans && studyData.dailyPlans.length > 0) {
 			const plansWithUser = studyData.dailyPlans.map((p) =>
 				objectToSnakeCase({
 					...p,
@@ -978,7 +1039,7 @@ export const syncStudyToCloud = async (
 		}
 
 		// Sync study notes
-		if (studyData.studyNotes.length > 0) {
+		if (studyData.studyNotes && studyData.studyNotes.length > 0) {
 			const notesWithUser = studyData.studyNotes.map((n) =>
 				objectToSnakeCase({
 					...n,
@@ -1124,10 +1185,36 @@ export const deleteAllCloudData = async (
 	userId: string,
 	module?: SyncModule
 ): Promise<SyncResult> => {
+	// CRITICAL: Validate userId to prevent accidental deletion of all data
+	if (!userId || typeof userId !== "string" || userId.trim() === "") {
+		console.error(
+			"❌ SAFETY CHECK: Invalid userId provided to deleteAllCloudData"
+		);
+		return {
+			success: false,
+			module: module || "all",
+			error: "Invalid user ID",
+		};
+	}
+
+	console.log(
+		`🗑️ Deleting cloud data for user: ${userId}, module: ${module || "all"}`
+	);
+
 	try {
 		if (!module || module === "all" || module === "habits") {
-			await supabase.from("habit_logs").delete().eq("user_id", userId);
-			await supabase.from("user_habits").delete().eq("user_id", userId);
+			const { error: logsError } = await supabase
+				.from("habit_logs")
+				.delete()
+				.eq("user_id", userId);
+			if (logsError) console.error("Error deleting habit_logs:", logsError);
+
+			const { error: habitsError } = await supabase
+				.from("user_habits")
+				.delete()
+				.eq("user_id", userId);
+			if (habitsError)
+				console.error("Error deleting user_habits:", habitsError);
 		}
 
 		if (!module || module === "all" || module === "workouts") {

@@ -1,5 +1,6 @@
 // Subject Manager - Manage subjects/topics within study goals
 
+import { Alert } from "@/src/components/CustomAlert";
 import { SubscriptionCheckResult } from "@/src/components/PremiumFeatureGate";
 import {
 	Difficulty,
@@ -11,7 +12,6 @@ import { Theme } from "@/src/context/themeContext";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import React, { useMemo, useState } from "react";
 import {
-	Alert,
 	Dimensions,
 	Modal,
 	ScrollView,

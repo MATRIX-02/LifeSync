@@ -1,5 +1,6 @@
 // Workout Dashboard - Quick overview and start workout
 
+import { Alert } from "@/src/components/CustomAlert";
 import { SubscriptionCheckResult } from "@/src/components/PremiumFeatureGate";
 import { useAuthStore } from "@/src/context/authStore";
 import { Theme } from "@/src/context/themeContext";
@@ -13,7 +14,6 @@ import Ionicons from "@expo/vector-icons/Ionicons";
 import { useRouter } from "expo-router";
 import React, { useCallback, useEffect, useState } from "react";
 import {
-	Alert,
 	Dimensions,
 	FlatList,
 	Modal,

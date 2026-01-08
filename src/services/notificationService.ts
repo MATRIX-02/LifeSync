@@ -152,6 +152,17 @@ export class NotificationService {
 				showBadge: true,
 			});
 
+			// Study Hub channel
+			await Notifications.setNotificationChannelAsync("study-reminders", {
+				name: "Study Reminders",
+				importance: Notifications.AndroidImportance.HIGH,
+				vibrationPattern: [0, 250, 250, 250],
+				lightColor: "#3B82F6",
+				sound: "default",
+				enableVibrate: true,
+				showBadge: true,
+			});
+
 			// Also set up a default channel
 			await Notifications.setNotificationChannelAsync("default", {
 				name: "Default",
@@ -272,6 +283,124 @@ export class NotificationService {
 		);
 	}
 
+	// ============ STUDY HUB NOTIFICATIONS ============
+
+	// Schedule daily study reminder at a specific time
+	static async scheduleStudyReminder(
+		timeString: string, // HH:mm format
+		message?: string
+	): Promise<string> {
+		const [hours, minutes] = timeString.split(":").map(Number);
+
+		const trigger: Notifications.DailyTriggerInput = {
+			type: Notifications.SchedulableTriggerInputTypes.DAILY,
+			hour: hours,
+			minute: minutes,
+		};
+
+		return this.scheduleNotification(
+			"📚 Time to Study!",
+			message || "Start your study session and stay on track with your goals.",
+			trigger,
+			{ type: "study_reminder" }
+		);
+	}
+
+	// Schedule flashcard review reminder
+	static async scheduleFlashcardReviewReminder(
+		deckId: string,
+		deckName: string,
+		dueCount: number,
+		scheduledTime?: Date
+	): Promise<string> {
+		const trigger = scheduledTime
+			? {
+					type: Notifications.SchedulableTriggerInputTypes.DATE as const,
+					date: scheduledTime,
+			  }
+			: null;
+
+		return this.scheduleNotification(
+			"🃏 Flashcards Due",
+			`You have ${dueCount} cards due for review in "${deckName}"`,
+			trigger,
+			{ type: "flashcard_review", deckId, dueCount }
+		);
+	}
+
+	// Schedule revision reminder
+	static async scheduleRevisionReminder(
+		scheduleId: string,
+		title: string,
+		scheduledDate: Date
+	): Promise<string> {
+		const trigger: Notifications.DateTriggerInput = {
+			type: Notifications.SchedulableTriggerInputTypes.DATE,
+			date: scheduledDate,
+		};
+
+		return this.scheduleNotification(
+			"📖 Revision Reminder",
+			`Time to revise: ${title}`,
+			trigger,
+			{ type: "revision_reminder", scheduleId }
+		);
+	}
+
+	// Schedule goal deadline reminder
+	static async scheduleGoalDeadlineReminder(
+		goalId: string,
+		goalName: string,
+		deadline: Date,
+		daysLeft: number
+	): Promise<string> {
+		const reminderDate = new Date(deadline);
+		reminderDate.setDate(reminderDate.getDate() - daysLeft);
+		reminderDate.setHours(9, 0, 0, 0);
+
+		if (reminderDate <= new Date()) {
+			console.log(`⏭️ Goal deadline reminder already passed, skipping`);
+			return "";
+		}
+
+		const trigger: Notifications.DateTriggerInput = {
+			type: Notifications.SchedulableTriggerInputTypes.DATE,
+			date: reminderDate,
+		};
+
+		const urgency = daysLeft <= 1 ? "⚠️" : daysLeft <= 3 ? "🎯" : "📅";
+		const message =
+			daysLeft === 1
+				? `Your goal "${goalName}" is due tomorrow!`
+				: `Your goal "${goalName}" is due in ${daysLeft} days!`;
+
+		return this.scheduleNotification(
+			`${urgency} Goal Deadline`,
+			message,
+			trigger,
+			{ type: "goal_deadline", goalId, daysLeft }
+		);
+	}
+
+	// Cancel study-related notification by ID
+	static async cancelStudyNotification(
+		type: "revision_reminder" | "goal_deadline" | "flashcard_review",
+		entityId: string
+	): Promise<void> {
+		const scheduled = await this.getAllScheduledNotifications();
+		for (const notif of scheduled) {
+			const data = notif.content.data;
+			if (
+				(type === "revision_reminder" && data?.scheduleId === entityId) ||
+				(type === "goal_deadline" && data?.goalId === entityId) ||
+				(type === "flashcard_review" && data?.deckId === entityId)
+			) {
+				await this.cancelNotification(notif.identifier);
+				console.log(`🗑️ Cancelled ${type} notification for: ${entityId}`);
+			}
+		}
+	}
+
 	// Schedule bill reminder notification
 	static async scheduleBillReminder(
 		billId: string,
@@ -332,6 +461,367 @@ export class NotificationService {
 				console.log(`🗑️ Cancelled notification for bill: ${billId}`);
 			}
 		}
+	}
+
+	// ============ HYDRATION NOTIFICATIONS ============
+
+	// Schedule water reminder notifications throughout the day
+	static async scheduleWaterReminders(
+		waterGoalMl: number,
+		wakeUpHour: number = 7,
+		sleepHour: number = 22
+	): Promise<string[]> {
+		// Cancel existing water reminders first
+		await this.cancelWaterReminders();
+
+		const notificationIds: string[] = [];
+		const activeHours = sleepHour - wakeUpHour;
+
+		// Calculate reminder intervals based on goal
+		// More water = more frequent reminders
+		const glassesPerDay = Math.ceil(waterGoalMl / 250); // 250ml per glass
+		const intervalsNeeded = Math.min(glassesPerDay, activeHours); // Max one per hour
+		const intervalHours = activeHours / intervalsNeeded;
+
+		// Create Android notification channel for hydration
+		if (Platform.OS === "android") {
+			await Notifications.setNotificationChannelAsync("hydration-reminders", {
+				name: "Hydration Reminders",
+				importance: Notifications.AndroidImportance.HIGH,
+				vibrationPattern: [0, 250, 250, 250],
+				lightColor: "#4FC3F7",
+				sound: "default",
+				enableVibrate: true,
+				showBadge: true,
+			});
+		}
+
+		const waterMessages = [
+			"💧 Time to hydrate! Drink a glass of water",
+			"🥤 Stay refreshed! Have some water now",
+			"💦 Water break time! Your body needs hydration",
+			"🌊 Drink up! Keep your hydration on track",
+			"💧 Reminder: A glass of water keeps you healthy",
+			"🚰 Hydration alert! Time for your water break",
+			"💧 Don't forget to drink water for better focus",
+			"🥛 Water time! Stay energized throughout the day",
+		];
+
+		for (let i = 0; i < intervalsNeeded; i++) {
+			const reminderHour = Math.round(wakeUpHour + i * intervalHours);
+			const reminderMinute = Math.round((intervalHours % 1) * 60 * i) % 60;
+
+			if (reminderHour >= sleepHour) continue;
+
+			const trigger: Notifications.DailyTriggerInput = {
+				type: Notifications.SchedulableTriggerInputTypes.DAILY,
+				hour: reminderHour,
+				minute: reminderMinute,
+			};
+
+			const message = waterMessages[i % waterMessages.length];
+			const remainingGlasses = glassesPerDay - i;
+
+			try {
+				const notificationId = await Notifications.scheduleNotificationAsync({
+					content: {
+						title: "💧 Hydration Reminder",
+						body: `${message}. ${remainingGlasses} glasses left for today!`,
+						data: { type: "water_reminder", reminderNumber: i + 1 },
+						sound: "default",
+						badge: 1,
+						...(Platform.OS === "android" && {
+							channelId: "hydration-reminders",
+						}),
+					},
+					trigger,
+				});
+				notificationIds.push(notificationId);
+				console.log(
+					`📅 Scheduled water reminder ${
+						i + 1
+					} at ${reminderHour}:${reminderMinute.toString().padStart(2, "0")}`
+				);
+			} catch (error) {
+				console.error(`Error scheduling water reminder ${i + 1}:`, error);
+			}
+		}
+
+		console.log(`✅ Scheduled ${notificationIds.length} water reminders`);
+		return notificationIds;
+	}
+
+	// Cancel all water reminder notifications
+	static async cancelWaterReminders(): Promise<void> {
+		const scheduled = await this.getAllScheduledNotifications();
+		for (const notif of scheduled) {
+			if (notif.content.data?.type === "water_reminder") {
+				await this.cancelNotification(notif.identifier);
+			}
+		}
+		console.log("🗑️ Cancelled all water reminders");
+	}
+
+	// Schedule a single water reminder after X minutes
+	static async scheduleNextWaterReminder(
+		minutesFromNow: number,
+		customMessage?: string
+	): Promise<string> {
+		const trigger: Notifications.TimeIntervalTriggerInput = {
+			type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
+			seconds: minutesFromNow * 60,
+		};
+
+		return this.scheduleNotification(
+			"💧 Water Reminder",
+			customMessage || "Time to drink some water! Stay hydrated!",
+			trigger,
+			{ type: "water_reminder_single" }
+		);
+	}
+
+	// ============ FASTING TIMER NOTIFICATIONS ============
+
+	// Start a persistent fasting timer notification (Android only supports ongoing)
+	static async startFastingTimerNotification(
+		fastType: string,
+		targetHours: number,
+		startTime: Date
+	): Promise<string | null> {
+		if (Platform.OS === "android") {
+			// Create fasting channel
+			await Notifications.setNotificationChannelAsync("fasting-timer", {
+				name: "Fasting Timer",
+				importance: Notifications.AndroidImportance.LOW,
+				vibrationPattern: [0],
+				sound: null,
+				enableVibrate: false,
+				showBadge: false,
+			});
+		}
+
+		try {
+			// Schedule milestone notifications
+			const milestoneHours = [4, 8, 12, 16, 20];
+			const notificationIds: string[] = [];
+
+			for (const milestone of milestoneHours) {
+				if (milestone < targetHours) {
+					const milestoneTime = new Date(
+						startTime.getTime() + milestone * 60 * 60 * 1000
+					);
+					if (milestoneTime > new Date()) {
+						const trigger: Notifications.DateTriggerInput = {
+							type: Notifications.SchedulableTriggerInputTypes.DATE,
+							date: milestoneTime,
+						};
+
+						const notifId = await Notifications.scheduleNotificationAsync({
+							content: {
+								title: `⏰ Fasting Milestone: ${milestone} hours!`,
+								body: `Great progress! ${
+									targetHours - milestone
+								} hours remaining.`,
+								data: { type: "fasting_milestone", milestone },
+								sound: "default",
+								...(Platform.OS === "android" && {
+									channelId: "fasting-timer",
+								}),
+							},
+							trigger,
+						});
+						notificationIds.push(notifId);
+					}
+				}
+			}
+
+			// Schedule completion notification
+			const endTime = new Date(
+				startTime.getTime() + targetHours * 60 * 60 * 1000
+			);
+			if (endTime > new Date()) {
+				const completionTrigger: Notifications.DateTriggerInput = {
+					type: Notifications.SchedulableTriggerInputTypes.DATE,
+					date: endTime,
+				};
+
+				const completionId = await Notifications.scheduleNotificationAsync({
+					content: {
+						title: "🎉 Fast Complete!",
+						body: `Congratulations! You completed your ${targetHours}-hour ${fastType} fast!`,
+						data: { type: "fasting_complete" },
+						sound: "default",
+						...(Platform.OS === "android" && {
+							channelId: "fasting-timer",
+						}),
+					},
+					trigger: completionTrigger,
+				});
+				notificationIds.push(completionId);
+			}
+
+			console.log(
+				`✅ Scheduled ${notificationIds.length} fasting notifications`
+			);
+			return notificationIds[0] || null;
+		} catch (error) {
+			console.error("Error scheduling fasting notifications:", error);
+			return null;
+		}
+	}
+
+	// Cancel fasting timer notifications
+	static async cancelFastingNotifications(): Promise<void> {
+		const scheduled = await this.getAllScheduledNotifications();
+		for (const notif of scheduled) {
+			const type = notif.content.data?.type;
+			if (
+				type === "fasting_milestone" ||
+				type === "fasting_complete" ||
+				type === "fasting_timer"
+			) {
+				await this.cancelNotification(notif.identifier);
+			}
+		}
+		console.log("🗑️ Cancelled all fasting notifications");
+	}
+
+	// ============ POMODORO TIMER NOTIFICATIONS ============
+
+	// Schedule pomodoro session end notification
+	static async schedulePomodoroEndNotification(
+		durationMinutes: number,
+		sessionNumber: number
+	): Promise<string> {
+		if (Platform.OS === "android") {
+			await Notifications.setNotificationChannelAsync("pomodoro-timer", {
+				name: "Pomodoro Timer",
+				importance: Notifications.AndroidImportance.HIGH,
+				vibrationPattern: [0, 250, 250, 250],
+				lightColor: "#FF6B6B",
+				sound: "default",
+				enableVibrate: true,
+				showBadge: true,
+			});
+		}
+
+		const endTime = new Date(Date.now() + durationMinutes * 60 * 1000);
+
+		const trigger: Notifications.DateTriggerInput = {
+			type: Notifications.SchedulableTriggerInputTypes.DATE,
+			date: endTime,
+		};
+
+		const notifId = await Notifications.scheduleNotificationAsync({
+			content: {
+				title: "🍅 Pomodoro Complete!",
+				body: `Session ${sessionNumber} finished! Time for a break.`,
+				data: { type: "pomodoro_end", sessionNumber },
+				sound: "default",
+				...(Platform.OS === "android" && {
+					channelId: "pomodoro-timer",
+				}),
+			},
+			trigger,
+		});
+
+		console.log(
+			`⏱️ Scheduled pomodoro end notification for ${durationMinutes} minutes`
+		);
+		return notifId;
+	}
+
+	// Schedule break end notification
+	static async scheduleBreakEndNotification(
+		breakMinutes: number,
+		isLongBreak: boolean
+	): Promise<string> {
+		const endTime = new Date(Date.now() + breakMinutes * 60 * 1000);
+
+		const trigger: Notifications.DateTriggerInput = {
+			type: Notifications.SchedulableTriggerInputTypes.DATE,
+			date: endTime,
+		};
+
+		const notifId = await Notifications.scheduleNotificationAsync({
+			content: {
+				title: "⏰ Break Over!",
+				body: isLongBreak
+					? "Long break finished! Ready for another round?"
+					: "Short break done! Time to focus again.",
+				data: { type: "break_end", isLongBreak },
+				sound: "default",
+				...(Platform.OS === "android" && {
+					channelId: "pomodoro-timer",
+				}),
+			},
+			trigger,
+		});
+
+		console.log(
+			`☕ Scheduled break end notification for ${breakMinutes} minutes`
+		);
+		return notifId;
+	}
+
+	// Cancel all pomodoro notifications
+	static async cancelPomodoroNotifications(): Promise<void> {
+		const scheduled = await this.getAllScheduledNotifications();
+		for (const notif of scheduled) {
+			const type = notif.content.data?.type;
+			if (
+				type === "pomodoro_end" ||
+				type === "break_end" ||
+				type === "pomodoro_complete"
+			) {
+				await this.cancelNotification(notif.identifier);
+			}
+		}
+		console.log("🗑️ Cancelled all pomodoro notifications");
+	}
+
+	// Schedule a countdown notification (for timer display)
+	static async scheduleTimerProgressNotification(
+		title: string,
+		body: string,
+		intervalSeconds: number,
+		totalDuration: number
+	): Promise<string[]> {
+		const notificationIds: string[] = [];
+		const intervals = Math.floor(totalDuration / intervalSeconds);
+
+		for (let i = 1; i <= intervals; i++) {
+			const secondsFromNow = i * intervalSeconds;
+			const remainingSeconds = totalDuration - secondsFromNow;
+
+			if (remainingSeconds <= 0) continue;
+
+			const trigger: Notifications.TimeIntervalTriggerInput = {
+				type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
+				seconds: secondsFromNow,
+			};
+
+			const minutes = Math.floor(remainingSeconds / 60);
+			const seconds = remainingSeconds % 60;
+			const timeString = `${minutes}:${seconds.toString().padStart(2, "0")}`;
+
+			try {
+				const notifId = await Notifications.scheduleNotificationAsync({
+					content: {
+						title,
+						body: `${body} - ${timeString} remaining`,
+						data: { type: "timer_progress", remaining: remainingSeconds },
+						sound: null, // Silent progress updates
+					},
+					trigger,
+				});
+				notificationIds.push(notifId);
+			} catch (error) {
+				console.error(`Error scheduling timer progress notification:`, error);
+			}
+		}
+
+		return notificationIds;
 	}
 
 	static setNotificationHandler(): void {

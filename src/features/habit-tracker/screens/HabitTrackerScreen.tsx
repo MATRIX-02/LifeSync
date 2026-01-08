@@ -1,26 +1,25 @@
-import React, { useCallback, useState, useRef } from "react";
-import {
-	View,
-	FlatList,
-	TouchableOpacity,
-	StyleSheet,
-	Text,
-	ActivityIndicator,
-	Modal,
-	TextInput,
-	Alert,
-	ScrollView,
-	Animated,
-	PanResponder,
-	Dimensions,
-	TouchableWithoutFeedback,
-	Switch,
-} from "react-native";
+import { Alert } from "@/src/components/CustomAlert";
 import Ionicons from "@expo/vector-icons/Ionicons";
-import { useHabitManager } from "../../../hooks/useHabitManager";
+import React, { useCallback, useRef, useState } from "react";
+import {
+	Animated,
+	Dimensions,
+	FlatList,
+	Modal,
+	PanResponder,
+	ScrollView,
+	StyleSheet,
+	Switch,
+	Text,
+	TextInput,
+	TouchableOpacity,
+	TouchableWithoutFeedback,
+	View,
+} from "react-native";
 import { COLORS } from "../../../constants";
-import HabitCard from "../components/HabitCard";
+import { useHabitManager } from "../../../hooks/useHabitManager";
 import { FrequencyType } from "../../../types";
+import HabitCard from "../components/HabitCard";
 
 const { height: SCREEN_HEIGHT } = Dimensions.get("window");
 

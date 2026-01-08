@@ -1,5 +1,6 @@
 // Active Workout Screen - In-progress workout UI
 
+import { Alert } from "@/src/components/CustomAlert";
 import { Theme } from "@/src/context/themeContext";
 import { useWorkoutStore } from "@/src/context/workoutStoreDB";
 import {
@@ -16,7 +17,6 @@ import {
 import Ionicons from "@expo/vector-icons/Ionicons";
 import React, { useEffect, useState } from "react";
 import {
-	Alert,
 	FlatList,
 	Modal,
 	ScrollView,

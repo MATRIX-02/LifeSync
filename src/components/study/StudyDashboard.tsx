@@ -1,15 +1,14 @@
 // Study Dashboard - Main overview with quick actions and progress
 
+import { Alert } from "@/src/components/CustomAlert";
 import { SubscriptionCheckResult } from "@/src/components/PremiumFeatureGate";
 import { useStudyStore } from "@/src/context/studyStoreDB/index";
 import { Theme } from "@/src/context/themeContext";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import React, { useMemo, useState } from "react";
 import {
-	Alert,
 	Dimensions,
 	Modal,
-	Alert as RNAlert,
 	ScrollView,
 	StyleSheet,
 	Text,
@@ -171,7 +170,7 @@ export default function StudyDashboard({
 
 	// Delete goal handler
 	const handleDeleteGoal = (goalId: string, goalName: string) => {
-		RNAlert.alert(
+		Alert.alert(
 			"Delete Goal",
 			`Are you sure you want to delete the goal "${goalName}"? This cannot be undone.`,
 			[
@@ -192,7 +191,7 @@ export default function StudyDashboard({
 	// End active session handler
 	const handleEndSession = async () => {
 		if (!activeSession) return;
-		RNAlert.alert(
+		Alert.alert(
 			"End Session",
 			"Are you sure you want to end the current study session?",
 			[
@@ -264,7 +263,7 @@ export default function StudyDashboard({
 				setTimeout(() => {
 					const newestGoal = studyGoals[studyGoals.length - 1];
 					if (newestGoal && newestGoal.name === goalName) {
-						RNAlert.alert(
+						Alert.alert(
 							"Create SSB Subjects?",
 							`Would you like to automatically create ${SSB_PREPARATION_CHECKLIST.length} subjects for SSB preparation?`,
 							[

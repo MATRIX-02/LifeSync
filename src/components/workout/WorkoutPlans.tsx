@@ -1,5 +1,6 @@
 // Workout Plans - Create and manage workout routines
 
+import { Alert } from "@/src/components/CustomAlert";
 import { SubscriptionCheckResult } from "@/src/components/PremiumFeatureGate";
 import { Theme } from "@/src/context/themeContext";
 import { useWorkoutStore } from "@/src/context/workoutStoreDB";
@@ -17,7 +18,6 @@ import {
 import Ionicons from "@expo/vector-icons/Ionicons";
 import React, { useState } from "react";
 import {
-	Alert,
 	FlatList,
 	Modal,
 	ScrollView,

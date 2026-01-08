@@ -1,3 +1,4 @@
+import { Alert } from "@/src/components/CustomAlert";
 import { useAuthStore } from "@/src/context/authStore";
 import { useTheme } from "@/src/context/themeContext";
 import { Ionicons } from "@expo/vector-icons";
@@ -5,7 +6,6 @@ import { useRouter } from "expo-router";
 import React, { useState } from "react";
 import {
 	ActivityIndicator,
-	Alert,
 	KeyboardAvoidingView,
 	Platform,
 	ScrollView,

@@ -211,5 +211,5 @@ export interface StudyStore {
 		dailyPlans?: DailyPlan[];
 		studyNotes?: StudyNote[];
 	}) => Promise<void>;
-	clearAllData: () => void;
+	clearAllData: () => Promise<void>;
 }

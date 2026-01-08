@@ -4,6 +4,7 @@
  */
 import { create } from "zustand";
 import { supabase as supabaseClient } from "../../config/supabase";
+import { NotificationService } from "../../services/notificationService";
 import {
 	calculateNextReviewDate,
 	calculateStreak,
@@ -191,6 +192,35 @@ export const useStudyStore = create<StudyStore>()((set, get) => ({
 		if (error) {
 			console.error("Error adding study goal:", error);
 			return;
+		}
+
+		// Schedule deadline reminder if target date is set
+		if (newGoal.targetDate) {
+			try {
+				const targetDate = new Date(newGoal.targetDate);
+
+				// Schedule reminder 3 days before deadline
+				await NotificationService.scheduleGoalDeadlineReminder(
+					newGoal.id,
+					newGoal.name,
+					targetDate,
+					3
+				);
+
+				// Schedule reminder 1 day before deadline
+				await NotificationService.scheduleGoalDeadlineReminder(
+					newGoal.id,
+					newGoal.name,
+					targetDate,
+					1
+				);
+
+				console.log(
+					`✅ Scheduled deadline reminders for goal: ${newGoal.name}`
+				);
+			} catch (error) {
+				console.error("Error scheduling goal reminders:", error);
+			}
 		}
 
 		set({ studyGoals: [...studyGoals, newGoal] });
@@ -805,6 +835,30 @@ export const useStudyStore = create<StudyStore>()((set, get) => ({
 			return;
 		}
 
+		// Schedule notification if reminder is enabled
+		if (newSchedule.reminderEnabled && newSchedule.scheduledDate) {
+			try {
+				const scheduledDate = new Date(newSchedule.scheduledDate);
+				const reminderTime = newSchedule.reminderTime || "09:00";
+				const [hours, minutes] = reminderTime.split(":").map(Number);
+				scheduledDate.setHours(hours, minutes, 0, 0);
+
+				// Only schedule if it's in the future
+				if (scheduledDate > new Date()) {
+					await NotificationService.scheduleRevisionReminder(
+						newSchedule.id,
+						newSchedule.title,
+						scheduledDate
+					);
+					console.log(
+						`✅ Scheduled revision reminder for ${newSchedule.title}`
+					);
+				}
+			} catch (error) {
+				console.error("Error scheduling revision reminder:", error);
+			}
+		}
+
 		set({ revisionSchedule: [...revisionSchedule, newSchedule] });
 	},
 
@@ -983,6 +1037,32 @@ export const useStudyStore = create<StudyStore>()((set, get) => ({
 		if (error) {
 			console.error("Error creating plan:", error);
 			return;
+		}
+
+		// Schedule morning reminder for the daily plan
+		try {
+			const planDate = new Date(newPlan.date);
+			planDate.setHours(8, 0, 0, 0); // 8 AM reminder
+
+			// Only schedule if it's today or in the future
+			if (planDate > new Date()) {
+				const taskCount = newPlan.tasks?.length || 0;
+				const message =
+					taskCount > 0
+						? `You have ${taskCount} study tasks planned for today. Target: ${newPlan.targetHours}h`
+						: `Your target for today: ${newPlan.targetHours} hours of study`;
+
+				// Use the scheduleStudyReminder for daily reminders
+				await NotificationService.scheduleNotification(
+					"📋 Daily Study Plan",
+					message,
+					null, // Immediate for today, or use the specific date trigger
+					{ type: "daily_plan", planId: newPlan.id }
+				);
+				console.log(`✅ Scheduled daily plan reminder for ${newPlan.date}`);
+			}
+		} catch (error) {
+			console.error("Error scheduling daily plan reminder:", error);
 		}
 
 		set({ dailyPlans: [...dailyPlans, newPlan] });
@@ -1439,18 +1519,45 @@ export const useStudyStore = create<StudyStore>()((set, get) => ({
 		}
 	},
 
-	clearAllData: () =>
-		set({
-			studyGoals: [],
-			subjects: [],
-			studySessions: [],
-			flashcardDecks: [],
-			flashcards: [],
-			revisionSchedule: [],
-			mockTests: [],
-			dailyPlans: [],
-			studyNotes: [],
-			streak: DEFAULT_STREAK,
-			activeSession: null,
-		}),
+	clearAllData: async () => {
+		const { userId } = get();
+		if (!userId) {
+			console.error("No user ID - cannot clear data");
+			return;
+		}
+		console.log("🗑️ Clearing study data for user:", userId);
+
+		try {
+			// Delete from database with user_id filter
+			await Promise.all([
+				supabaseClient.from("study_sessions").delete().eq("user_id", userId),
+				supabaseClient.from("study_subjects").delete().eq("user_id", userId),
+				supabaseClient.from("study_goals").delete().eq("user_id", userId),
+				supabaseClient.from("flashcards").delete().eq("user_id", userId),
+				supabaseClient.from("flashcard_decks").delete().eq("user_id", userId),
+				supabaseClient.from("revision_schedule").delete().eq("user_id", userId),
+				supabaseClient.from("mock_tests").delete().eq("user_id", userId),
+				supabaseClient.from("daily_plans").delete().eq("user_id", userId),
+				supabaseClient.from("study_notes").delete().eq("user_id", userId),
+			]);
+
+			// Clear local state
+			set({
+				studyGoals: [],
+				subjects: [],
+				studySessions: [],
+				flashcardDecks: [],
+				flashcards: [],
+				revisionSchedule: [],
+				mockTests: [],
+				dailyPlans: [],
+				studyNotes: [],
+				streak: DEFAULT_STREAK,
+				activeSession: null,
+			});
+			console.log("✅ Study data cleared");
+		} catch (error: any) {
+			console.error("❌ Failed to clear study data:", error);
+		}
+	},
 }));
