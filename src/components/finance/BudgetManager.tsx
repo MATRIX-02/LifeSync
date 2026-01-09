@@ -114,6 +114,7 @@ export default function BudgetManager({
 		amount: "",
 		dueDate: "",
 		isRecurring: false,
+		isAutoDeduct: false,
 		notes: "",
 	});
 	const [debtForm, setDebtForm] = useState({
@@ -161,7 +162,10 @@ export default function BudgetManager({
 
 	const formatAmount = (value: number | undefined | null) => {
 		const num = value ?? 0;
-		return num.toLocaleString("en-IN", { maximumFractionDigits: 0 });
+		return num.toLocaleString("en-IN", {
+			minimumFractionDigits: 0,
+			maximumFractionDigits: 2,
+		});
 	};
 
 	const handleAddBudget = () => {
@@ -178,6 +182,7 @@ export default function BudgetManager({
 				.toISOString()
 				.split("T")[0],
 			alertThreshold: 80,
+			isActive: true,
 		});
 		setBudgetForm({ category: "", amount: "" });
 		setShowAddBudget(false);
@@ -191,9 +196,10 @@ export default function BudgetManager({
 		addSavingsGoal({
 			name: savingsForm.name,
 			targetAmount: parseFloat(savingsForm.targetAmount),
-			targetDate: savingsForm.deadline || undefined,
+			deadline: savingsForm.deadline || undefined,
 			icon: savingsForm.icon,
 			color: COLORS[Math.floor(Math.random() * COLORS.length)],
+			priority: "medium",
 		});
 		setSavingsForm({
 			name: "",
@@ -231,6 +237,7 @@ export default function BudgetManager({
 			category: "bills",
 			frequency: billForm.isRecurring ? "monthly" : "once",
 			reminderDays: 3,
+			isAutoDeduct: false,
 			notes: billForm.notes || undefined,
 		});
 		setBillForm({
@@ -238,6 +245,7 @@ export default function BudgetManager({
 			amount: "",
 			dueDate: "",
 			isRecurring: false,
+			isAutoDeduct: false,
 			notes: "",
 		});
 		setShowAddBill(false);
@@ -270,6 +278,7 @@ export default function BudgetManager({
 			amount: parseFloat(billForm.amount),
 			dueDate: billForm.dueDate,
 			frequency: billForm.isRecurring ? "monthly" : "once",
+			isAutoDeduct: billForm.isAutoDeduct || false,
 			notes: billForm.notes || undefined,
 		});
 		setBillForm({
@@ -277,6 +286,7 @@ export default function BudgetManager({
 			amount: "",
 			dueDate: "",
 			isRecurring: false,
+			isAutoDeduct: false,
 			notes: "",
 		});
 		setShowEditBill(null);
@@ -851,6 +861,7 @@ export default function BudgetManager({
 											amount: bill.amount.toString(),
 											dueDate: bill.dueDate,
 											isRecurring: bill.frequency !== "once",
+											isAutoDeduct: bill.isAutoDeduct ?? false,
 											notes: bill.notes || "",
 										});
 										setBillDate(new Date(bill.dueDate));
@@ -915,6 +926,7 @@ export default function BudgetManager({
 														amount: bill.amount.toString(),
 														dueDate: bill.dueDate,
 														isRecurring: bill.frequency !== "once",
+														isAutoDeduct: bill.isAutoDeduct ?? false,
 														notes: bill.notes || "",
 													});
 													setBillDate(new Date(bill.dueDate));
@@ -1366,9 +1378,9 @@ export default function BudgetManager({
 							style={styles.input}
 							value={budgetForm.amount}
 							onChangeText={(t) => setBudgetForm({ ...budgetForm, amount: t })}
-							placeholder="0"
+							placeholder="0.00"
 							placeholderTextColor={theme.textMuted}
-							keyboardType="numeric"
+							keyboardType={Platform.OS === "ios" ? "decimal-pad" : "numeric"}
 						/>
 
 						<TouchableOpacity
@@ -1413,9 +1425,9 @@ export default function BudgetManager({
 							onChangeText={(t) =>
 								setSavingsForm({ ...savingsForm, targetAmount: t })
 							}
-							placeholder="0"
+							placeholder="0.00"
 							placeholderTextColor={theme.textMuted}
-							keyboardType="numeric"
+							keyboardType={Platform.OS === "ios" ? "decimal-pad" : "numeric"}
 						/>
 
 						<Text style={styles.inputLabel}>Deadline (Optional)</Text>
@@ -1485,9 +1497,9 @@ export default function BudgetManager({
 							style={styles.input}
 							value={billForm.amount}
 							onChangeText={(t) => setBillForm({ ...billForm, amount: t })}
-							placeholder="0"
+							placeholder="0.00"
 							placeholderTextColor={theme.textMuted}
-							keyboardType="numeric"
+							keyboardType={Platform.OS === "ios" ? "decimal-pad" : "numeric"}
 						/>
 
 						<Text style={styles.inputLabel}>Due Date</Text>
@@ -1636,9 +1648,9 @@ export default function BudgetManager({
 							style={styles.input}
 							value={debtForm.totalAmount}
 							onChangeText={(t) => setDebtForm({ ...debtForm, totalAmount: t })}
-							placeholder="0"
+							placeholder="0.00"
 							placeholderTextColor={theme.textMuted}
-							keyboardType="numeric"
+							keyboardType={Platform.OS === "ios" ? "decimal-pad" : "numeric"}
 						/>
 
 						<Text style={styles.inputLabel}>Interest Rate (%) - Optional</Text>
@@ -1648,9 +1660,9 @@ export default function BudgetManager({
 							onChangeText={(t) =>
 								setDebtForm({ ...debtForm, interestRate: t })
 							}
-							placeholder="0"
+							placeholder="0.00"
 							placeholderTextColor={theme.textMuted}
-							keyboardType="numeric"
+							keyboardType={Platform.OS === "ios" ? "decimal-pad" : "numeric"}
 						/>
 
 						<Text style={styles.inputLabel}>Minimum Monthly Payment</Text>
@@ -1660,9 +1672,9 @@ export default function BudgetManager({
 							onChangeText={(t) =>
 								setDebtForm({ ...debtForm, minimumPayment: t })
 							}
-							placeholder="0"
+							placeholder="0.00"
 							placeholderTextColor={theme.textMuted}
-							keyboardType="numeric"
+							keyboardType={Platform.OS === "ios" ? "decimal-pad" : "numeric"}
 						/>
 
 						<Text style={styles.inputLabel}>Due Day of Month (1-31)</Text>
@@ -1708,8 +1720,15 @@ export default function BudgetManager({
 								</Text>
 								<Text style={styles.contributeProgress}>
 									{currency}
-									{showContribute.currentAmount.toLocaleString()} / {currency}
-									{showContribute.targetAmount.toLocaleString()}
+									{showContribute.currentAmount.toLocaleString("en-IN", {
+										minimumFractionDigits: 0,
+										maximumFractionDigits: 2,
+									})}{" "}
+									/ {currency}
+									{showContribute.targetAmount.toLocaleString("en-IN", {
+										minimumFractionDigits: 0,
+										maximumFractionDigits: 2,
+									})}
 								</Text>
 
 								<Text style={styles.inputLabel}>Amount to Add</Text>
@@ -1717,9 +1736,11 @@ export default function BudgetManager({
 									style={styles.input}
 									value={contributionAmount}
 									onChangeText={setContributionAmount}
-									placeholder="0"
+									placeholder="0.00"
 									placeholderTextColor={theme.textMuted}
-									keyboardType="numeric"
+									keyboardType={
+										Platform.OS === "ios" ? "decimal-pad" : "numeric"
+									}
 								/>
 
 								{renderAccountSelector()}
@@ -2040,9 +2061,11 @@ export default function BudgetManager({
 											style={styles.input}
 											value={debtPaymentAmount}
 											onChangeText={setDebtPaymentAmount}
-											placeholder="0"
+											placeholder="0.00"
 											placeholderTextColor={theme.textMuted}
-											keyboardType="numeric"
+											keyboardType={
+												Platform.OS === "ios" ? "decimal-pad" : "numeric"
+											}
 										/>
 
 										{renderAccountSelector()}
@@ -2120,9 +2143,11 @@ export default function BudgetManager({
 									style={styles.input}
 									value={withdrawalAmount}
 									onChangeText={setWithdrawalAmount}
-									placeholder="0"
+									placeholder="0.00"
 									placeholderTextColor={theme.textMuted}
-									keyboardType="numeric"
+									keyboardType={
+										Platform.OS === "ios" ? "decimal-pad" : "numeric"
+									}
 								/>
 
 								{renderAccountSelector()}
@@ -2174,9 +2199,11 @@ export default function BudgetManager({
 									style={styles.input}
 									value={billForm.amount}
 									onChangeText={(t) => setBillForm({ ...billForm, amount: t })}
-									placeholder="0"
+									placeholder="0.00"
 									placeholderTextColor={theme.textMuted}
-									keyboardType="numeric"
+									keyboardType={
+										Platform.OS === "ios" ? "decimal-pad" : "numeric"
+									}
 								/>
 
 								<Text style={styles.inputLabel}>Due Date</Text>

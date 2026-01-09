@@ -10,6 +10,7 @@ import Ionicons from "@expo/vector-icons/Ionicons";
 import React, { useState } from "react";
 import {
 	Modal,
+	Platform,
 	ScrollView,
 	StyleSheet,
 	Text,
@@ -106,7 +107,10 @@ export default function SplitWise({
 	});
 
 	const formatAmount = (value: number) => {
-		return value.toLocaleString("en-IN", { maximumFractionDigits: 0 });
+		return value.toLocaleString("en-IN", {
+			minimumFractionDigits: 0,
+			maximumFractionDigits: 2,
+		});
 	};
 
 	// Handlers
@@ -627,7 +631,10 @@ export default function SplitWise({
 													<View style={styles.expenseCardRight}>
 														<Text style={styles.expenseCardAmount}>
 															{currency}
-															{expense.amount.toLocaleString()}
+															{expense.amount.toLocaleString("en-IN", {
+																minimumFractionDigits: 0,
+																maximumFractionDigits: 2,
+															})}
 														</Text>
 														<Text style={styles.expenseCardDate}>
 															{new Date(expense.date).toLocaleDateString()}
@@ -980,9 +987,9 @@ export default function SplitWise({
 								onChangeText={(t) =>
 									setExpenseForm({ ...expenseForm, amount: t })
 								}
-								placeholder="0"
+								placeholder="0.00"
 								placeholderTextColor={theme.textMuted}
-								keyboardType="numeric"
+								keyboardType={Platform.OS === "ios" ? "decimal-pad" : "numeric"}
 							/>
 						</View>
 
@@ -1094,7 +1101,9 @@ export default function SplitWise({
 														: currency
 												}
 												placeholderTextColor={theme.textMuted}
-												keyboardType="numeric"
+												keyboardType={
+													Platform.OS === "ios" ? "decimal-pad" : "numeric"
+												}
 											/>
 										)}
 									</View>
@@ -1203,9 +1212,9 @@ export default function SplitWise({
 								onChangeText={(t) =>
 									setSettlementForm({ ...settlementForm, amount: t })
 								}
-								placeholder="0"
+								placeholder="0.00"
 								placeholderTextColor={theme.textMuted}
-								keyboardType="numeric"
+								keyboardType={Platform.OS === "ios" ? "decimal-pad" : "numeric"}
 							/>
 						</View>
 

@@ -110,7 +110,7 @@ export function TransactionPrompt({
 			accountId: selectedAccountId || "",
 			paymentMethod: "upi",
 			isRecurring: false,
-			notes: `Auto-detected from ${
+			note: `Auto-detected from ${
 				transaction.source === "notification"
 					? transaction.sourceApp
 					: "bank SMS"
@@ -218,7 +218,10 @@ export function TransactionPrompt({
 							>
 								{transaction.type === "income" ? "+" : "-"}
 								{currency}
-								{transaction.amount.toLocaleString("en-IN")}
+								{transaction.amount.toLocaleString("en-IN", {
+									minimumFractionDigits: 0,
+									maximumFractionDigits: 2,
+								})}
 							</Text>
 							<Text style={styles.timeText}>
 								{formatDate(new Date(transaction.timestamp))}
@@ -314,8 +317,10 @@ export function TransactionPrompt({
 									style={styles.input}
 									value={amount}
 									onChangeText={setAmount}
-									keyboardType="numeric"
-									placeholder="0"
+									keyboardType={
+										Platform.OS === "ios" ? "decimal-pad" : "numeric"
+									}
+									placeholder="0.00"
 									placeholderTextColor={theme.textMuted}
 								/>
 							</View>
@@ -494,7 +499,13 @@ export function PendingTransactionsBadge({
 				<Text style={styles.badgeCount}>
 					{pendingTransactions.length} detected
 				</Text>
-				<Text style={styles.badgeAmount}>₹{total.toLocaleString("en-IN")}</Text>
+				<Text style={styles.badgeAmount}>
+					₹
+					{total.toLocaleString("en-IN", {
+						minimumFractionDigits: 0,
+						maximumFractionDigits: 2,
+					})}
+				</Text>
 			</View>
 		</TouchableOpacity>
 	);

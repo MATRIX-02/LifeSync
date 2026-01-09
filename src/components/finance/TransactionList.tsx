@@ -6,10 +6,13 @@ import { useFinanceStore } from "@/src/context/financeStoreDB";
 import {
 	ExpenseCategory,
 	IncomeCategory,
-	Transaction,
 } from "@/src/context/financeStoreDB/types";
 import { Theme } from "@/src/context/themeContext";
-import { EXPENSE_CATEGORIES, INCOME_CATEGORIES } from "@/src/types/finance";
+import {
+	EXPENSE_CATEGORIES,
+	INCOME_CATEGORIES,
+	Transaction,
+} from "@/src/types/finance";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import React, { useMemo, useState } from "react";
 import {
@@ -224,7 +227,7 @@ export default function TransactionList({
 			amount,
 			description: editForm.description || undefined,
 			category: editForm.category,
-			notes: editForm.note || undefined,
+			note: editForm.note || undefined,
 		});
 
 		setShowEditModal(false);
@@ -233,7 +236,10 @@ export default function TransactionList({
 	};
 
 	const formatAmount = (value: number) => {
-		return value.toLocaleString("en-IN", { maximumFractionDigits: 0 });
+		return value.toLocaleString("en-IN", {
+			minimumFractionDigits: 0,
+			maximumFractionDigits: 2,
+		});
 	};
 
 	const getAccountName = (accountId: string) => {
@@ -655,7 +661,10 @@ export default function TransactionList({
 												>
 													{selectedTransaction.type === "income" ? "+" : "-"}
 													{currency}
-													{selectedTransaction.amount.toLocaleString()}
+													{selectedTransaction.amount.toLocaleString("en-IN", {
+														minimumFractionDigits: 0,
+														maximumFractionDigits: 2,
+													})}
 												</Text>
 												<Text style={styles.detailDescription}>
 													{selectedTransaction.description}

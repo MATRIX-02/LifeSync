@@ -9,7 +9,11 @@ import { useWorkoutStore } from "@/src/context/workoutStoreDB";
 import { NotificationService } from "@/src/services/notificationService";
 import {
 	deleteAllCloudData,
+	getAutoSyncInterval,
 	getSyncStatus,
+	setAutoSyncInterval,
+	startAutoSync,
+	stopAutoSync,
 	syncAllToCloud,
 	syncFinanceToCloud,
 	syncHabitsToCloud,
@@ -48,7 +52,7 @@ export default function SettingsScreen() {
 	const financeStore = useFinanceStore();
 	const studyStore = useStudyStore();
 	const moduleStore = useModuleStore();
-	const { user, isAdmin } = useAuthStore();
+	const { user, isAdmin, profile: authProfile } = useAuthStore();
 
 	const [notificationsEnabled, setNotificationsEnabled] = useState(true);
 	const [soundEnabled, setSoundEnabled] = useState(true);
@@ -78,6 +82,121 @@ export default function SettingsScreen() {
 			getSyncStatus(user.id).then(setSyncStatus);
 		}
 	}, [user?.id]);
+
+	// Auto-sync state
+	const [autoSyncInterval, setAutoSyncIntervalState] = useState<number | null>(
+		null
+	);
+	const [autoSyncRunning, setAutoSyncRunning] = useState(false);
+	const [showAutoSyncModal, setShowAutoSyncModal] = useState(false);
+	const [tempInterval, setTempInterval] = useState<number | null>(null);
+
+	useEffect(() => {
+		let mounted = true;
+		getAutoSyncInterval()
+			.then((m) => {
+				if (!mounted) return;
+				setAutoSyncIntervalState(m);
+			})
+			.catch((e) => console.error(e));
+		return () => {
+			mounted = false;
+		};
+	}, []);
+
+	const buildSyncPayload = async () => {
+		return {
+			profile: authProfile || habitStore.profile || null,
+			habits: {
+				habits: habitStore.habits || [],
+				logs: habitStore.logs || [],
+				settings: habitStore.settings,
+			},
+			workouts: {
+				fitnessProfile: workoutStore.fitnessProfile,
+				workoutPlans: workoutStore.workoutPlans,
+				workoutSessions: workoutStore.workoutSessions,
+				personalRecords: workoutStore.personalRecords,
+				bodyMeasurements: workoutStore.bodyMeasurements,
+				bodyWeights: workoutStore.bodyWeights,
+				customExercises: workoutStore.customExercises,
+			},
+			finance: {
+				accounts: financeStore.accounts || [],
+				transactions: financeStore.transactions || [],
+				recurringTransactions: financeStore.recurringTransactions || [],
+				budgets: financeStore.budgets || [],
+				savingsGoals: financeStore.savingsGoals || [],
+				billReminders: financeStore.billReminders || [],
+				debts: financeStore.debts || [],
+				splitGroups: financeStore.splitGroups || [],
+				currency: financeStore.currency || "INR",
+			},
+			study: {
+				studyGoals: studyStore.studyGoals,
+				subjects: studyStore.subjects,
+				studySessions: studyStore.studySessions,
+				flashcardDecks: studyStore.flashcardDecks,
+				flashcards: studyStore.flashcards,
+				revisionSchedule: studyStore.revisionSchedule,
+				mockTests: studyStore.mockTests,
+				dailyPlans: studyStore.dailyPlans,
+				studyNotes: studyStore.studyNotes,
+			},
+		};
+	};
+
+	const handleChooseInterval = () => {
+		setTempInterval(autoSyncInterval ?? 5);
+		setShowAutoSyncModal(true);
+	};
+
+	const selectTempInterval = (m: number) => {
+		setTempInterval(m);
+	};
+
+	const applyTempInterval = async () => {
+		if (tempInterval == null) {
+			setShowAutoSyncModal(false);
+			return;
+		}
+		try {
+			await setAutoSyncInterval(tempInterval);
+			setAutoSyncIntervalState(tempInterval);
+			Alert.alert("Saved", `Auto-sync interval set to ${tempInterval} minutes`);
+		} catch (err) {
+			console.error(err);
+			Alert.alert("Error", "Failed to set interval");
+		} finally {
+			setShowAutoSyncModal(false);
+		}
+	};
+
+	const cancelTempInterval = () => {
+		setShowAutoSyncModal(false);
+	};
+
+	const handleStartStopAutoSync = async () => {
+		if (autoSyncRunning) {
+			stopAutoSync();
+			setAutoSyncRunning(false);
+			Alert.alert("Auto-sync", "Auto-sync stopped");
+			return;
+		}
+		const userId = user?.id;
+		if (!userId) {
+			Alert.alert("Not signed in", "Please sign in to enable auto-sync");
+			return;
+		}
+		try {
+			await startAutoSync(userId, buildSyncPayload, true);
+			setAutoSyncRunning(true);
+			Alert.alert("Auto-sync", "Auto-sync started");
+		} catch (err) {
+			console.error("startAutoSync error:", err);
+			Alert.alert("Error", "Failed to start auto-sync");
+		}
+	};
 
 	// Format last sync time
 	const formatSyncTime = (timestamp?: string) => {
@@ -1091,6 +1210,65 @@ export default function SettingsScreen() {
 								</View>
 							</View>
 
+							{/* Auto-sync (new) */}
+							<View style={[styles.settingCard, { marginTop: 12 }]}>
+								<View style={styles.compactHeader}>
+									<Text style={styles.compactHeaderText}>Auto-sync</Text>
+								</View>
+								<View style={styles.compactActions}>
+									<View
+										style={[
+											styles.compactButton,
+											{
+												flexDirection: "row",
+												justifyContent: "space-between",
+												alignItems: "center",
+											},
+										]}
+									>
+										<View
+											style={{ flexDirection: "row", alignItems: "center" }}
+										>
+											<View
+												style={[
+													styles.compactIcon,
+													{ backgroundColor: theme.primary + "20" },
+												]}
+											>
+												<Ionicons
+													name="sync-circle"
+													size={18}
+													color={theme.primary}
+												/>
+											</View>
+											<View style={{ marginLeft: 12 }}>
+												<Text style={styles.compactButtonText}>Interval</Text>
+												<Text style={[styles.compactButtonSubText]}>
+													{autoSyncInterval
+														? `${autoSyncInterval} minutes`
+														: "Default 5 minutes"}
+												</Text>
+											</View>
+										</View>
+										<View
+											style={{ flexDirection: "row", alignItems: "center" }}
+										>
+											<TouchableOpacity
+												onPress={handleChooseInterval}
+												style={{ marginRight: 12 }}
+											>
+												<Text style={{ color: theme.primary }}>Change</Text>
+											</TouchableOpacity>
+											<TouchableOpacity onPress={handleStartStopAutoSync}>
+												<Text style={{ color: theme.primary }}>
+													{autoSyncRunning ? "Stop" : "Start"}
+												</Text>
+											</TouchableOpacity>
+										</View>
+									</View>
+								</View>
+							</View>
+
 							{/* Module-Specific Cloud Sync */}
 							<View style={[styles.settingCard, { marginTop: 12 }]}>
 								<View style={styles.compactHeader}>
@@ -1902,6 +2080,83 @@ export default function SettingsScreen() {
 				</View>
 			</ScrollView>
 
+			<Modal
+				visible={showAutoSyncModal}
+				transparent={true}
+				animationType="slide"
+				onRequestClose={() => setShowAutoSyncModal(false)}
+			>
+				<View style={styles.modalOverlay}>
+					<View style={styles.modalCard}>
+						<View style={styles.modalHeader}>
+							<Text style={styles.modalTitle}>Auto-sync Interval</Text>
+							<View style={{ width: 24 }} />
+						</View>
+						<View
+							style={[
+								styles.modalContent,
+								{ paddingHorizontal: 16, paddingVertical: 12 },
+							]}
+						>
+							<Text style={{ color: theme.textMuted, marginBottom: 8 }}>
+								Choose how often the app should auto-sync (minutes)
+							</Text>
+							{[1, 5, 15, 30, 60].map((m) => {
+								const selected = tempInterval === m;
+								return (
+									<TouchableOpacity
+										key={m}
+										style={[
+											styles.modalOption,
+											{
+												backgroundColor: selected
+													? theme.primary + "10"
+													: theme.surface,
+											},
+										]}
+										onPress={() => selectTempInterval(m)}
+									>
+										<Text style={styles.compactButtonText}>{m} minutes</Text>
+										{selected ? (
+											<Ionicons
+												name="checkmark-circle"
+												size={20}
+												color={theme.primary}
+											/>
+										) : (
+											<View style={{ width: 20 }} />
+										)}
+									</TouchableOpacity>
+								);
+							})}
+						</View>
+						<View style={styles.modalActions}>
+							<TouchableOpacity
+								style={styles.modalActionBtn}
+								onPress={cancelTempInterval}
+							>
+								<Text
+									style={[styles.compactButtonText, { color: theme.textMuted }]}
+								>
+									Cancel
+								</Text>
+							</TouchableOpacity>
+							<TouchableOpacity
+								style={[
+									styles.modalActionBtn,
+									{ backgroundColor: theme.primary },
+								]}
+								onPress={applyTempInterval}
+							>
+								<Text style={[styles.compactButtonText, { color: "#fff" }]}>
+									Apply
+								</Text>
+							</TouchableOpacity>
+						</View>
+					</View>
+				</View>
+			</Modal>
+
 			{/* Developer Modal - Scheduled Reminders */}
 			<Modal
 				visible={showDeveloper}
@@ -2154,6 +2409,11 @@ const createStyles = (theme: Theme) =>
 			fontWeight: "600",
 			color: theme.text,
 		},
+		compactButtonSubText: {
+			fontSize: 11,
+			color: theme.textMuted,
+			marginTop: 2,
+		},
 		moduleRow: {
 			flexDirection: "row",
 			alignItems: "center",
@@ -2301,7 +2561,7 @@ const createStyles = (theme: Theme) =>
 			color: theme.text,
 		},
 		modalContent: {
-			flex: 1,
+			// flex: 1,
 			paddingHorizontal: 16,
 			paddingTop: 16,
 		},
@@ -2366,6 +2626,50 @@ const createStyles = (theme: Theme) =>
 			borderRadius: 8,
 			padding: 8,
 			gap: 6,
+		},
+		modalOverlay: {
+			position: "absolute",
+			top: 0,
+			left: 0,
+			right: 0,
+			bottom: 0,
+			backgroundColor: "rgba(0,0,0,0.4)",
+			justifyContent: "center",
+			alignItems: "center",
+		},
+		modalCard: {
+			width: "92%",
+			borderRadius: 12,
+			overflow: "hidden",
+			backgroundColor: theme.surface,
+			shadowColor: "#000",
+			shadowOffset: { width: 0, height: 4 },
+			shadowOpacity: 0.1,
+			shadowRadius: 8,
+			elevation: 8,
+		},
+		modalOption: {
+			paddingVertical: 12,
+			paddingHorizontal: 16,
+			flexDirection: "row",
+			justifyContent: "space-between",
+			alignItems: "center",
+			borderBottomWidth: 1,
+			borderBottomColor: theme.border,
+		},
+		modalActions: {
+			flexDirection: "row",
+			padding: 12,
+			gap: 12,
+			justifyContent: "space-between",
+		},
+		modalActionBtn: {
+			flex: 1,
+			paddingVertical: 12,
+			borderRadius: 10,
+			justifyContent: "center",
+			alignItems: "center",
+			backgroundColor: theme.background,
 		},
 		detailRow: {
 			flexDirection: "row",

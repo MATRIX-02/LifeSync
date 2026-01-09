@@ -1,6 +1,17 @@
 import { Alert } from "@/src/components/CustomAlert";
+import { useAuthStore } from "@/src/context/authStore";
+import { useFinanceStore } from "@/src/context/financeStore";
+import { useHabitStore } from "@/src/context/habitStoreDB";
+import { useStudyStore } from "@/src/context/studyStoreDB";
+import { useWorkoutStore } from "@/src/context/workoutStoreDB";
+import {
+	getAutoSyncInterval,
+	setAutoSyncInterval,
+	startAutoSync,
+	stopAutoSync,
+} from "@/src/services/syncService";
 import Ionicons from "@expo/vector-icons/Ionicons";
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
 	ScrollView,
 	StyleSheet,
@@ -17,6 +28,108 @@ import {
 const SettingsScreen = () => {
 	const { enabledModules, isModuleEnabled, toggleModule } = useModuleStore();
 	const [loadingModule, setLoadingModule] = useState<ModuleType | null>(null);
+	const [autoSyncInterval, setAutoSyncIntervalState] = useState<number | null>(
+		null
+	);
+	const [autoSyncRunning, setAutoSyncRunning] = useState(false);
+
+	useEffect(() => {
+		let mounted = true;
+		getAutoSyncInterval()
+			.then((m) => {
+				if (!mounted) return;
+				setAutoSyncIntervalState(m);
+			})
+			.catch((e) => console.error(e));
+		return () => {
+			mounted = false;
+		};
+	}, []);
+
+	const buildSyncPayload = async () => {
+		// Gather data from stores via getState
+		const auth = useAuthStore.getState();
+		const habitState = useHabitStore.getState();
+		const workoutState = useWorkoutStore.getState();
+		const financeState = useFinanceStore.getState();
+		const studyState = useStudyStore.getState();
+
+		return {
+			profile: auth.profile || null,
+			habits: {
+				habits: habitState.habits || [],
+				logs: habitState.logs || [],
+				settings: habitState.settings,
+			},
+			workouts: {
+				fitnessProfile: workoutState.fitnessProfile,
+				workoutPlans: workoutState.workoutPlans,
+				workoutSessions: workoutState.workoutSessions,
+				personalRecords: workoutState.personalRecords,
+				bodyMeasurements: workoutState.bodyMeasurements,
+				bodyWeights: workoutState.bodyWeights,
+				customExercises: workoutState.customExercises,
+			},
+			finance: {
+				accounts: financeState.accounts || [],
+				transactions: financeState.transactions || [],
+				recurringTransactions: financeState.recurringTransactions || [],
+				budgets: financeState.budgets || [],
+				savingsGoals: financeState.savingsGoals || [],
+				billReminders: financeState.billReminders || [],
+				debts: financeState.debts || [],
+				splitGroups: financeState.splitGroups || [],
+				currency: financeState.currency || "INR",
+			},
+			study: studyState.ssbData || {},
+		};
+	};
+
+	const handleChooseInterval = () => {
+		const options = [1, 5, 15, 30, 60];
+		Alert.alert(
+			"Auto-sync Interval",
+			"Choose how often the app should auto-sync (minutes)",
+			[
+				...options.map((m) => ({
+					text: `${m} minutes`,
+					onPress: async () => {
+						try {
+							await setAutoSyncInterval(m);
+							setAutoSyncIntervalState(m);
+							Alert.alert("Saved", `Auto-sync interval set to ${m} minutes`);
+						} catch (err) {
+							console.error(err);
+							Alert.alert("Error", "Failed to set interval");
+						}
+					},
+				})),
+				{ text: "Cancel", style: "cancel" },
+			]
+		);
+	};
+
+	const handleStartStopAutoSync = async () => {
+		if (autoSyncRunning) {
+			stopAutoSync();
+			setAutoSyncRunning(false);
+			Alert.alert("Auto-sync", "Auto-sync stopped");
+			return;
+		}
+		const userId = useAuthStore.getState().user?.id;
+		if (!userId) {
+			Alert.alert("Not signed in", "Please sign in to enable auto-sync");
+			return;
+		}
+		try {
+			await startAutoSync(userId, buildSyncPayload, true);
+			setAutoSyncRunning(true);
+			Alert.alert("Auto-sync", "Auto-sync started");
+		} catch (err) {
+			console.error("startAutoSync error:", err);
+			Alert.alert("Error", "Failed to start auto-sync");
+		}
+	};
 
 	const handleModuleToggle = async (
 		module: ModuleType,
@@ -86,6 +199,32 @@ const SettingsScreen = () => {
 
 			<View style={styles.section}>
 				<Text style={styles.sectionTitle}>Notifications</Text>
+				{/* Auto-sync controls */}
+				<View style={{ height: 12 }} />
+				<TouchableOpacity
+					style={styles.settingItemContainer}
+					onPress={handleChooseInterval}
+				>
+					<View style={styles.settingItemContent}>
+						<Ionicons name="cloud-upload" size={24} color={COLORS.primary} />
+						<View style={styles.settingItemText}>
+							<Text style={styles.settingLabel}>Auto-sync Interval</Text>
+							<Text style={styles.settingDescription}>
+								{autoSyncInterval
+									? `${autoSyncInterval} minutes`
+									: "Not set (default 5 minutes)"}
+							</Text>
+						</View>
+					</View>
+					<TouchableOpacity
+						onPress={handleStartStopAutoSync}
+						style={{ paddingHorizontal: 8 }}
+					>
+						<Text style={{ color: COLORS.primary }}>
+							{autoSyncRunning ? "Stop" : "Start"}
+						</Text>
+					</TouchableOpacity>
+				</TouchableOpacity>
 				<SettingItem
 					icon="notifications"
 					label="Enable All Notifications"

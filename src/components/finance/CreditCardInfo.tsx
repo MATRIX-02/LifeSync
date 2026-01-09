@@ -81,13 +81,21 @@ export const CreditCardInfo: React.FC<CreditCardInfoProps> = ({
 
 						<View style={styles.amountRow}>
 							<Text style={[styles.amount, { color: theme.text }]}>
-								₹{utilization.used.toLocaleString()}
+								₹
+								{utilization.used.toLocaleString("en-IN", {
+									minimumFractionDigits: 0,
+									maximumFractionDigits: 2,
+								})}
 							</Text>
 							<Text style={[styles.divider, { color: theme.textSecondary }]}>
 								/
 							</Text>
 							<Text style={[styles.amount, { color: theme.text }]}>
-								₹{utilization.limit.toLocaleString()}
+								₹
+								{utilization.limit.toLocaleString("en-IN", {
+									minimumFractionDigits: 0,
+									maximumFractionDigits: 2,
+								})}
 							</Text>
 						</View>
 
@@ -121,7 +129,11 @@ export const CreditCardInfo: React.FC<CreditCardInfoProps> = ({
 							Available Credit
 						</Text>
 						<Text style={[styles.availableAmount, { color: utilizationColor }]}>
-							₹{(utilization.limit - utilization.used).toLocaleString()}
+							₹
+							{(utilization.limit - utilization.used).toLocaleString("en-IN", {
+								minimumFractionDigits: 0,
+								maximumFractionDigits: 2,
+							})}
 						</Text>
 					</View>
 
@@ -133,7 +145,11 @@ export const CreditCardInfo: React.FC<CreditCardInfoProps> = ({
 									Outstanding Balance
 								</Text>
 								<Text style={[styles.debtAmount, { color: "#EF4444" }]}>
-									₹{debt.remainingAmount.toLocaleString()}
+									₹
+									{debt.remainingAmount.toLocaleString("en-IN", {
+										minimumFractionDigits: 0,
+										maximumFractionDigits: 2,
+									})}
 								</Text>
 							</View>
 
@@ -152,7 +168,10 @@ export const CreditCardInfo: React.FC<CreditCardInfoProps> = ({
 										₹
 										{debt.payments
 											.reduce((sum, p) => sum + p.amount, 0)
-											.toLocaleString()}
+											.toLocaleString("en-IN", {
+												minimumFractionDigits: 0,
+												maximumFractionDigits: 2,
+											})}
 									</Text>
 								</View>
 							)}

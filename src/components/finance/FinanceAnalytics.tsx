@@ -170,12 +170,18 @@ export default function FinanceAnalytics({
 
 	const formatAmount = (value: number | undefined | null) => {
 		const num = value ?? 0;
-		return num.toLocaleString("en-IN", { maximumFractionDigits: 0 });
+		return num.toLocaleString("en-IN", {
+			minimumFractionDigits: 0,
+			maximumFractionDigits: 2,
+		});
 	};
 
 	const formatFullAmount = (value: number | undefined | null) => {
 		const num = value ?? 0;
-		return num.toLocaleString("en-IN", { maximumFractionDigits: 0 });
+		return num.toLocaleString("en-IN", {
+			minimumFractionDigits: 0,
+			maximumFractionDigits: 2,
+		});
 	};
 
 	const formatPercent = (

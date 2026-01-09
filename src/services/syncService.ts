@@ -1,7 +1,9 @@
 // Cloud Sync Service - Syncs all user data to Supabase
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { decode } from "base64-arraybuffer";
 import * as FileSystem from "expo-file-system/legacy";
 import * as ImageManipulator from "expo-image-manipulator";
+import { AppState } from "react-native";
 import { supabase } from "../config/supabase";
 
 // Types for sync status
@@ -1177,6 +1179,120 @@ export const getSyncStatus = async (
 		return data || {};
 	} catch {
 		return {};
+	}
+};
+
+// ============ AUTO-SYNC / SCHEDULER ============
+const AUTO_SYNC_INTERVAL_KEY = "auto_sync_interval_minutes";
+const DEFAULT_AUTO_SYNC_MINUTES = 5;
+let autoSyncTimer: ReturnType<typeof setInterval> | null = null;
+let appStateSubscription: any = null;
+let autoSyncUserId: string | null = null;
+let autoSyncGetData: (() => Promise<any>) | null = null;
+
+const handleAppStateChange = async (nextAppState: string) => {
+	if (nextAppState === "active") {
+		// On resume, run an immediate sync if configured
+		if (autoSyncUserId && autoSyncGetData) {
+			try {
+				const data = await autoSyncGetData();
+				await syncAllToCloud(autoSyncUserId, data);
+			} catch (err) {
+				console.error("autoSync (on resume) failed:", err);
+			}
+		}
+	}
+};
+
+export const getAutoSyncInterval = async (): Promise<number> => {
+	try {
+		const raw = await AsyncStorage.getItem(AUTO_SYNC_INTERVAL_KEY);
+		const parsed = raw ? parseInt(raw, 10) : NaN;
+		if (!isNaN(parsed) && parsed > 0) return parsed;
+		return DEFAULT_AUTO_SYNC_MINUTES;
+	} catch (err) {
+		console.error("getAutoSyncInterval error:", err);
+		return DEFAULT_AUTO_SYNC_MINUTES;
+	}
+};
+
+export const setAutoSyncInterval = async (minutes: number): Promise<void> => {
+	if (!minutes || minutes <= 0) throw new Error("Interval must be > 0 minutes");
+	await AsyncStorage.setItem(AUTO_SYNC_INTERVAL_KEY, String(minutes));
+
+	// If auto-sync is running, restart timer with new interval
+	if (autoSyncTimer && autoSyncUserId && autoSyncGetData) {
+		stopAutoSync();
+		startAutoSync(autoSyncUserId, autoSyncGetData, false).catch((e) =>
+			console.error("Failed to restart auto-sync after interval change:", e)
+		);
+	}
+};
+
+export const startAutoSync = async (
+	userId: string,
+	getDataFn: () => Promise<any>,
+	immediate: boolean = true
+): Promise<void> => {
+	if (!userId) throw new Error("userId required to start auto-sync");
+	if (!getDataFn)
+		throw new Error("getDataFn is required to fetch current data for sync");
+
+	// stop any existing timer
+	stopAutoSync();
+
+	autoSyncUserId = userId;
+	autoSyncGetData = getDataFn;
+
+	const minutes = await getAutoSyncInterval();
+	const ms = minutes * 60 * 1000;
+
+	if (immediate) {
+		try {
+			const data = await getDataFn();
+			await syncAllToCloud(userId, data);
+		} catch (err) {
+			console.error("autoSync immediate sync failed:", err);
+		}
+	}
+
+	autoSyncTimer = setInterval(async () => {
+		if (!autoSyncUserId || !autoSyncGetData) return;
+		try {
+			const data = await autoSyncGetData();
+			await syncAllToCloud(autoSyncUserId, data);
+		} catch (err) {
+			console.error("autoSync interval sync failed:", err);
+		}
+	}, ms);
+
+	// Listen for app resume to trigger immediate sync
+	try {
+		appStateSubscription = AppState.addEventListener
+			? AppState.addEventListener("change", handleAppStateChange)
+			: null;
+	} catch (err) {
+		console.warn("AppState subscription failed:", err);
+	}
+};
+
+export const stopAutoSync = (): void => {
+	if (autoSyncTimer) {
+		clearInterval(autoSyncTimer as any);
+		autoSyncTimer = null;
+	}
+	autoSyncUserId = null;
+	autoSyncGetData = null;
+	if (
+		appStateSubscription &&
+		typeof appStateSubscription.remove === "function"
+	) {
+		appStateSubscription.remove();
+		appStateSubscription = null;
+	} else if (appStateSubscription) {
+		// older RN versions
+		AppState.removeEventListener("change", handleAppStateChange as any);
+		appStateSubscription = null;
 	}
 };
 

@@ -34,7 +34,7 @@
 			"adaptiveIcon": {
 				"foregroundImage": "./assets/images/adaptive-icon.png",
 				"monochromeImage": "./assets/images/adaptive-icon.png",
-				"backgroundColor": "transparent"
+				"backgroundColor": "#000000"
 			},
 			"edgeToEdgeEnabled": false,
 			"predictiveBackGestureEnabled": false,
@@ -60,7 +60,7 @@
 				"expo-notifications",
 				{
 					"icon": "./assets/images/icon.png",
-					"color": "#6200EE",
+					"color": "#000000",
 					"defaultChannel": "default",
 					"modes": "productionMode"
 				}

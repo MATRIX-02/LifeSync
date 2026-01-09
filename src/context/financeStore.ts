@@ -1,5 +1,7 @@
 // Finance Store - Zustand state management for Finance Tracker
 
+import { supabase } from "@/src/config/supabase";
+import { fetchFinanceFromCloud } from "@/src/services/syncService";
 import {
 	Account,
 	Balance,
@@ -27,9 +29,9 @@ interface FinanceStore {
 	accounts: Account[];
 	addAccount: (
 		account: Omit<Account, "id" | "createdAt" | "updatedAt">
-	) => void;
-	updateAccount: (id: string, updates: Partial<Account>) => void;
-	deleteAccount: (id: string) => void;
+	) => Promise<void>;
+	updateAccount: (id: string, updates: Partial<Account>) => Promise<void>;
+	deleteAccount: (id: string) => Promise<void>;
 	setDefaultAccount: (id: string) => void;
 	getDefaultAccount: () => Account | undefined;
 
@@ -37,13 +39,17 @@ interface FinanceStore {
 	transactions: Transaction[];
 	addTransaction: (
 		transaction: Omit<Transaction, "id" | "createdAt" | "updatedAt">
-	) => void;
-	updateTransaction: (id: string, updates: Partial<Transaction>) => void;
-	deleteTransaction: (id: string) => void;
+	) => Promise<void>;
+	updateTransaction: (
+		id: string,
+		updates: Partial<Transaction>
+	) => Promise<void>;
+	deleteTransaction: (id: string) => Promise<void>;
 	getTransactionsByAccount: (accountId: string) => Transaction[];
 	getTransactionsByCategory: (
 		category: ExpenseCategory | IncomeCategory
 	) => Transaction[];
+
 	getTransactionsByDateRange: (
 		startDate: string,
 		endDate: string
@@ -227,32 +233,192 @@ export const useFinanceStore = create<FinanceStore>()(
 			currency: "₹",
 
 			// Account Methods
-			addAccount: (account) =>
-				set((state) => ({
-					accounts: [
-						...state.accounts,
-						{
-							...account,
-							id: generateId(),
-							createdAt: new Date().toISOString(),
-							updatedAt: new Date().toISOString(),
-						},
-					],
-				})),
+			addAccount: async (account) => {
+				try {
+					const userRes = await supabase.auth.getUser();
+					const userId = (userRes.data as any)?.user?.id || null;
+					const newAcc: Account = {
+						...account,
+						id: generateId(),
+						createdAt: new Date().toISOString(),
+						updatedAt: new Date().toISOString(),
+					};
 
-			updateAccount: (id, updates) =>
-				set((state) => ({
-					accounts: state.accounts.map((acc) =>
-						acc.id === id
-							? { ...acc, ...updates, updatedAt: new Date().toISOString() }
-							: acc
-					),
-				})),
+					// Prepare DB payload (snake_case)
+					const dbObj: any = {
+						id: newAcc.id,
+						name: newAcc.name,
+						type: newAcc.type,
+						balance: newAcc.balance,
+						currency: newAcc.currency,
+						color: newAcc.color,
+						icon: newAcc.icon,
+						is_default: newAcc.isDefault,
+						credit_limit: newAcc.creditLimit ?? null,
+						credit_used: newAcc.creditUsed ?? null,
+						is_settled: newAcc.isSettled ?? null,
+						created_at: newAcc.createdAt,
+						updated_at: newAcc.updatedAt,
+						user_id: userId,
+					};
 
-			deleteAccount: (id) =>
-				set((state) => ({
-					accounts: state.accounts.filter((acc) => acc.id !== id),
-				})),
+					const { error } = await (
+						supabase.from("finance_accounts") as any
+					).upsert([dbObj], { onConflict: "id" });
+
+					if (error) {
+						console.error("addAccount supabase error:", error);
+						// Fallback to local update
+						set((state) => ({
+							accounts: [...state.accounts, newAcc],
+						}));
+						return;
+					}
+
+					// Use returned representation if available
+					// fetch inserted/updated row to get canonical DB representation
+					const { data: selData, error: selErr } = await (
+						supabase.from("finance_accounts") as any
+					)
+						.select("*")
+						.eq("id", newAcc.id)
+						.single();
+					if (selErr) {
+						// if select fails, fall back to local newAcc
+						set((state) => ({ accounts: [...state.accounts, newAcc] }));
+					} else if (selData) {
+						const returned = selData as any;
+						const acc: Account = {
+							id: returned.id,
+							name: returned.name,
+							type: returned.type,
+							balance: returned.balance || 0,
+							currency: returned.currency || newAcc.currency,
+							color: returned.color || newAcc.color,
+							icon: returned.icon || newAcc.icon,
+							isDefault: !!returned.is_default,
+							creditLimit: returned.credit_limit ?? undefined,
+							creditUsed: returned.credit_used ?? undefined,
+							isSettled: returned.is_settled ?? undefined,
+							createdAt: returned.created_at || newAcc.createdAt,
+							updatedAt: returned.updated_at || newAcc.updatedAt,
+						};
+						set((state) => ({ accounts: [...state.accounts, acc] }));
+					}
+				} catch (err) {
+					console.error("addAccount error:", err);
+					// best-effort local fallback
+					set((state) => ({
+						accounts: [
+							...state.accounts,
+							{
+								...account,
+								id: generateId(),
+								createdAt: new Date().toISOString(),
+								updatedAt: new Date().toISOString(),
+							},
+						],
+					}));
+				}
+			},
+
+			updateAccount: async (id, updates) => {
+				try {
+					const updatedAt = new Date().toISOString();
+					const dbUpdates: any = { ...updates, updated_at: updatedAt };
+					// map camelCase keys to snake_case where needed
+					if (dbUpdates.isDefault !== undefined) {
+						dbUpdates.is_default = dbUpdates.isDefault;
+						delete dbUpdates.isDefault;
+					}
+					if (dbUpdates.creditLimit !== undefined) {
+						dbUpdates.credit_limit = dbUpdates.creditLimit;
+						delete dbUpdates.creditLimit;
+					}
+					if (dbUpdates.creditUsed !== undefined) {
+						dbUpdates.credit_used = dbUpdates.creditUsed;
+						delete dbUpdates.creditUsed;
+					}
+					if (dbUpdates.isSettled !== undefined) {
+						dbUpdates.is_settled = dbUpdates.isSettled;
+						delete dbUpdates.isSettled;
+					}
+
+					const { error, data } = await (
+						supabase.from("finance_accounts") as any
+					)
+						.update(dbUpdates)
+						.eq("id", id)
+						.select()
+						.single();
+
+					if (error) {
+						console.error("updateAccount supabase error:", error);
+						// fallback to local update
+						set((state) => ({
+							accounts: state.accounts.map((acc) =>
+								acc.id === id ? { ...acc, ...updates, updatedAt } : acc
+							),
+						}));
+						return;
+					}
+
+					// Apply returned data
+					const returned = data as any;
+					const acc: Partial<Account> = {
+						name: returned.name,
+						type: returned.type,
+						balance: returned.balance,
+						currency: returned.currency,
+						color: returned.color,
+						icon: returned.icon,
+						isDefault: !!returned.is_default,
+						creditLimit: returned.credit_limit ?? undefined,
+						creditUsed: returned.credit_used ?? undefined,
+						isSettled: returned.is_settled ?? undefined,
+						updatedAt: returned.updated_at,
+					};
+					set((state) => ({
+						accounts: state.accounts.map((a) =>
+							a.id === id ? ({ ...a, ...acc } as Account) : a
+						),
+					}));
+				} catch (err) {
+					console.error("updateAccount error:", err);
+					const updatedAt = new Date().toISOString();
+					set((state) => ({
+						accounts: state.accounts.map((acc) =>
+							acc.id === id ? { ...acc, ...updates, updatedAt } : acc
+						),
+					}));
+				}
+			},
+
+			deleteAccount: async (id) => {
+				try {
+					const { error } = await (supabase.from("finance_accounts") as any)
+						.delete()
+						.eq("id", id);
+
+					if (error) {
+						console.error("deleteAccount supabase error:", error);
+						// fallback local
+						set((state) => ({
+							accounts: state.accounts.filter((acc) => acc.id !== id),
+						}));
+						return;
+					}
+
+					set((state) => ({
+						accounts: state.accounts.filter((acc) => acc.id !== id),
+					}));
+				} catch (err) {
+					console.error("deleteAccount error:", err);
+					set((state) => ({
+						accounts: state.accounts.filter((acc) => acc.id !== id),
+					}));
+				}
+			},
 
 			setDefaultAccount: (id) =>
 				set((state) => ({
@@ -267,9 +433,9 @@ export const useFinanceStore = create<FinanceStore>()(
 				return accounts.find((acc) => acc.isDefault) || accounts[0];
 			},
 
-			// Transaction Methods
-			addTransaction: (transaction) =>
-				set((state) => {
+			// Transaction Methods (DB-first)
+			addTransaction: async (transaction) => {
+				try {
 					const newTransaction: Transaction = {
 						...transaction,
 						id: generateId(),
@@ -277,179 +443,461 @@ export const useFinanceStore = create<FinanceStore>()(
 						updatedAt: new Date().toISOString(),
 					};
 
-					// Update account balance
-					const accounts = state.accounts.map((acc) => {
-						if (acc.id === transaction.accountId) {
-							const balanceChange =
-								transaction.type === "income"
-									? transaction.amount
-									: transaction.type === "expense"
-									? -transaction.amount
-									: -transaction.amount; // transfer out
-
-							// For credit card expenses, also track creditUsed
-							const updatedAcc = {
-								...acc,
-								balance: acc.balance + balanceChange,
-							};
-							if (
-								transaction.type === "expense" &&
-								acc.type === "credit_card"
-							) {
-								updatedAcc.creditUsed =
-									(acc.creditUsed || 0) + transaction.amount;
-							}
-							return updatedAcc;
-						}
-						if (transaction.toAccountId && acc.id === transaction.toAccountId) {
-							return { ...acc, balance: acc.balance + transaction.amount }; // transfer in
-						}
-						return acc;
-					});
-
-					// Create credit card debt if expense is from a credit card
-					let newDebts = state.debts;
-					const sourceAccount = state.accounts.find(
-						(a) => a.id === transaction.accountId
-					);
-
-					if (
-						transaction.type === "expense" &&
-						sourceAccount?.type === "credit_card"
-					) {
-						// Check if there's already an unsettled CC debt for this card
-						const existingCCDebt = state.debts.find(
-							(d) =>
-								d.linkedCreditCardId === transaction.accountId && !d.isSettled
-						);
-
-						if (existingCCDebt) {
-							// Update existing credit card debt
-							newDebts = state.debts.map((d) =>
-								d.id === existingCCDebt.id
-									? {
-											...d,
-											originalAmount: d.originalAmount + transaction.amount,
-											remainingAmount: d.remainingAmount + transaction.amount,
-											description: `Credit card expenses on ${sourceAccount.name}`,
-											updatedAt: new Date().toISOString(),
-									  }
-									: d
-							);
-						} else {
-							// Create new credit card debt
-							const ccDebt: Debt = {
-								id: generateId(),
-								type: "owe", // User owes the credit card company
-								personName: `${sourceAccount.name} (Credit Card)`,
-								originalAmount: transaction.amount,
-								remainingAmount: transaction.amount,
-								description: `Credit card debt on ${sourceAccount.name}`,
-								payments: [],
-								isSettled: false,
-								linkedCreditCardId: transaction.accountId,
-								createdAt: new Date().toISOString(),
-								updatedAt: new Date().toISOString(),
-							};
-							newDebts = [ccDebt, ...state.debts];
-						}
-					}
-
-					return {
-						transactions: [newTransaction, ...state.transactions],
-						accounts,
-						debts: newDebts,
+					const dbObj: any = {
+						id: newTransaction.id,
+						type: newTransaction.type,
+						amount: newTransaction.amount,
+						category: newTransaction.category,
+						description: newTransaction.description || null,
+						date: newTransaction.date,
+						time: newTransaction.time,
+						account_id: newTransaction.accountId,
+						to_account_id: newTransaction.toAccountId || null,
+						payment_method: newTransaction.paymentMethod,
+						is_recurring: newTransaction.isRecurring || false,
+						recurring_id: newTransaction.recurringId || null,
+						created_at: newTransaction.createdAt,
+						updated_at: newTransaction.updatedAt,
+						user_id: (await supabase.auth.getUser()).data?.user?.id || null,
 					};
-				}),
 
-			updateTransaction: (id, updates) =>
-				set((state) => ({
-					transactions: state.transactions.map((t) =>
-						t.id === id
-							? { ...t, ...updates, updatedAt: new Date().toISOString() }
-							: t
-					),
-				})),
+					const { error } = await (
+						supabase.from("finance_transactions") as any
+					).upsert([dbObj], { onConflict: "id" });
 
-			deleteTransaction: (id) =>
-				set((state) => {
-					const transaction = state.transactions.find((t) => t.id === id);
-					if (!transaction) return state;
+					if (error) {
+						console.error("addTransaction supabase error:", error);
+						// fallback to local
+						set((state) => {
+							const accounts = state.accounts.map((acc) => {
+								if (acc.id === transaction.accountId) {
+									const balanceChange =
+										transaction.type === "income"
+											? transaction.amount
+											: transaction.type === "expense"
+											? -transaction.amount
+											: -transaction.amount;
+									const updatedAcc = {
+										...acc,
+										balance: acc.balance + balanceChange,
+									};
+									if (
+										transaction.type === "expense" &&
+										acc.type === "credit_card"
+									) {
+										updatedAcc.creditUsed =
+											(acc.creditUsed || 0) + transaction.amount;
+									}
+									return updatedAcc;
+								}
+								if (
+									transaction.toAccountId &&
+									acc.id === transaction.toAccountId
+								) {
+									return { ...acc, balance: acc.balance + transaction.amount };
+								}
+								return acc;
+							});
 
-					// Reverse the balance change
-					const accounts = state.accounts.map((acc) => {
-						if (acc.id === transaction.accountId) {
-							const balanceChange =
-								transaction.type === "income"
-									? -transaction.amount
-									: transaction.type === "expense"
-									? transaction.amount
-									: transaction.amount;
-
-							// For credit card expenses, also reverse creditUsed
-							const updatedAcc = {
-								...acc,
-								balance: acc.balance + balanceChange,
-							};
+							let newDebts = state.debts;
+							const sourceAccount = state.accounts.find(
+								(a) => a.id === transaction.accountId
+							);
 							if (
 								transaction.type === "expense" &&
-								acc.type === "credit_card"
+								sourceAccount?.type === "credit_card"
 							) {
-								updatedAcc.creditUsed = Math.max(
-									0,
-									(acc.creditUsed || 0) - transaction.amount
+								const existingCCDebt = state.debts.find(
+									(d) =>
+										d.linkedCreditCardId === transaction.accountId &&
+										!d.isSettled
 								);
-							}
-							return updatedAcc;
-						}
-						if (transaction.toAccountId && acc.id === transaction.toAccountId) {
-							return { ...acc, balance: acc.balance - transaction.amount };
-						}
-						return acc;
-					});
-
-					// Reverse credit card debt if applicable
-					let newDebts = state.debts;
-					if (transaction.type === "expense") {
-						const sourceAccount = state.accounts.find(
-							(a) => a.id === transaction.accountId
-						);
-						if (sourceAccount?.type === "credit_card") {
-							const existingCCDebt = state.debts.find(
-								(d) =>
-									d.linkedCreditCardId === transaction.accountId && !d.isSettled
-							);
-
-							if (existingCCDebt) {
-								const newRemainingAmount =
-									existingCCDebt.remainingAmount - transaction.amount;
-								if (newRemainingAmount <= 0) {
-									// If no remaining amount, remove the debt
-									newDebts = state.debts.filter(
-										(d) => d.id !== existingCCDebt.id
-									);
-								} else {
-									// Update the debt
+								if (existingCCDebt) {
 									newDebts = state.debts.map((d) =>
 										d.id === existingCCDebt.id
 											? {
 													...d,
-													remainingAmount: newRemainingAmount,
+													originalAmount: d.originalAmount + transaction.amount,
+													remainingAmount:
+														d.remainingAmount + transaction.amount,
 													updatedAt: new Date().toISOString(),
 											  }
 											: d
 									);
+								} else {
+									const ccDebt: Debt = {
+										id: generateId(),
+										type: "owe",
+										personName: `${sourceAccount.name} (Credit Card)`,
+										originalAmount: transaction.amount,
+										remainingAmount: transaction.amount,
+										description: `Credit card debt on ${sourceAccount.name}`,
+										payments: [],
+										isSettled: false,
+										linkedCreditCardId: transaction.accountId,
+										createdAt: new Date().toISOString(),
+										updatedAt: new Date().toISOString(),
+									};
+									newDebts = [ccDebt, ...state.debts];
+								}
+							}
+
+							return {
+								transactions: [newTransaction, ...state.transactions],
+								accounts,
+								debts: newDebts,
+							};
+						});
+						return;
+					}
+
+					// success: update local state
+					set((state) => {
+						const accounts = state.accounts.map((acc) => {
+							if (acc.id === transaction.accountId) {
+								const balanceChange =
+									transaction.type === "income"
+										? transaction.amount
+										: transaction.type === "expense"
+										? -transaction.amount
+										: -transaction.amount;
+								const updatedAcc = {
+									...acc,
+									balance: acc.balance + balanceChange,
+								};
+								if (
+									transaction.type === "expense" &&
+									acc.type === "credit_card"
+								) {
+									updatedAcc.creditUsed =
+										(acc.creditUsed || 0) + transaction.amount;
+								}
+								return updatedAcc;
+							}
+							if (
+								transaction.toAccountId &&
+								acc.id === transaction.toAccountId
+							) {
+								return { ...acc, balance: acc.balance + transaction.amount };
+							}
+							return acc;
+						});
+
+						let newDebts = state.debts;
+						const sourceAccount = state.accounts.find(
+							(a) => a.id === transaction.accountId
+						);
+						if (
+							transaction.type === "expense" &&
+							sourceAccount?.type === "credit_card"
+						) {
+							const existingCCDebt = state.debts.find(
+								(d) =>
+									d.linkedCreditCardId === transaction.accountId && !d.isSettled
+							);
+							if (existingCCDebt) {
+								newDebts = state.debts.map((d) =>
+									d.id === existingCCDebt.id
+										? {
+												...d,
+												originalAmount: d.originalAmount + transaction.amount,
+												remainingAmount: d.remainingAmount + transaction.amount,
+												updatedAt: new Date().toISOString(),
+										  }
+										: d
+								);
+							} else {
+								const ccDebt: Debt = {
+									id: generateId(),
+									type: "owe",
+									personName: `${sourceAccount.name} (Credit Card)`,
+									originalAmount: transaction.amount,
+									remainingAmount: transaction.amount,
+									description: `Credit card debt on ${sourceAccount.name}`,
+									payments: [],
+									isSettled: false,
+									linkedCreditCardId: transaction.accountId,
+									createdAt: new Date().toISOString(),
+									updatedAt: new Date().toISOString(),
+								};
+								newDebts = [ccDebt, ...state.debts];
+							}
+						}
+
+						return {
+							transactions: [newTransaction, ...state.transactions],
+							accounts,
+							debts: newDebts,
+						};
+					});
+				} catch (err) {
+					console.error("addTransaction error:", err);
+					// fallback local insertion
+					set((state) => ({
+						transactions: [
+							{
+								...transaction,
+								id: generateId(),
+								createdAt: new Date().toISOString(),
+								updatedAt: new Date().toISOString(),
+							},
+							...state.transactions,
+						],
+					}));
+				}
+			},
+
+			updateTransaction: async (id, updates) => {
+				try {
+					const updatedAt = new Date().toISOString();
+					const dbUpdates: any = { ...updates, updated_at: updatedAt };
+					// map camelCase keys to snake_case where needed
+					if ((dbUpdates as any).accountId !== undefined) {
+						dbUpdates.account_id = (dbUpdates as any).accountId;
+						delete (dbUpdates as any).accountId;
+					}
+					if ((dbUpdates as any).toAccountId !== undefined) {
+						dbUpdates.to_account_id = (dbUpdates as any).toAccountId;
+						delete (dbUpdates as any).toAccountId;
+					}
+					if ((dbUpdates as any).isRecurring !== undefined) {
+						dbUpdates.is_recurring = (dbUpdates as any).isRecurring;
+						delete (dbUpdates as any).isRecurring;
+					}
+					if ((dbUpdates as any).recurringId !== undefined) {
+						dbUpdates.recurring_id = (dbUpdates as any).recurringId;
+						delete (dbUpdates as any).recurringId;
+					}
+
+					const { error, data } = await (
+						supabase.from("finance_transactions") as any
+					)
+						.update(dbUpdates)
+						.eq("id", id)
+						.select()
+						.single();
+
+					if (error) {
+						console.error("updateTransaction supabase error:", error);
+						// fallback to local update
+						set((state) => ({
+							transactions: state.transactions.map((t) =>
+								t.id === id ? { ...t, ...updates, updatedAt } : t
+							),
+						}));
+						return;
+					}
+
+					// Apply returned data if available
+					if (data) {
+						const returned = data as any;
+						const mapped: Partial<Transaction> = {
+							id: returned.id,
+							type: returned.type,
+							amount: returned.amount,
+							category: returned.category,
+							description: returned.description,
+							date: returned.date,
+							time: returned.time,
+							accountId: returned.account_id,
+							toAccountId: returned.to_account_id,
+							paymentMethod: returned.payment_method,
+							isRecurring: returned.is_recurring,
+							recurringId: returned.recurring_id,
+							createdAt: returned.created_at,
+							updatedAt: returned.updated_at,
+						};
+						set((state) => ({
+							transactions: state.transactions.map((t) =>
+								t.id === id ? ({ ...t, ...mapped } as Transaction) : t
+							),
+						}));
+					}
+				} catch (err) {
+					console.error("updateTransaction error:", err);
+					const updatedAt = new Date().toISOString();
+					set((state) => ({
+						transactions: state.transactions.map((t) =>
+							t.id === id ? { ...t, ...updates, updatedAt } : t
+						),
+					}));
+				}
+			},
+
+			deleteTransaction: async (id) => {
+				const transaction = get().transactions.find((t) => t.id === id);
+				if (!transaction) return;
+				try {
+					const { error } = await (supabase.from("finance_transactions") as any)
+						.delete()
+						.eq("id", id);
+
+					if (error) {
+						console.error("deleteTransaction supabase error:", error);
+						// fallback local
+						set((state) => {
+							// Use existing logic to reverse balances and debts
+							const accounts = state.accounts.map((acc) => {
+								if (acc.id === transaction.accountId) {
+									const balanceChange =
+										transaction.type === "income"
+											? -transaction.amount
+											: transaction.type === "expense"
+											? transaction.amount
+											: transaction.amount;
+
+									const updatedAcc = {
+										...acc,
+										balance: acc.balance + balanceChange,
+									};
+									if (
+										transaction.type === "expense" &&
+										acc.type === "credit_card"
+									) {
+										updatedAcc.creditUsed = Math.max(
+											0,
+											(acc.creditUsed || 0) - transaction.amount
+										);
+									}
+									return updatedAcc;
+								}
+								if (
+									transaction.toAccountId &&
+									acc.id === transaction.toAccountId
+								) {
+									return { ...acc, balance: acc.balance - transaction.amount };
+								}
+								return acc;
+							});
+
+							let newDebts = state.debts;
+							if (transaction.type === "expense") {
+								const sourceAccount = state.accounts.find(
+									(a) => a.id === transaction.accountId
+								);
+								if (sourceAccount?.type === "credit_card") {
+									const existingCCDebt = state.debts.find(
+										(d) =>
+											d.linkedCreditCardId === transaction.accountId &&
+											!d.isSettled
+									);
+
+									if (existingCCDebt) {
+										const newRemainingAmount =
+											existingCCDebt.remainingAmount - transaction.amount;
+										if (newRemainingAmount <= 0) {
+											// If no remaining amount, remove the debt
+											newDebts = state.debts.filter(
+												(d) => d.id !== existingCCDebt.id
+											);
+										} else {
+											// Update the debt
+											newDebts = state.debts.map((d) =>
+												d.id === existingCCDebt.id
+													? {
+															...d,
+															remainingAmount: newRemainingAmount,
+															updatedAt: new Date().toISOString(),
+													  }
+													: d
+											);
+										}
+									}
+								}
+							}
+
+							return {
+								transactions: state.transactions.filter((t) => t.id !== id),
+								accounts,
+								debts: newDebts,
+							};
+						});
+						return;
+					}
+
+					// success: apply local reversal same as fallback
+					set((state) => {
+						const accounts = state.accounts.map((acc) => {
+							if (acc.id === transaction.accountId) {
+								const balanceChange =
+									transaction.type === "income"
+										? -transaction.amount
+										: transaction.type === "expense"
+										? transaction.amount
+										: transaction.amount;
+
+								const updatedAcc = {
+									...acc,
+									balance: acc.balance + balanceChange,
+								};
+								if (
+									transaction.type === "expense" &&
+									acc.type === "credit_card"
+								) {
+									updatedAcc.creditUsed = Math.max(
+										0,
+										(acc.creditUsed || 0) - transaction.amount
+									);
+								}
+								return updatedAcc;
+							}
+							if (
+								transaction.toAccountId &&
+								acc.id === transaction.toAccountId
+							) {
+								return { ...acc, balance: acc.balance - transaction.amount };
+							}
+							return acc;
+						});
+
+						let newDebts = state.debts;
+						if (transaction.type === "expense") {
+							const sourceAccount = state.accounts.find(
+								(a) => a.id === transaction.accountId
+							);
+							if (sourceAccount?.type === "credit_card") {
+								const existingCCDebt = state.debts.find(
+									(d) =>
+										d.linkedCreditCardId === transaction.accountId &&
+										!d.isSettled
+								);
+
+								if (existingCCDebt) {
+									const newRemainingAmount =
+										existingCCDebt.remainingAmount - transaction.amount;
+									if (newRemainingAmount <= 0) {
+										newDebts = state.debts.filter(
+											(d) => d.id !== existingCCDebt.id
+										);
+									} else {
+										newDebts = state.debts.map((d) =>
+											d.id === existingCCDebt.id
+												? {
+														...d,
+														remainingAmount: newRemainingAmount,
+														updatedAt: new Date().toISOString(),
+												  }
+												: d
+										);
+									}
 								}
 							}
 						}
-					}
 
-					return {
+						return {
+							transactions: state.transactions.filter((t) => t.id !== id),
+							accounts,
+							debts: newDebts,
+						};
+					});
+				} catch (err) {
+					console.error("deleteTransaction error:", err);
+					// fallback local deletion
+					set((state) => ({
 						transactions: state.transactions.filter((t) => t.id !== id),
-						accounts,
-						debts: newDebts,
-					};
-				}),
+					}));
+				}
+			},
 
 			getTransactionsByAccount: (accountId) => {
 				const { transactions } = get();
@@ -1097,6 +1545,8 @@ export const useFinanceStore = create<FinanceStore>()(
 											id: generateId(),
 											name: memberName,
 											isCurrentUser: g.members.length === 0, // First member is current user
+											role: "member", // default role
+											joinedAt: new Date().toISOString(),
 										},
 									],
 									updatedAt: new Date().toISOString(),
@@ -1452,10 +1902,34 @@ export const useFinanceStore = create<FinanceStore>()(
 			// Settings
 			setCurrency: (currency) => set({ currency }),
 
-			// Initialize from database (stub for now - will be implemented with database-first)
+			// Initialize from database (database-first)
 			initialize: async (userId: string) => {
-				// TODO: Load data from Supabase tables when fully migrated to database-first
-				console.log("Finance store initialize called for user:", userId);
+				if (!userId) return;
+				try {
+					console.log(
+						"Finance store: fetching data from cloud for user:",
+						userId
+					);
+					const { data, error } = await fetchFinanceFromCloud(userId);
+					if (error || !data) {
+						console.error("fetchFinanceFromCloud error:", error);
+						return;
+					}
+					set({
+						accounts: data.accounts || [],
+						transactions: data.transactions || [],
+						recurringTransactions: data.recurringTransactions || [],
+						budgets: data.budgets || [],
+						savingsGoals: data.savingsGoals || [],
+						billReminders: data.billReminders || [],
+						debts: data.debts || [],
+						splitGroups: data.splitGroups || [],
+						currency: data.currency || "₹",
+					});
+					console.log("Finance store initialized from cloud");
+				} catch (err) {
+					console.error("Finance initialize error:", err);
+				}
 			},
 
 			// Import/Export

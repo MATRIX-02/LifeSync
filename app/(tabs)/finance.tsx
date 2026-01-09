@@ -22,6 +22,8 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 
 // Import Finance Components
+
+import AccountManager from "@/src/components/finance/AccountManager";
 import BudgetManager from "@/src/components/finance/BudgetManager";
 import FinanceAnalytics from "@/src/components/finance/FinanceAnalytics";
 import FinanceDashboard from "@/src/components/finance/FinanceDashboard";
@@ -43,8 +45,15 @@ export default function FinanceScreen() {
 	const { isDark, toggleTheme } = useTheme();
 	const theme = useColors();
 	const { profile: authProfile, user } = useAuthStore();
-	const { currency, accounts, transactions, budgets, savingsGoals } =
-		useFinanceStore();
+	const {
+		currency,
+		accounts,
+		updateAccount,
+		deleteAccount,
+		transactions,
+		budgets,
+		savingsGoals,
+	} = useFinanceStore();
 	const { isModuleEnabled, getFirstEnabledModule, _hasHydrated } =
 		useModuleStore();
 
@@ -64,6 +73,7 @@ export default function FinanceScreen() {
 	);
 	const [drawerOpen, setDrawerOpen] = useState(false);
 	const [drawerAnim] = useState(new Animated.Value(-width * 0.8));
+	const [showAccountManager, setShowAccountManager] = useState(false);
 
 	const userName =
 		authProfile?.full_name || user?.email?.split("@")[0] || "User";
@@ -110,7 +120,7 @@ export default function FinanceScreen() {
 		const now = new Date();
 		const currentMonth = now.getMonth();
 		const currentYear = now.getFullYear();
-		return transactions.filter((t) => {
+		return transactions.filter((t: { date: string }) => {
 			const txDate = new Date(t.date);
 			return (
 				txDate.getMonth() === currentMonth &&
@@ -130,6 +140,18 @@ export default function FinanceScreen() {
 	const openDrawer = () => setDrawerOpen(true);
 
 	const renderContent = () => {
+		if (showAccountManager) {
+			return (
+				<AccountManager
+					accounts={accounts}
+					currency={currency}
+					theme={theme}
+					onClose={() => setShowAccountManager(false)}
+					onEdit={(account) => updateAccount(account.id, account)}
+					onDelete={deleteAccount}
+				/>
+			);
+		}
 		switch (activeTab) {
 			case "dashboard":
 				return (

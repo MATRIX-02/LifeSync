@@ -67,6 +67,7 @@ export interface Transaction {
 	category: ExpenseCategory | IncomeCategory;
 	description?: string;
 	note?: string;
+	notes?: string;
 	date: string;
 	time: string;
 	accountId: string;
@@ -128,6 +129,7 @@ export interface SavingsGoal {
 	linkedAccountId?: string; // Account linked to this goal
 	createdAt: string;
 	updatedAt: string;
+	targetDate?: string;
 }
 
 export interface GoalContribution {

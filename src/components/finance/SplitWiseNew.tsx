@@ -19,6 +19,7 @@ import {
 	ActivityIndicator,
 	Dimensions,
 	Modal,
+	Platform,
 	RefreshControl,
 	ScrollView,
 	StyleSheet,
@@ -288,7 +289,10 @@ function SplitWiseNew({ theme, currency, onOpenDrawer }: SplitWiseProps) {
 	// ============== HELPER FUNCTIONS ==============
 
 	const formatAmount = (value: number) => {
-		return value.toLocaleString("en-IN", { maximumFractionDigits: 0 });
+		return value.toLocaleString("en-IN", {
+			minimumFractionDigits: 0,
+			maximumFractionDigits: 2,
+		});
 	};
 
 	const getInitials = (name: string) => {
@@ -1475,7 +1479,10 @@ const GroupDetailView: React.FC<GroupDetailViewProps> = ({
 												<View style={styles.expenseCardRight}>
 													<Text style={styles.expenseCardAmount}>
 														{currency}
-														{expense.amount.toLocaleString()}
+														{expense.amount.toLocaleString("en-IN", {
+															minimumFractionDigits: 0,
+															maximumFractionDigits: 2,
+														})}
 													</Text>
 													<Text style={styles.expenseCardDate}>
 														{new Date(expense.date).toLocaleDateString()}
@@ -2390,7 +2397,9 @@ const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
 											onChangeText={(text) =>
 												handlePercentageChange(member.id, text)
 											}
-											keyboardType="number-pad"
+											keyboardType={
+												Platform.OS === "ios" ? "decimal-pad" : "numeric"
+											}
 										/>
 										<Text style={styles.customSplitCurrency}>%</Text>
 									</View>

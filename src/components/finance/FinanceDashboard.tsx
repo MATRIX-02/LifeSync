@@ -18,6 +18,7 @@ import React, { useMemo, useState } from "react";
 import {
 	Dimensions,
 	Modal,
+	Platform,
 	ScrollView,
 	StyleSheet,
 	Text,
@@ -53,6 +54,7 @@ export default function FinanceDashboard({
 		getFinancialSummary,
 		getUpcomingBills,
 		getNetWorth,
+		updateAccount,
 	} = useFinanceStore();
 
 	const styles = createStyles(theme);
@@ -77,6 +79,20 @@ export default function FinanceDashboard({
 	>("food");
 	const [selectedAccount, setSelectedAccount] = useState<string>("");
 	const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("upi");
+
+	// Editing Account State
+	const [editingAccount, setEditingAccount] = useState<Account | null>(null);
+	const [editForm, setEditForm] = useState<{
+		name: string;
+		type: Account["type"];
+		balance: string;
+		color: string;
+	}>({
+		name: "",
+		type: "bank",
+		balance: "",
+		color: COLORS[0],
+	});
 
 	// Analytics
 	const today = new Date().toISOString().split("T")[0];
@@ -199,7 +215,10 @@ export default function FinanceDashboard({
 	};
 
 	const formatAmount = (value: number) => {
-		return value.toLocaleString("en-IN", { maximumFractionDigits: 0 });
+		return value.toLocaleString("en-IN", {
+			minimumFractionDigits: 0,
+			maximumFractionDigits: 2,
+		});
 	};
 
 	const accountTypes: Account["type"][] = [
@@ -217,6 +236,36 @@ export default function FinanceDashboard({
 		"net_banking",
 		"wallet",
 	];
+
+	const startEdit = (account: Account) => {
+		setEditingAccount(account);
+		setEditForm({
+			name: account.name,
+			type: account.type,
+			balance:
+				account.type === "credit_card"
+					? String(account.creditLimit || 0)
+					: String(account.balance),
+			color: account.color,
+		});
+	};
+
+	const handleSave = () => {
+		if (!editForm.name.trim() || !editingAccount) return;
+		const updated: Account = {
+			...editingAccount,
+			name: editForm.name,
+			type: editForm.type as Account["type"],
+			color: editForm.color,
+		};
+		if (editForm.type === "credit_card") {
+			updated.creditLimit = parseFloat(editForm.balance) || 0;
+		} else {
+			updated.balance = parseFloat(editForm.balance) || 0;
+		}
+		updateAccount(updated.id, updated);
+		setEditingAccount(null);
+	};
 
 	return (
 		<ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
@@ -413,24 +462,11 @@ export default function FinanceDashboard({
 				) : (
 					<ScrollView horizontal showsHorizontalScrollIndicator={false}>
 						{accounts.map((account) => (
-							<TouchableOpacity
-								key={account.id}
-								style={styles.accountCard}
-								onLongPress={() => {
-									Alert.alert("Delete Account", `Delete "${account.name}"?`, [
-										{ text: "Cancel", style: "cancel" },
-										{
-											text: "Delete",
-											style: "destructive",
-											onPress: () => deleteAccount(account.id),
-										},
-									]);
-								}}
-							>
+							<View key={account.id} style={styles.accountCard}>
 								<View
 									style={[
 										styles.accountIconWrapper,
-										{ backgroundColor: account.color + "20" },
+										{ backgroundColor: account.color + "15" },
 									]}
 								>
 									<Ionicons
@@ -443,7 +479,7 @@ export default function FinanceDashboard({
 												? "trending-up-outline"
 												: "wallet-outline"
 										}
-										size={20}
+										size={22}
 										color={account.color}
 									/>
 								</View>
@@ -462,7 +498,15 @@ export default function FinanceDashboard({
 										  )} / ${formatAmount(account.creditLimit || 0)}`
 										: `${currency}${formatAmount(account.balance)}`}
 								</Text>
-							</TouchableOpacity>
+								<View style={styles.accountActions}>
+									<TouchableOpacity onPress={() => startEdit(account)}>
+										<Ionicons name="pencil" size={16} color={theme.primary} />
+									</TouchableOpacity>
+									<TouchableOpacity onPress={() => deleteAccount(account.id)}>
+										<Ionicons name="trash" size={16} color={theme.error} />
+									</TouchableOpacity>
+								</View>
+							</View>
 						))}
 						<TouchableOpacity
 							style={styles.addAccountCard}
@@ -808,9 +852,11 @@ export default function FinanceDashboard({
 									style={styles.formInput}
 									value={accountBalance}
 									onChangeText={setAccountBalance}
-									placeholder="0"
+									placeholder="0.00"
 									placeholderTextColor={theme.textMuted}
-									keyboardType="numeric"
+									keyboardType={
+										Platform.OS === "ios" ? "decimal-pad" : "numeric"
+									}
 								/>
 								<View style={styles.colorSelector}>
 									{COLORS.map((color) => (
@@ -898,9 +944,11 @@ export default function FinanceDashboard({
 										style={styles.amountField}
 										value={amount}
 										onChangeText={setAmount}
-										placeholder="0"
+										placeholder="0.00"
 										placeholderTextColor={theme.textMuted}
-										keyboardType="numeric"
+										keyboardType={
+											Platform.OS === "ios" ? "decimal-pad" : "numeric"
+										}
 									/>
 								</View>
 							</View>
@@ -1072,6 +1120,141 @@ export default function FinanceDashboard({
 					</View>
 				</View>
 			</Modal>
+
+			{/* Edit Account Modal */}
+			{editingAccount && (
+				<Modal visible animationType="slide" transparent>
+					<View style={styles.modalOverlay}>
+						<View style={styles.modalContent}>
+							<View style={styles.modalHeader}>
+								<Text style={styles.modalTitle}>Edit Account</Text>
+								<TouchableOpacity onPress={() => setEditingAccount(null)}>
+									<Ionicons name="close" size={24} color={theme.text} />
+								</TouchableOpacity>
+							</View>
+							<ScrollView showsVerticalScrollIndicator={false}>
+								<View style={styles.formGroup}>
+									<Text style={styles.formLabel}>Account Name</Text>
+									<TextInput
+										style={styles.formInput}
+										value={editForm.name}
+										onChangeText={(v) => setEditForm({ ...editForm, name: v })}
+										placeholder="e.g., HDFC Savings"
+										placeholderTextColor={theme.textMuted}
+									/>
+								</View>
+								<View style={styles.formGroup}>
+									<Text style={styles.formLabel}>Account Type</Text>
+									<View style={styles.typeSelector}>
+										{[
+											"cash",
+											"bank",
+											"credit_card",
+											"wallet",
+											"investment",
+										].map((type) => (
+											<TouchableOpacity
+												key={type}
+												style={[
+													styles.typeOption,
+													editForm.type === type && styles.typeOptionActive,
+												]}
+												onPress={() =>
+													setEditForm({
+														...editForm,
+														type: type as Account["type"],
+													})
+												}
+											>
+												<Ionicons
+													name={
+														type === "cash"
+															? "cash"
+															: type === "credit_card"
+															? "card"
+															: type === "investment"
+															? "trending-up"
+															: "wallet"
+													}
+													size={20}
+													color={editForm.type === type ? "#FFF" : theme.text}
+												/>
+												<Text
+													style={[
+														styles.typeOptionText,
+														editForm.type === type &&
+															styles.typeOptionTextActive,
+													]}
+												>
+													{type.replace("_", " ")}
+												</Text>
+											</TouchableOpacity>
+										))}
+									</View>
+								</View>
+								<View style={styles.formGroup}>
+									<Text style={styles.formLabel}>
+										{editForm.type === "credit_card"
+											? "Max Limit"
+											: "Current Balance"}
+									</Text>
+									<TextInput
+										style={styles.formInput}
+										value={editForm.balance}
+										onChangeText={(v) =>
+											setEditForm({ ...editForm, balance: v })
+										}
+										placeholder="0.00"
+										placeholderTextColor={theme.textMuted}
+										keyboardType={
+											Platform.OS === "ios" ? "decimal-pad" : "numeric"
+										}
+									/>
+									<View style={styles.colorSelector}>
+										{COLORS.map((color) => (
+											<TouchableOpacity
+												key={color}
+												style={[
+													styles.colorOption,
+													{ backgroundColor: color },
+													editForm.color === color && styles.colorOptionActive,
+												]}
+												onPress={() => setEditForm({ ...editForm, color })}
+											>
+												{editForm.color === color && (
+													<Ionicons name="checkmark" size={16} color="#FFF" />
+												)}
+											</TouchableOpacity>
+										))}
+									</View>
+								</View>
+								<TouchableOpacity
+									style={styles.submitButton}
+									onPress={handleSave}
+								>
+									<Text style={styles.submitButtonText}>Save</Text>
+								</TouchableOpacity>
+								<TouchableOpacity
+									style={[
+										styles.submitButton,
+										{ backgroundColor: theme.surface },
+									]}
+									onPress={() => setEditingAccount(null)}
+								>
+									<Text
+										style={[
+											styles.submitButtonText,
+											{ color: theme.textMuted },
+										]}
+									>
+										Cancel
+									</Text>
+								</TouchableOpacity>
+							</ScrollView>
+						</View>
+					</View>
+				</Modal>
+			)}
 		</ScrollView>
 	);
 }
@@ -1283,35 +1466,48 @@ const createStyles = (theme: Theme) =>
 		// Account Cards
 		accountCard: {
 			backgroundColor: theme.surface,
-			borderRadius: 18,
-			padding: 16,
-			marginRight: 12,
-			width: 150,
+			borderRadius: 16,
+			padding: 14,
+			marginRight: 10,
+			width: 140,
+			alignItems: "center",
+			justifyContent: "center",
 		},
 		accountIconWrapper: {
-			width: 44,
-			height: 44,
-			borderRadius: 14,
+			width: 40,
+			height: 40,
+			borderRadius: 12,
 			justifyContent: "center",
 			alignItems: "center",
-			marginBottom: 14,
+			marginBottom: 8,
 		},
 		accountName: {
 			fontSize: 15,
 			fontWeight: "600",
 			color: theme.text,
 			marginBottom: 2,
+			textAlign: "center",
 		},
 		accountType: {
-			fontSize: 12,
+			fontSize: 11,
 			color: theme.textMuted,
 			textTransform: "capitalize",
-			marginBottom: 10,
+			marginBottom: 6,
+			textAlign: "center",
 		},
 		accountBalance: {
-			fontSize: 18,
+			fontSize: 16,
 			fontWeight: "700",
-			color: theme.text,
+			color: theme.primary,
+			marginBottom: 4,
+			textAlign: "center",
+		},
+		accountActions: {
+			flexDirection: "row",
+			justifyContent: "center",
+			alignItems: "center",
+			marginTop: 6,
+			gap: 10,
 		},
 		addAccountCard: {
 			backgroundColor: theme.surface,
