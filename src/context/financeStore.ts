@@ -215,8 +215,20 @@ interface FinanceStore {
 	clearAllData: () => void;
 }
 
-const generateId = () =>
-	Date.now().toString(36) + Math.random().toString(36).substr(2);
+// Generate a UUID v4 for DB primary keys (compatible with Postgres uuid)
+const generateId = (): string =>
+	"xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+		const r = (Math.random() * 16) | 0;
+		const v = c === "x" ? r : (r & 0x3) | 0x8;
+		return v.toString(16);
+	});
+
+const isValidUUID = (id?: string): boolean => {
+	if (!id || typeof id !== "string") return false;
+	return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+		id
+	);
+};
 
 export const useFinanceStore = create<FinanceStore>()(
 	persist(
@@ -237,7 +249,7 @@ export const useFinanceStore = create<FinanceStore>()(
 				try {
 					const userRes = await supabase.auth.getUser();
 					const userId = (userRes.data as any)?.user?.id || null;
-					const newAcc: Account = {
+					let newAcc: Account = {
 						...account,
 						id: generateId(),
 						createdAt: new Date().toISOString(),
@@ -262,12 +274,54 @@ export const useFinanceStore = create<FinanceStore>()(
 						user_id: userId,
 					};
 
+					// Ensure id is a valid UUID before sending to Postgres
+					if (!isValidUUID(dbObj.id)) {
+						const newId = generateId();
+						dbObj.id = newId;
+						newAcc.id = newId;
+					}
+
 					const { error } = await (
 						supabase.from("finance_accounts") as any
 					).upsert([dbObj], { onConflict: "id" });
 
 					if (error) {
-						console.error("addAccount supabase error:", error);
+						console.error(
+							"addAccount supabase error: full error object:",
+							error
+						);
+						try {
+							console.error("addAccount supabase error - fields:", {
+								message: (error as any)?.message,
+								details: (error as any)?.details,
+								hint: (error as any)?.hint,
+								code: (error as any)?.code,
+							});
+							console.error("addAccount payload for debug:", {
+								userId,
+								newAcc,
+								dbObj,
+								idIsValid: isValidUUID(dbObj.id),
+							});
+							if (
+								(error as any)?.message &&
+								typeof (error as any)?.message === "string"
+							) {
+								console.error(
+									"addAccount supabase error message:",
+									(error as any).message
+								);
+							}
+							if (error instanceof Error && (error as Error).stack) {
+								console.error(
+									"addAccount supabase error stack:",
+									(error as Error).stack
+								);
+							}
+						} catch (logErr) {
+							console.error("addAccount logging failure:", logErr);
+						}
+
 						// Fallback to local update
 						set((state) => ({
 							accounts: [...state.accounts, newAcc],

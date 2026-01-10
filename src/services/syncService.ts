@@ -75,6 +75,19 @@ const ensureValidUUID = (id: string): string => {
 	return generateUUID();
 };
 
+// Helper: Ensure an object has a stable UUID on the given key. If missing or invalid,
+// generate one and assign it back onto the object so subsequent syncs reuse the same id.
+const assignIdIfMissing = (obj: any, key: string = "id"): string => {
+	if (!obj) return generateUUID();
+	const existing = obj[key];
+	if (isValidUUID(existing)) return existing;
+	const newId = generateUUID();
+	try {
+		obj[key] = newId;
+	} catch {}
+	return newId;
+};
+
 // Helper: Convert snake_case to camelCase
 const toCamelCase = (str: string): string => {
 	return str.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase());
@@ -246,9 +259,12 @@ export const syncHabitsToCloud = async (
 		// Upsert habits
 		if (habitsData.habits && habitsData.habits.length > 0) {
 			const habitsWithUser = habitsData.habits.map((habit) => {
+				// ensure a stable id exists on habit
+				assignIdIfMissing(habit, "id");
 				// Flatten frequency object to match database columns
 				const { frequency, ...restHabit } = habit;
 				const flattenedHabit = {
+					id: habit.id,
 					...restHabit,
 					frequency_type: frequency?.type || "daily",
 					frequency_value: frequency?.value || 1,
@@ -282,12 +298,14 @@ export const syncHabitsToCloud = async (
 
 		// Upsert logs (batch in chunks to avoid payload limits)
 		if (habitsData.logs && habitsData.logs.length > 0) {
-			const logsWithUser = habitsData.logs.map((log) =>
-				objectToSnakeCase({
+			const logsWithUser = habitsData.logs.map((log) => {
+				assignIdIfMissing(log, "id");
+				return objectToSnakeCase({
 					...log,
+					id: log.id,
 					user_id: userId,
-				})
-			);
+				});
+			});
 
 			// Batch in chunks of 500
 			const chunkSize = 500;
@@ -428,9 +446,13 @@ export const syncWorkoutsToCloud = async (
 		// Sync workout sessions - explicitly map only valid DB columns, fix invalid UUIDs
 		if (workoutData.workoutSessions && workoutData.workoutSessions.length > 0) {
 			const sessionsWithUser = workoutData.workoutSessions.map((session) => ({
-				id: ensureValidUUID(session.id),
+				id: assignIdIfMissing(session, "id"),
 				user_id: userId,
-				plan_id: session.planId ? ensureValidUUID(session.planId) : null,
+				plan_id: session.planId
+					? isValidUUID(session.planId)
+						? session.planId
+						: null
+					: null,
 				plan_name: session.planName || null,
 				name: session.name,
 				date: session.date,
@@ -460,12 +482,14 @@ export const syncWorkoutsToCloud = async (
 
 		// Sync personal records
 		if (workoutData.personalRecords && workoutData.personalRecords.length > 0) {
-			const recordsWithUser = workoutData.personalRecords.map((record) =>
-				objectToSnakeCase({
+			const recordsWithUser = workoutData.personalRecords.map((record) => {
+				assignIdIfMissing(record, "id");
+				return objectToSnakeCase({
 					...record,
+					id: record.id,
 					user_id: userId,
-				})
-			);
+				});
+			});
 
 			const { error: recordsError } = await (
 				supabase.from("personal_records") as any
@@ -479,12 +503,14 @@ export const syncWorkoutsToCloud = async (
 			workoutData.bodyMeasurements &&
 			workoutData.bodyMeasurements.length > 0
 		) {
-			const measurementsWithUser = workoutData.bodyMeasurements.map((m) =>
-				objectToSnakeCase({
+			const measurementsWithUser = workoutData.bodyMeasurements.map((m) => {
+				assignIdIfMissing(m, "id");
+				return objectToSnakeCase({
 					...m,
+					id: m.id,
 					user_id: userId,
-				})
-			);
+				});
+			});
 
 			const { error: measurementsError } = await (
 				supabase.from("body_measurements") as any
@@ -495,12 +521,14 @@ export const syncWorkoutsToCloud = async (
 
 		// Sync body weights
 		if (workoutData.bodyWeights && workoutData.bodyWeights.length > 0) {
-			const weightsWithUser = workoutData.bodyWeights.map((w) =>
-				objectToSnakeCase({
+			const weightsWithUser = workoutData.bodyWeights.map((w) => {
+				assignIdIfMissing(w, "id");
+				return objectToSnakeCase({
 					...w,
+					id: w.id,
 					user_id: userId,
-				})
-			);
+				});
+			});
 
 			const { error: weightsError } = await (
 				supabase.from("body_weights") as any
@@ -511,14 +539,16 @@ export const syncWorkoutsToCloud = async (
 
 		// Sync custom exercises
 		if (workoutData.customExercises && workoutData.customExercises.length > 0) {
-			const exercisesWithUser = workoutData.customExercises.map((e) =>
-				objectToSnakeCase({
+			const exercisesWithUser = workoutData.customExercises.map((e) => {
+				assignIdIfMissing(e, "id");
+				return objectToSnakeCase({
 					...e,
+					id: e.id,
 					user_id: userId,
 					target_muscles: JSON.stringify(e.targetMuscles || []),
 					secondary_muscles: JSON.stringify(e.secondaryMuscles || []),
-				})
-			);
+				});
+			});
 
 			const { error: exercisesError } = await (
 				supabase.from("custom_exercises") as any
@@ -664,7 +694,7 @@ export const syncFinanceToCloud = async (
 			const accountsWithUser = financeData.accounts.map((a) =>
 				objectToSnakeCase({
 					...a,
-					id: ensureValidUUID(a.id),
+					id: assignIdIfMissing(a, "id"),
 					user_id: userId,
 				})
 			);
@@ -681,8 +711,12 @@ export const syncFinanceToCloud = async (
 			const transactionsWithUser = financeData.transactions.map((t) =>
 				objectToSnakeCase({
 					...t,
-					id: ensureValidUUID(t.id),
-					account_id: t.accountId ? ensureValidUUID(t.accountId) : null,
+					id: assignIdIfMissing(t, "id"),
+					account_id: t.accountId
+						? isValidUUID(t.accountId)
+							? t.accountId
+							: null
+						: null,
 					user_id: userId,
 				})
 			);
@@ -706,8 +740,12 @@ export const syncFinanceToCloud = async (
 			const recurringWithUser = financeData.recurringTransactions.map((r) =>
 				objectToSnakeCase({
 					...r,
-					id: ensureValidUUID(r.id),
-					account_id: r.accountId ? ensureValidUUID(r.accountId) : null,
+					id: assignIdIfMissing(r, "id"),
+					account_id: r.accountId
+						? isValidUUID(r.accountId)
+							? r.accountId
+							: null
+						: null,
 					user_id: userId,
 				})
 			);
@@ -724,7 +762,7 @@ export const syncFinanceToCloud = async (
 			const budgetsWithUser = financeData.budgets.map((b) =>
 				objectToSnakeCase({
 					...b,
-					id: ensureValidUUID(b.id),
+					id: assignIdIfMissing(b, "id"),
 					user_id: userId,
 				})
 			);
@@ -741,7 +779,7 @@ export const syncFinanceToCloud = async (
 			const goalsWithUser = financeData.savingsGoals.map((g) =>
 				objectToSnakeCase({
 					...g,
-					id: ensureValidUUID(g.id),
+					id: assignIdIfMissing(g, "id"),
 					user_id: userId,
 				})
 			);
@@ -758,7 +796,7 @@ export const syncFinanceToCloud = async (
 			const remindersWithUser = financeData.billReminders.map((r) =>
 				objectToSnakeCase({
 					...r,
-					id: ensureValidUUID(r.id),
+					id: assignIdIfMissing(r, "id"),
 					user_id: userId,
 				})
 			);
@@ -775,7 +813,7 @@ export const syncFinanceToCloud = async (
 			const debtsWithUser = financeData.debts.map((d) =>
 				objectToSnakeCase({
 					...d,
-					id: ensureValidUUID(d.id),
+					id: assignIdIfMissing(d, "id"),
 					user_id: userId,
 				})
 			);
@@ -792,7 +830,7 @@ export const syncFinanceToCloud = async (
 			const groupsWithUser = financeData.splitGroups.map((g) =>
 				objectToSnakeCase({
 					...g,
-					id: ensureValidUUID(g.id),
+					id: assignIdIfMissing(g, "id"),
 					user_id: userId,
 					members: JSON.stringify(g.members || []),
 					expenses: JSON.stringify(g.expenses || []),
@@ -914,12 +952,14 @@ export const syncStudyToCloud = async (
 	try {
 		// Sync study goals
 		if (studyData.studyGoals && studyData.studyGoals.length > 0) {
-			const goalsWithUser = studyData.studyGoals.map((g) =>
-				objectToSnakeCase({
+			const goalsWithUser = studyData.studyGoals.map((g) => {
+				assignIdIfMissing(g, "id");
+				return objectToSnakeCase({
 					...g,
+					id: g.id,
 					user_id: userId,
-				})
-			);
+				});
+			});
 
 			const { error: goalsError } = await (
 				supabase.from("study_goals") as any
@@ -930,12 +970,14 @@ export const syncStudyToCloud = async (
 
 		// Sync subjects
 		if (studyData.subjects && studyData.subjects.length > 0) {
-			const subjectsWithUser = studyData.subjects.map((s) =>
-				objectToSnakeCase({
+			const subjectsWithUser = studyData.subjects.map((s) => {
+				assignIdIfMissing(s, "id");
+				return objectToSnakeCase({
 					...s,
+					id: s.id,
 					user_id: userId,
-				})
-			);
+				});
+			});
 
 			const { error: subjectsError } = await (
 				supabase.from("study_subjects") as any
@@ -946,12 +988,14 @@ export const syncStudyToCloud = async (
 
 		// Sync study sessions
 		if (studyData.studySessions && studyData.studySessions.length > 0) {
-			const sessionsWithUser = studyData.studySessions.map((s) =>
-				objectToSnakeCase({
+			const sessionsWithUser = studyData.studySessions.map((s) => {
+				assignIdIfMissing(s, "id");
+				return objectToSnakeCase({
 					...s,
+					id: s.id,
 					user_id: userId,
-				})
-			);
+				});
+			});
 
 			const { error: sessionsError } = await (
 				supabase.from("study_sessions") as any
@@ -962,12 +1006,14 @@ export const syncStudyToCloud = async (
 
 		// Sync flashcard decks
 		if (studyData.flashcardDecks && studyData.flashcardDecks.length > 0) {
-			const decksWithUser = studyData.flashcardDecks.map((d) =>
-				objectToSnakeCase({
+			const decksWithUser = studyData.flashcardDecks.map((d) => {
+				assignIdIfMissing(d, "id");
+				return objectToSnakeCase({
 					...d,
+					id: d.id,
 					user_id: userId,
-				})
-			);
+				});
+			});
 
 			const { error: decksError } = await (
 				supabase.from("flashcard_decks") as any
@@ -978,12 +1024,14 @@ export const syncStudyToCloud = async (
 
 		// Sync flashcards
 		if (studyData.flashcards && studyData.flashcards.length > 0) {
-			const cardsWithUser = studyData.flashcards.map((c) =>
-				objectToSnakeCase({
+			const cardsWithUser = studyData.flashcards.map((c) => {
+				assignIdIfMissing(c, "id");
+				return objectToSnakeCase({
 					...c,
+					id: c.id,
 					user_id: userId,
-				})
-			);
+				});
+			});
 
 			const { error: cardsError } = await (
 				supabase.from("flashcards") as any
@@ -994,12 +1042,14 @@ export const syncStudyToCloud = async (
 
 		// Sync revision schedule
 		if (studyData.revisionSchedule && studyData.revisionSchedule.length > 0) {
-			const revisionWithUser = studyData.revisionSchedule.map((r) =>
-				objectToSnakeCase({
+			const revisionWithUser = studyData.revisionSchedule.map((r) => {
+				assignIdIfMissing(r, "id");
+				return objectToSnakeCase({
 					...r,
+					id: r.id,
 					user_id: userId,
-				})
-			);
+				});
+			});
 
 			const { error: revisionError } = await (
 				supabase.from("revision_schedule") as any
@@ -1010,12 +1060,14 @@ export const syncStudyToCloud = async (
 
 		// Sync mock tests
 		if (studyData.mockTests && studyData.mockTests.length > 0) {
-			const testsWithUser = studyData.mockTests.map((t) =>
-				objectToSnakeCase({
+			const testsWithUser = studyData.mockTests.map((t) => {
+				assignIdIfMissing(t, "id");
+				return objectToSnakeCase({
 					...t,
+					id: t.id,
 					user_id: userId,
-				})
-			);
+				});
+			});
 
 			const { error: testsError } = await (
 				supabase.from("mock_tests") as any
@@ -1026,12 +1078,14 @@ export const syncStudyToCloud = async (
 
 		// Sync daily plans
 		if (studyData.dailyPlans && studyData.dailyPlans.length > 0) {
-			const plansWithUser = studyData.dailyPlans.map((p) =>
-				objectToSnakeCase({
+			const plansWithUser = studyData.dailyPlans.map((p) => {
+				assignIdIfMissing(p, "id");
+				return objectToSnakeCase({
 					...p,
+					id: p.id,
 					user_id: userId,
-				})
-			);
+				});
+			});
 
 			const { error: plansError } = await (
 				supabase.from("daily_plans") as any
@@ -1042,12 +1096,14 @@ export const syncStudyToCloud = async (
 
 		// Sync study notes
 		if (studyData.studyNotes && studyData.studyNotes.length > 0) {
-			const notesWithUser = studyData.studyNotes.map((n) =>
-				objectToSnakeCase({
+			const notesWithUser = studyData.studyNotes.map((n) => {
+				assignIdIfMissing(n, "id");
+				return objectToSnakeCase({
 					...n,
+					id: n.id,
 					user_id: userId,
-				})
-			);
+				});
+			});
 
 			const { error: notesError } = await (
 				supabase.from("study_notes") as any

@@ -502,7 +502,23 @@ export default function FinanceDashboard({
 									<TouchableOpacity onPress={() => startEdit(account)}>
 										<Ionicons name="pencil" size={16} color={theme.primary} />
 									</TouchableOpacity>
-									<TouchableOpacity onPress={() => deleteAccount(account.id)}>
+									<TouchableOpacity
+										onPress={() =>
+											Alert.alert(
+												"Delete account",
+												`Are you sure you want to delete "${account.name}"? This action cannot be undone.`,
+												[
+													{ text: "Cancel", style: "cancel" },
+													{
+														text: "Delete",
+														style: "destructive",
+														onPress: () => deleteAccount(account.id),
+													},
+												],
+												{ cancelable: true }
+											)
+										}
+									>
 										<Ionicons name="trash" size={16} color={theme.error} />
 									</TouchableOpacity>
 								</View>
