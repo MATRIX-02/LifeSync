@@ -247,53 +247,66 @@ export default function TransactionList({
 		return account?.name || "Unknown";
 	};
 
-	const getClosingBalance = (transaction: Transaction): number => {
+	// Returns two closing balances for a transaction:
+	// - account: balance of the transaction's account immediately after the transaction
+	// - total: combined balance across all accounts immediately after the transaction
+	const getClosingBalances = (
+		transaction: Transaction
+	): { account: number; total: number } => {
+		// find the affected account
 		const account = accounts.find((acc) => acc.id === transaction.accountId);
-		if (!account) return 0;
+		// current total across all accounts
+		const currentTotal = accounts.reduce((s, a) => s + (a.balance || 0), 0);
 
-		// Get all transactions for this account up to and including current transaction
-		const relatedTransactions = transactions
-			.filter((t) => t.accountId === transaction.accountId)
-			.sort(
-				(a, b) =>
-					new Date(a.date).getTime() - new Date(b.date).getTime() ||
-					(a.time < b.time ? -1 : 1)
-			);
+		// If account not found, return zeros (but still compute total by reversing global transactions)
+		let accountBalance = account ? account.balance : 0;
+		let totalBalance = currentTotal;
 
-		let balance = account.balance;
-		for (const t of relatedTransactions) {
-			if (t.id === transaction.id) {
-				break;
+		// Sort all transactions in descending chronological order (newest first)
+		const sortedDesc = [...transactions].sort((a, b) => {
+			const da = new Date(a.date).getTime();
+			const db = new Date(b.date).getTime();
+			if (da !== db) return db - da;
+			// if same date, compare time strings
+			if (a.time !== b.time) return a.time < b.time ? 1 : -1;
+			return 0;
+		});
+
+		for (const t of sortedDesc) {
+			// stop once we've reached the transaction itself
+			if (t.id === transaction.id) break;
+
+			// Reverse-apply this transaction to reach earlier state
+			// For the account-specific balance, only consider transactions that affect that account
+			if (account) {
+				if (t.accountId === account.id) {
+					if (t.type === "income") accountBalance -= t.amount;
+					else if (t.type === "expense") accountBalance += t.amount;
+					else if (t.type === "transfer") {
+						// outgoing transfer from this account
+						if (t.toAccountId === account.id) accountBalance -= t.amount;
+						else accountBalance += t.amount;
+					}
+				}
+
+				// transfers that credit this account via toAccountId
+				if (t.toAccountId === account.id && t.accountId !== account.id) {
+					// if this transaction credited the account, remove its credit
+					accountBalance -= t.amount;
+				}
 			}
+
+			// For total balance across all accounts, transfers cancel out (internal), so ignore transfers.
 			if (t.type === "income") {
-				balance += t.amount;
+				totalBalance -= t.amount;
 			} else if (t.type === "expense") {
-				balance -= t.amount;
-			} else if (
-				t.type === "transfer" &&
-				t.toAccountId === transaction.accountId
-			) {
-				balance += t.amount;
-			} else if (t.type === "transfer") {
-				balance -= t.amount;
+				totalBalance += t.amount;
 			}
 		}
 
-		// Apply the current transaction
-		if (transaction.type === "income") {
-			balance += transaction.amount;
-		} else if (transaction.type === "expense") {
-			balance -= transaction.amount;
-		} else if (
-			transaction.type === "transfer" &&
-			transaction.toAccountId === account.id
-		) {
-			balance += transaction.amount;
-		} else if (transaction.type === "transfer") {
-			balance -= transaction.amount;
-		}
+		// accountBalance already represents the balance immediately after the transaction
 
-		return balance;
+		return { account: accountBalance, total: totalBalance };
 	};
 
 	const renderTransactionItem = (transaction: Transaction) => {
@@ -302,7 +315,7 @@ export default function TransactionList({
 				? INCOME_CATEGORIES[transaction.category as IncomeCategory]
 				: EXPENSE_CATEGORIES[transaction.category as ExpenseCategory];
 
-		const closingBalance = getClosingBalance(transaction);
+		const { account: closingBalanceAccount } = getClosingBalances(transaction);
 
 		return (
 			<TouchableOpacity
@@ -332,8 +345,9 @@ export default function TransactionList({
 						{getAccountName(transaction.accountId)}
 					</Text>
 					<Text style={styles.transactionBalance} numberOfLines={1}>
-						Closing Balance: {currency}
-						{formatAmount(closingBalance)}
+						Closing Balance ({getAccountName(transaction.accountId)}):{" "}
+						{currency}
+						{formatAmount(closingBalanceAccount)}
 					</Text>
 				</View>
 				<View style={styles.transactionAmountContainer}>
@@ -724,13 +738,34 @@ export default function TransactionList({
 													.toUpperCase()}
 											</Text>
 										</View>
-										<View style={styles.detailRow}>
-											<Text style={styles.detailLabel}>Closing Balance</Text>
-											<Text style={styles.detailValue}>
-												{currency}
-												{formatAmount(getClosingBalance(selectedTransaction))}
-											</Text>
-										</View>
+										{(() => {
+											const { account: accBal, total: totBal } =
+												getClosingBalances(selectedTransaction);
+											return (
+												<>
+													<View style={styles.detailRow}>
+														<Text style={styles.detailLabel}>
+															{`Closing Balance (${getAccountName(
+																selectedTransaction.accountId
+															)})`}
+														</Text>
+														<Text style={styles.detailValue}>
+															{currency}
+															{formatAmount(accBal)}
+														</Text>
+													</View>
+													<View style={styles.detailRow}>
+														<Text style={styles.detailLabel}>
+															Closing Balance (Total)
+														</Text>
+														<Text style={styles.detailValue}>
+															{currency}
+															{formatAmount(totBal)}
+														</Text>
+													</View>
+												</>
+											);
+										})()}
 										{selectedTransaction.notes && (
 											<View style={styles.detailRow}>
 												<Text style={styles.detailLabel}>Note</Text>

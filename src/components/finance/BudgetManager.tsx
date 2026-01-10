@@ -130,6 +130,82 @@ export default function BudgetManager({
 	const [debtPaymentAmount, setDebtPaymentAmount] = useState("");
 	const [paymentNote, setPaymentNote] = useState("");
 
+	// Bill templates for quick selection with category colors
+	const billTemplates = [
+		{
+			name: "Mobile",
+			fullName: "Mobile Recharge",
+			icon: "phone-portrait",
+			color: "#10B981",
+			bgColor: "#D1FAE5",
+		},
+		{
+			name: "Spotify",
+			fullName: "Spotify Premium",
+			icon: "musical-notes",
+			color: "#1DB954",
+			bgColor: "#D1FAE5",
+		},
+		{
+			name: "YouTube",
+			fullName: "YouTube Premium",
+			icon: "logo-youtube",
+			color: "#FF0000",
+			bgColor: "#FFE5E5",
+		},
+		{
+			name: "Netflix",
+			fullName: "Netflix Subscription",
+			icon: "film",
+			color: "#E50914",
+			bgColor: "#FFE5E7",
+		},
+		{
+			name: "WiFi",
+			fullName: "WiFi/Broadband",
+			icon: "wifi",
+			color: "#3B82F6",
+			bgColor: "#DBEAFE",
+		},
+		{
+			name: "SIP",
+			fullName: "SIP Investment",
+			icon: "trending-up",
+			color: "#8B5CF6",
+			bgColor: "#EDE9FE",
+		},
+		{
+			name: "Electricity",
+			fullName: "Electricity Bill",
+			icon: "flash",
+			color: "#F59E0B",
+			bgColor: "#FEF3C7",
+		},
+		{
+			name: "Rent",
+			fullName: "Monthly Rent",
+			icon: "home",
+			color: "#EC4899",
+			bgColor: "#FCE7F3",
+		},
+		{
+			name: "Insurance",
+			fullName: "Insurance Premium",
+			icon: "shield-checkmark",
+			color: "#06B6D4",
+			bgColor: "#CFFAFE",
+		},
+		{
+			name: "DTH",
+			fullName: "DTH Recharge",
+			icon: "tv",
+			color: "#6366F1",
+			bgColor: "#E0E7FF",
+		},
+	];
+
+	const [selectedTemplate, setSelectedTemplate] = useState<string | null>(null);
+
 	// Calculate budget spending
 	const budgetData = useMemo(() => {
 		const now = new Date();
@@ -248,6 +324,7 @@ export default function BudgetManager({
 			isAutoDeduct: false,
 			notes: "",
 		});
+		setSelectedTemplate(null);
 		setShowAddBill(false);
 	};
 
@@ -289,6 +366,7 @@ export default function BudgetManager({
 			isAutoDeduct: false,
 			notes: "",
 		});
+		setSelectedTemplate(null);
 		setShowEditBill(null);
 	};
 
@@ -880,14 +958,43 @@ export default function BudgetManager({
 											},
 										]}
 									/>
+									<View
+										style={[
+											styles.billGradientOverlay,
+											{
+												backgroundColor: isOverdue
+													? theme.error + "08"
+													: isDueSoon
+													? theme.warning + "08"
+													: theme.primary + "08",
+											},
+										]}
+									/>
 									<View style={styles.billInfo}>
 										<Text style={styles.billName}>{bill.name}</Text>
 										<View style={styles.billMeta}>
+											<Ionicons
+												name="calendar-outline"
+												size={13}
+												color={
+													isOverdue
+														? theme.error
+														: isDueSoon
+														? theme.warning
+														: theme.textMuted
+												}
+											/>
 											<Text
 												style={[
 													styles.billDue,
-													isOverdue && { color: theme.error },
-													isDueSoon && { color: theme.warning },
+													isOverdue && {
+														color: theme.error,
+														fontWeight: "600",
+													},
+													isDueSoon && {
+														color: theme.warning,
+														fontWeight: "600",
+													},
 												]}
 											>
 												{isOverdue
@@ -899,10 +1006,15 @@ export default function BudgetManager({
 													: `Due in ${daysUntil} days`}
 											</Text>
 											{bill.frequency !== "once" && (
-												<View style={styles.recurringBadge}>
+												<View
+													style={[
+														styles.recurringBadge,
+														{ backgroundColor: theme.primary + "15" },
+													]}
+												>
 													<Ionicons
 														name="repeat"
-														size={12}
+														size={11}
 														color={theme.primary}
 													/>
 													<Text style={styles.recurringText}>
@@ -913,7 +1025,7 @@ export default function BudgetManager({
 										</View>
 									</View>
 									<View style={styles.billActions}>
-										<Text style={styles.billAmount}>
+										<Text style={[styles.billAmount, { fontWeight: "700" }]}>
 											{currency}
 											{formatAmount(bill.amount)}
 										</Text>
@@ -1481,6 +1593,83 @@ export default function BudgetManager({
 							<TouchableOpacity onPress={() => setShowAddBill(false)}>
 								<Ionicons name="close" size={24} color={theme.text} />
 							</TouchableOpacity>
+						</View>
+
+						<View style={styles.templateSection}>
+							<Text style={styles.sectionLabel}>💳 Quick Templates</Text>
+							<ScrollView
+								horizontal
+								showsHorizontalScrollIndicator={false}
+								contentContainerStyle={{
+									paddingBottom: 12,
+									paddingHorizontal: 2,
+								}}
+							>
+								{billTemplates.map((template) => {
+									const isSelected = selectedTemplate === template.name;
+									return (
+										<TouchableOpacity
+											key={template.name}
+											style={[
+												styles.templateCard,
+												{
+													backgroundColor: isSelected
+														? template.color + "20"
+														: theme.surface,
+													borderColor: isSelected
+														? template.color
+														: theme.border,
+												},
+											]}
+											activeOpacity={0.7}
+											onPress={() => {
+												setSelectedTemplate(template.name);
+												setBillForm({
+													...billForm,
+													name: template.fullName,
+													isRecurring: true,
+												});
+											}}
+										>
+											<View
+												style={[
+													styles.templateIconContainer,
+													{
+														backgroundColor: template.color + "15",
+														borderWidth: isSelected ? 2 : 0,
+														borderColor: template.color,
+													},
+												]}
+											>
+												<Ionicons
+													name={template.icon as any}
+													size={24}
+													color={template.color}
+												/>
+											</View>
+											<Text
+												style={[styles.templateCardText, { color: theme.text }]}
+											>
+												{template.name}
+											</Text>
+											{isSelected && (
+												<View
+													style={[
+														styles.selectedBadge,
+														{ backgroundColor: template.color },
+													]}
+												>
+													<Ionicons
+														name="checkmark-circle"
+														size={18}
+														color="#FFF"
+													/>
+												</View>
+											)}
+										</TouchableOpacity>
+									);
+								})}
+							</ScrollView>
 						</View>
 
 						<Text style={styles.inputLabel}>Bill Name</Text>
@@ -2185,6 +2374,86 @@ export default function BudgetManager({
 
 						{showEditBill && (
 							<>
+								<View style={styles.templateSection}>
+									<Text style={styles.sectionLabel}>💳 Quick Templates</Text>
+									<ScrollView
+										horizontal
+										showsHorizontalScrollIndicator={false}
+										contentContainerStyle={{
+											paddingBottom: 12,
+											paddingHorizontal: 2,
+										}}
+									>
+										{billTemplates.map((template) => {
+											const isSelected = selectedTemplate === template.name;
+											return (
+												<TouchableOpacity
+													key={template.name}
+													style={[
+														styles.templateCard,
+														{
+															backgroundColor: isSelected
+																? template.color + "20"
+																: theme.surface,
+															borderColor: isSelected
+																? template.color
+																: theme.border,
+														},
+													]}
+													activeOpacity={0.7}
+													onPress={() => {
+														setSelectedTemplate(template.name);
+														setBillForm({
+															...billForm,
+															name: template.fullName,
+															isRecurring: true,
+														});
+													}}
+												>
+													<View
+														style={[
+															styles.templateIconContainer,
+															{
+																backgroundColor: template.color + "15",
+																borderWidth: isSelected ? 2 : 0,
+																borderColor: template.color,
+															},
+														]}
+													>
+														<Ionicons
+															name={template.icon as any}
+															size={24}
+															color={template.color}
+														/>
+													</View>
+													<Text
+														style={[
+															styles.templateCardText,
+															{ color: theme.text },
+														]}
+													>
+														{template.name}
+													</Text>
+													{isSelected && (
+														<View
+															style={[
+																styles.selectedBadge,
+																{ backgroundColor: template.color },
+															]}
+														>
+															<Ionicons
+																name="checkmark-circle"
+																size={18}
+																color="#FFF"
+															/>
+														</View>
+													)}
+												</TouchableOpacity>
+											);
+										})}
+									</ScrollView>
+								</View>
+
 								<Text style={styles.inputLabel}>Bill Name</Text>
 								<TextInput
 									style={styles.input}
@@ -2845,6 +3114,57 @@ const createStyles = (theme: Theme) =>
 			fontWeight: "600",
 			color: "#FFF",
 		},
+		templateSection: {
+			marginBottom: 24,
+		},
+		sectionLabel: {
+			fontSize: 14,
+			fontWeight: "700",
+			color: theme.text,
+			marginBottom: 16,
+			letterSpacing: 0.2,
+		},
+		templateCard: {
+			alignItems: "center",
+			gap: 12,
+			paddingHorizontal: 18,
+			paddingVertical: 16,
+			borderRadius: 18,
+			borderWidth: 2.5,
+			marginRight: 14,
+			minWidth: 90,
+			shadowColor: "#000",
+			shadowOffset: { width: 0, height: 4 },
+			shadowOpacity: 0.12,
+			shadowRadius: 8,
+			elevation: 4,
+			position: "relative",
+		},
+		templateIconContainer: {
+			width: 50,
+			height: 50,
+			borderRadius: 25,
+			justifyContent: "center",
+			alignItems: "center",
+			shadowColor: "#000",
+			shadowOffset: { width: 0, height: 2 },
+			shadowOpacity: 0.1,
+			shadowRadius: 4,
+			elevation: 2,
+		},
+		templateCardText: {
+			fontSize: 11,
+			fontWeight: "700",
+			textAlign: "center",
+			letterSpacing: 0.3,
+		},
+		selectedBadge: {
+			position: "absolute",
+			top: 8,
+			right: 8,
+			backgroundColor: "rgba(255,255,255,0.3)",
+			borderRadius: 12,
+		},
 		contributeGoalName: {
 			fontSize: 20,
 			fontWeight: "700",
@@ -2949,6 +3269,11 @@ const createStyles = (theme: Theme) =>
 			borderRadius: 2,
 			alignSelf: "stretch",
 			marginRight: 12,
+		},
+		billGradientOverlay: {
+			...StyleSheet.absoluteFillObject,
+			borderRadius: 12,
+			pointerEvents: "none",
 		},
 		billItemPaid: {
 			opacity: 0.6,
