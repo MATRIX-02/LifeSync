@@ -60,6 +60,10 @@ const dbHabitToHabit = (dbHabit: any): Habit => {
 		value: habit.frequencyValue || 1,
 		secondValue: habit.frequencySecondValue,
 		days: habit.frequencyDays || [],
+		// "times_per_day" window
+		startTime: habit.frequencyStartTime ?? undefined,
+		endTime: habit.frequencyEndTime ?? undefined,
+		intervalMinutes: habit.frequencyIntervalMinutes ?? undefined,
 	} as FrequencyConfig;
 	// Map archived to isArchived
 	habit.isArchived = habit.archived || false;
@@ -79,6 +83,10 @@ const habitToDbHabit = (habit: Habit, userId: string): any => {
 		frequencyValue: frequency?.value || 1,
 		frequencySecondValue: frequency?.secondValue,
 		frequencyDays: frequency?.days || [],
+		// "times_per_day" window
+		frequencyStartTime: frequency?.startTime ?? null,
+		frequencyEndTime: frequency?.endTime ?? null,
+		frequencyIntervalMinutes: frequency?.intervalMinutes ?? null,
 		archived: isArchived || false,
 		userId: userId,
 		syncedAt: new Date().toISOString(),

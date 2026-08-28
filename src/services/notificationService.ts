@@ -3,6 +3,7 @@ import * as Device from "expo-device";
 import * as Notifications from "expo-notifications";
 import { Platform } from "react-native";
 import { supabase } from "../config/supabase";
+import { FrequencyConfig } from "../types";
 
 export class NotificationService {
 	// Get and register the Expo Push Token for the current user
@@ -226,6 +227,131 @@ export class NotificationService {
 			trigger,
 			{ habitId, type: "habit_reminder" }
 		);
+	}
+
+	// Expand a "times_per_day" window into the concrete HH:mm slots it fires at.
+	// Falls back to evenly spreading `count` reminders across the window when no
+	// interval is configured.
+	static expandDailyWindow(
+		startTime: string,
+		endTime: string,
+		intervalMinutes: number | undefined,
+		count: number
+	): string[] {
+		const toMinutes = (t: string) => {
+			const [h, m] = t.split(":").map(Number);
+			return h * 60 + m;
+		};
+		const toHHmm = (mins: number) => {
+			const h = Math.floor(mins / 60) % 24;
+			const m = mins % 60;
+			return `${h.toString().padStart(2, "0")}:${m
+				.toString()
+				.padStart(2, "0")}`;
+		};
+
+		const start = toMinutes(startTime);
+		const end = toMinutes(endTime);
+		if (end <= start) return [startTime];
+
+		const step =
+			intervalMinutes && intervalMinutes > 0
+				? intervalMinutes
+				: Math.max(1, Math.floor((end - start) / Math.max(1, count - 1)));
+
+		const slots: string[] = [];
+		for (let t = start; t <= end && slots.length < 24; t += step) {
+			slots.push(toHHmm(t));
+			if (step <= 0) break;
+		}
+		return slots.length > 0 ? slots : [startTime];
+	}
+
+	// Schedule every reminder a habit needs, honouring its frequency config.
+	// Returns the ids of all notifications created.
+	static async scheduleHabitReminders(habit: {
+		id: string;
+		name: string;
+		notificationTime?: string;
+		frequency?: FrequencyConfig;
+	}): Promise<string[]> {
+		// Always start from a clean slate so edits never leave orphans behind.
+		await this.cancelHabitNotifications(habit.id);
+
+		const frequency = habit.frequency;
+		const baseTime = habit.notificationTime || "09:00";
+		const ids: string[] = [];
+
+		const scheduleDaily = async (timeString: string, label?: string) => {
+			const [hour, minute] = timeString.split(":").map(Number);
+			const id = await this.scheduleNotification(
+				"🎯 Habit Reminder",
+				label
+					? `Time to complete: ${habit.name} ${label}`
+					: `Time to complete: ${habit.name}`,
+				{
+					type: Notifications.SchedulableTriggerInputTypes.DAILY,
+					hour,
+					minute,
+				},
+				{ habitId: habit.id, type: "habit_reminder" }
+			);
+			ids.push(id);
+		};
+
+		if (frequency?.type === "times_per_day") {
+			const slots = this.expandDailyWindow(
+				frequency.startTime || baseTime,
+				frequency.endTime || "21:00",
+				frequency.intervalMinutes,
+				frequency.value || 1
+			);
+			for (let i = 0; i < slots.length; i++) {
+				await scheduleDaily(slots[i], `(${i + 1}/${slots.length})`);
+			}
+		} else if (frequency?.type === "specific_days" && frequency.days?.length) {
+			const [hour, minute] = baseTime.split(":").map(Number);
+			for (const day of frequency.days) {
+				const id = await this.scheduleNotification(
+					"🎯 Habit Reminder",
+					`Time to complete: ${habit.name}`,
+					{
+						type: Notifications.SchedulableTriggerInputTypes.WEEKLY,
+						// expo-notifications weekday is 1-7 with 1 = Sunday
+						weekday: day + 1,
+						hour,
+						minute,
+					},
+					{ habitId: habit.id, type: "habit_reminder" }
+				);
+				ids.push(id);
+			}
+		} else {
+			await scheduleDaily(baseTime);
+		}
+
+		return ids;
+	}
+
+	// Cancel every reminder belonging to a habit, found by its data payload.
+	static async cancelHabitNotifications(habitId: string): Promise<void> {
+		const scheduled = await this.getAllScheduledNotifications();
+		for (const notif of scheduled) {
+			const data = notif.content.data;
+			if (data?.type === "habit_reminder" && data?.habitId === habitId) {
+				await this.cancelNotification(notif.identifier);
+			}
+		}
+	}
+
+	// Cancel every habit reminder, leaving bills/water/study/timers untouched.
+	static async cancelAllHabitNotifications(): Promise<void> {
+		const scheduled = await this.getAllScheduledNotifications();
+		for (const notif of scheduled) {
+			if (notif.content.data?.type === "habit_reminder") {
+				await this.cancelNotification(notif.identifier);
+			}
+		}
 	}
 
 	static async scheduleInstantNotification(

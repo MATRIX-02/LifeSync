@@ -5,7 +5,14 @@ import { useAuthStore } from "../context/authStore";
 import { useFinanceStore } from "../context/financeStoreDB";
 import { useHabitStore } from "../context/habitStoreDB";
 import { useWorkoutStore } from "../context/workoutStoreDB";
-import { SyncStatus } from "../services/syncService";
+import { buildSyncPayload } from "../services/syncPayload";
+import {
+	getAutoSyncEnabled,
+	isAutoSyncRunning,
+	startAutoSync,
+	stopAutoSync,
+	SyncStatus,
+} from "../services/syncService";
 
 interface SyncState {
 	status: SyncStatus;
@@ -167,6 +174,39 @@ export const useSyncManager = () => {
 			subscription.remove();
 		};
 	}, [user?.id, fetchFromCloud]);
+
+	// Resume auto-sync on app launch if the user had it enabled.
+	// The timer lives in module scope in syncService and does not survive a
+	// process restart, so without this it silently stays off after every
+	// cold start until the user toggles it again in Settings.
+	useEffect(() => {
+		if (!isInitialized || !user?.id) return;
+		let cancelled = false;
+
+		(async () => {
+			if (isAutoSyncRunning()) return;
+			const enabled = await getAutoSyncEnabled();
+			if (!enabled || cancelled || isAutoSyncRunning()) return;
+			try {
+				// immediate=false: the initial cloud fetch already ran on login.
+				await startAutoSync(user.id, buildSyncPayload, false);
+				console.log("🔁 Auto-sync resumed from saved preference");
+			} catch (err) {
+				console.error("Failed to resume auto-sync:", err);
+			}
+		})();
+
+		return () => {
+			cancelled = true;
+		};
+	}, [isInitialized, user?.id]);
+
+	// Stop auto-sync on sign-out so it can't keep pushing under a stale user id.
+	useEffect(() => {
+		if (isInitialized && !user && isAutoSyncRunning()) {
+			stopAutoSync(false);
+		}
+	}, [isInitialized, user]);
 
 	// Manual refresh
 	const refresh = useCallback(async () => {

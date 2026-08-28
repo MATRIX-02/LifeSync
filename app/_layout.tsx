@@ -26,7 +26,7 @@ import { NotificationService } from "@/src/services/notificationService";
 
 export {
 	// Catch any errors thrown by the Layout component.
-	ErrorBoundary
+	ErrorBoundary,
 } from "expo-router";
 
 export const unstable_settings = {
@@ -65,13 +65,14 @@ export default function RootLayout() {
 			if (permitted) {
 				console.log("✅ Notification permissions granted");
 
-				// IMPORTANT: Cancel all scheduled notifications first to prevent duplicates
-				// This ensures we don't create new notifications if they already exist
+				// Clear only habit reminders before rescheduling them. Cancelling
+				// *all* notifications here would also wipe bill, water, study and
+				// timer reminders, which nothing reschedules.
 				try {
-					await NotificationService.cancelAllNotifications();
-					console.log("🗑️  Cleared all previously scheduled notifications");
+					await NotificationService.cancelAllHabitNotifications();
+					console.log("🗑️  Cleared previously scheduled habit reminders");
 				} catch (error) {
-					console.error("Failed to clear old notifications:", error);
+					console.error("Failed to clear old habit reminders:", error);
 				}
 
 				// Reschedule notifications for all habits with notifications enabled
@@ -86,14 +87,10 @@ export default function RootLayout() {
 
 				for (const habit of activeHabits) {
 					try {
-						const notificationId =
-							await NotificationService.scheduleHabitReminder(
-								habit.id,
-								habit.name,
-								habit.notificationTime!
-							);
-						// Store the notification ID in the habit for future reference
-						useHabitStore.getState().updateHabit(habit.id, { notificationId });
+						// No id is persisted: reminders are cancelled by matching the
+						// notification's `data.habitId`, so this avoids a DB write per
+						// habit on every app launch.
+						await NotificationService.scheduleHabitReminders(habit);
 					} catch (error) {
 						console.error(
 							`Failed to reschedule notification for ${habit.name}:`,

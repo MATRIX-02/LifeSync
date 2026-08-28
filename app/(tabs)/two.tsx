@@ -11,6 +11,7 @@ import {
 	deleteAllCloudData,
 	getAutoSyncInterval,
 	getSyncStatus,
+	isAutoSyncRunning,
 	setAutoSyncInterval,
 	startAutoSync,
 	stopAutoSync,
@@ -21,6 +22,7 @@ import {
 	syncStudyToCloud,
 	syncWorkoutsToCloud,
 } from "@/src/services/syncService";
+import { buildSyncPayload } from "@/src/services/syncPayload";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system/legacy";
@@ -99,52 +101,13 @@ export default function SettingsScreen() {
 				setAutoSyncIntervalState(m);
 			})
 			.catch((e) => console.error(e));
+		// The timer lives in syncService module scope, so read the real state
+		// instead of assuming "off" every time this screen mounts.
+		setAutoSyncRunning(isAutoSyncRunning());
 		return () => {
 			mounted = false;
 		};
 	}, []);
-
-	const buildSyncPayload = async () => {
-		return {
-			profile: authProfile || habitStore.profile || null,
-			habits: {
-				habits: habitStore.habits || [],
-				logs: habitStore.logs || [],
-				settings: habitStore.settings,
-			},
-			workouts: {
-				fitnessProfile: workoutStore.fitnessProfile,
-				workoutPlans: workoutStore.workoutPlans,
-				workoutSessions: workoutStore.workoutSessions,
-				personalRecords: workoutStore.personalRecords,
-				bodyMeasurements: workoutStore.bodyMeasurements,
-				bodyWeights: workoutStore.bodyWeights,
-				customExercises: workoutStore.customExercises,
-			},
-			finance: {
-				accounts: financeStore.accounts || [],
-				transactions: financeStore.transactions || [],
-				recurringTransactions: financeStore.recurringTransactions || [],
-				budgets: financeStore.budgets || [],
-				savingsGoals: financeStore.savingsGoals || [],
-				billReminders: financeStore.billReminders || [],
-				debts: financeStore.debts || [],
-				splitGroups: financeStore.splitGroups || [],
-				currency: financeStore.currency || "INR",
-			},
-			study: {
-				studyGoals: studyStore.studyGoals,
-				subjects: studyStore.subjects,
-				studySessions: studyStore.studySessions,
-				flashcardDecks: studyStore.flashcardDecks,
-				flashcards: studyStore.flashcards,
-				revisionSchedule: studyStore.revisionSchedule,
-				mockTests: studyStore.mockTests,
-				dailyPlans: studyStore.dailyPlans,
-				studyNotes: studyStore.studyNotes,
-			},
-		};
-	};
 
 	const handleChooseInterval = () => {
 		setTempInterval(autoSyncInterval ?? 5);
@@ -228,48 +191,15 @@ export default function SettingsScreen() {
 		setIsSyncing(module);
 		try {
 			if (module === "all") {
-				const results = await syncAllToCloud(user.id, {
-					habits: {
-						habits: habitStore.habits,
-						logs: habitStore.logs,
-						settings: habitStore.settings,
-					},
-					workouts: {
-						fitnessProfile: workoutStore.fitnessProfile,
-						bodyMeasurements: workoutStore.bodyMeasurements,
-						bodyWeights: workoutStore.bodyWeights,
-						customExercises: workoutStore.customExercises,
-						workoutPlans: workoutStore.workoutPlans,
-						workoutSessions: workoutStore.workoutSessions,
-						personalRecords: workoutStore.personalRecords,
-					},
-					finance: {
-						accounts: financeStore.accounts,
-						transactions: financeStore.transactions,
-						recurringTransactions: financeStore.recurringTransactions,
-						budgets: financeStore.budgets,
-						savingsGoals: financeStore.savingsGoals,
-						billReminders: financeStore.billReminders,
-						debts: financeStore.debts,
-					},
-					study: {
-						studyGoals: studyStore.studyGoals,
-						subjects: studyStore.subjects,
-						studySessions: studyStore.studySessions,
-						flashcardDecks: studyStore.flashcardDecks,
-						flashcards: studyStore.flashcards,
-						revisionSchedule: studyStore.revisionSchedule,
-						mockTests: studyStore.mockTests,
-						dailyPlans: studyStore.dailyPlans,
-					},
-				});
+				// Same payload auto-sync uses, so "Sync All" can't push less.
+				const results = await syncAllToCloud(user.id, await buildSyncPayload());
 				const failed = results.filter((r) => !r.success);
 				if (failed.length > 0) {
 					Alert.alert(
 						"Partial Sync",
-						`Some modules failed to sync: ${failed
-							.map((f) => f.module)
-							.join(", ")}`
+						`Some modules failed to sync:\n\n${failed
+							.map((f) => `• ${f.module}: ${f.error || "unknown error"}`)
+							.join("\n")}`
 					);
 				} else {
 					Alert.alert("Success", "All data synced to cloud!");

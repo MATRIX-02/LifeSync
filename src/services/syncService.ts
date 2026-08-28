@@ -172,35 +172,45 @@ export const uploadAvatar = async (
 export const syncProfileToCloud = async (
 	userId: string,
 	profileData: {
-		name: string;
+		// local UserProfile shape
+		name?: string;
 		email?: string;
 		bio?: string;
 		avatar?: string;
+		// Supabase `profiles` row shape (auto-sync passes this)
+		full_name?: string | null;
+		avatar_url?: string | null;
 	}
 ): Promise<SyncResult> => {
 	try {
-		let avatarUrl = profileData.avatar;
+		// Accept either the local UserProfile shape or a raw `profiles` row.
+		const name = profileData.name ?? profileData.full_name ?? undefined;
+		const avatar = profileData.avatar ?? profileData.avatar_url ?? undefined;
+		let avatarUrl = avatar;
 
 		// Upload avatar if it's a local file
 		if (
-			profileData.avatar &&
-			(profileData.avatar.startsWith("file://") ||
-				profileData.avatar.startsWith("content://"))
+			avatar &&
+			(avatar.startsWith("file://") || avatar.startsWith("content://"))
 		) {
-			const uploadedUrl = await uploadAvatar(userId, profileData.avatar);
+			const uploadedUrl = await uploadAvatar(userId, avatar);
 			if (uploadedUrl) {
 				avatarUrl = uploadedUrl;
 			}
 		}
 
+		// Only send fields we actually have, so a partial payload never blanks
+		// out columns that already hold good data.
+		const payload: Record<string, any> = {
+			updated_at: new Date().toISOString(),
+		};
+		if (name !== undefined) payload.full_name = name;
+		if (profileData.bio !== undefined) payload.bio = profileData.bio;
+		if (avatarUrl !== undefined) payload.avatar_url = avatarUrl;
+
 		const { error } = await (supabase.from("profiles") as any)
-			.update({
-				full_name: profileData.name,
-				bio: profileData.bio,
-				avatar_url: avatarUrl,
-				updated_at: new Date().toISOString(),
-			})
-			.eq("user_id", userId);
+			.update(payload)
+			.eq("id", userId);
 
 		if (error) throw error;
 
@@ -222,8 +232,8 @@ export const fetchProfileFromCloud = async (
 		const { data, error } = await supabase
 			.from("profiles")
 			.select("*")
-			.eq("user_id", userId)
-			.single();
+			.eq("id", userId)
+			.maybeSingle();
 
 		if (error) throw error;
 		return { data };
@@ -270,6 +280,10 @@ export const syncHabitsToCloud = async (
 					frequency_value: frequency?.value || 1,
 					frequency_second_value: frequency?.secondValue,
 					frequency_days: frequency?.days || [],
+					// "times_per_day" window
+					frequency_start_time: frequency?.startTime ?? null,
+					frequency_end_time: frequency?.endTime ?? null,
+					frequency_interval_minutes: frequency?.intervalMinutes ?? null,
 					user_id: userId,
 					synced_at: new Date().toISOString(),
 					// Map isArchived to archived
@@ -368,6 +382,10 @@ export const fetchHabitsFromCloud = async (
 				value: converted.frequencyValue || 1,
 				secondValue: converted.frequencySecondValue,
 				days: converted.frequencyDays || [],
+				// "times_per_day" window
+				startTime: converted.frequencyStartTime ?? undefined,
+				endTime: converted.frequencyEndTime ?? undefined,
+				intervalMinutes: converted.frequencyIntervalMinutes ?? undefined,
 			};
 			// Map archived back to isArchived
 			converted.isArchived = converted.archived || false;
@@ -376,6 +394,9 @@ export const fetchHabitsFromCloud = async (
 			delete converted.frequencyValue;
 			delete converted.frequencySecondValue;
 			delete converted.frequencyDays;
+			delete converted.frequencyStartTime;
+			delete converted.frequencyEndTime;
+			delete converted.frequencyIntervalMinutes;
 			delete converted.archived;
 			return converted;
 		});
@@ -1240,24 +1261,62 @@ export const getSyncStatus = async (
 
 // ============ AUTO-SYNC / SCHEDULER ============
 const AUTO_SYNC_INTERVAL_KEY = "auto_sync_interval_minutes";
+const AUTO_SYNC_ENABLED_KEY = "auto_sync_enabled";
 const DEFAULT_AUTO_SYNC_MINUTES = 5;
 let autoSyncTimer: ReturnType<typeof setInterval> | null = null;
 let appStateSubscription: any = null;
 let autoSyncUserId: string | null = null;
 let autoSyncGetData: (() => Promise<any>) | null = null;
+let autoSyncInFlight = false;
+let autoSyncLastRunAt = 0;
+
+export const isAutoSyncRunning = (): boolean => autoSyncTimer !== null;
+
+export const getAutoSyncEnabled = async (): Promise<boolean> => {
+	try {
+		return (await AsyncStorage.getItem(AUTO_SYNC_ENABLED_KEY)) === "true";
+	} catch {
+		return false;
+	}
+};
+
+// Single entry point for every auto-sync run. Skips overlapping runs so a slow
+// sync can't stack up behind the interval timer.
+const runAutoSync = async (reason: string): Promise<void> => {
+	if (!autoSyncUserId || !autoSyncGetData) return;
+	if (autoSyncInFlight) {
+		console.log(`autoSync (${reason}) skipped: a sync is already running`);
+		return;
+	}
+	autoSyncInFlight = true;
+	try {
+		const data = await autoSyncGetData();
+		const results = await syncAllToCloud(autoSyncUserId, data);
+		autoSyncLastRunAt = Date.now();
+		const failed = results.filter((r) => !r.success);
+		if (failed.length > 0) {
+			console.error(
+				`autoSync (${reason}) partial failure:`,
+				failed.map((f) => `${f.module}: ${f.error}`).join("; ")
+			);
+		}
+	} catch (err) {
+		console.error(`autoSync (${reason}) failed:`, err);
+	} finally {
+		autoSyncInFlight = false;
+	}
+};
 
 const handleAppStateChange = async (nextAppState: string) => {
-	if (nextAppState === "active") {
-		// On resume, run an immediate sync if configured
-		if (autoSyncUserId && autoSyncGetData) {
-			try {
-				const data = await autoSyncGetData();
-				await syncAllToCloud(autoSyncUserId, data);
-			} catch (err) {
-				console.error("autoSync (on resume) failed:", err);
-			}
-		}
-	}
+	if (nextAppState !== "active") return;
+	if (!autoSyncUserId || !autoSyncGetData) return;
+
+	// Only sync on resume if we're actually due — otherwise every app switch
+	// fires a full push of every module.
+	const minutes = await getAutoSyncInterval();
+	if (Date.now() - autoSyncLastRunAt < minutes * 60 * 1000) return;
+
+	await runAutoSync("on resume");
 };
 
 export const getAutoSyncInterval = async (): Promise<number> => {
@@ -1276,10 +1335,13 @@ export const setAutoSyncInterval = async (minutes: number): Promise<void> => {
 	if (!minutes || minutes <= 0) throw new Error("Interval must be > 0 minutes");
 	await AsyncStorage.setItem(AUTO_SYNC_INTERVAL_KEY, String(minutes));
 
-	// If auto-sync is running, restart timer with new interval
+	// If auto-sync is running, restart timer with new interval.
+	// Capture the config BEFORE stopping — stopAutoSync() clears these.
 	if (autoSyncTimer && autoSyncUserId && autoSyncGetData) {
-		stopAutoSync();
-		startAutoSync(autoSyncUserId, autoSyncGetData, false).catch((e) =>
+		const userId = autoSyncUserId;
+		const getDataFn = autoSyncGetData;
+		stopAutoSync(false);
+		startAutoSync(userId, getDataFn, false).catch((e) =>
 			console.error("Failed to restart auto-sync after interval change:", e)
 		);
 	}
@@ -1295,7 +1357,7 @@ export const startAutoSync = async (
 		throw new Error("getDataFn is required to fetch current data for sync");
 
 	// stop any existing timer
-	stopAutoSync();
+	stopAutoSync(false);
 
 	autoSyncUserId = userId;
 	autoSyncGetData = getDataFn;
@@ -1303,24 +1365,22 @@ export const startAutoSync = async (
 	const minutes = await getAutoSyncInterval();
 	const ms = minutes * 60 * 1000;
 
-	if (immediate) {
-		try {
-			const data = await getDataFn();
-			await syncAllToCloud(userId, data);
-		} catch (err) {
-			console.error("autoSync immediate sync failed:", err);
-		}
+	// Remember the choice so auto-sync can be resumed on the next app launch.
+	try {
+		await AsyncStorage.setItem(AUTO_SYNC_ENABLED_KEY, "true");
+	} catch (err) {
+		console.warn("Failed to persist auto-sync enabled flag:", err);
 	}
 
-	autoSyncTimer = setInterval(async () => {
-		if (!autoSyncUserId || !autoSyncGetData) return;
-		try {
-			const data = await autoSyncGetData();
-			await syncAllToCloud(autoSyncUserId, data);
-		} catch (err) {
-			console.error("autoSync interval sync failed:", err);
-		}
+	// Set the timer up front so isAutoSyncRunning() is already true while the
+	// immediate sync is in flight.
+	autoSyncTimer = setInterval(() => {
+		runAutoSync("interval");
 	}, ms);
+
+	if (immediate) {
+		await runAutoSync("immediate");
+	}
 
 	// Listen for app resume to trigger immediate sync
 	try {
@@ -1332,7 +1392,15 @@ export const startAutoSync = async (
 	}
 };
 
-export const stopAutoSync = (): void => {
+// `persistPreference` defaults to true (an explicit user "Stop"). Pass false
+// for internal teardown — sign-out, an interval change — so the user's
+// auto-sync preference survives and is restored on the next launch.
+export const stopAutoSync = (persistPreference: boolean = true): void => {
+	if (persistPreference) {
+		AsyncStorage.setItem(AUTO_SYNC_ENABLED_KEY, "false").catch((err) =>
+			console.warn("Failed to persist auto-sync disabled flag:", err)
+		);
+	}
 	if (autoSyncTimer) {
 		clearInterval(autoSyncTimer as any);
 		autoSyncTimer = null;

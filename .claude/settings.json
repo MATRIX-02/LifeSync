@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run *)",
+      "Read(//c/Users/mayan/AppData/Local/Android/Sdk/**)"
+    ]
+  }
+}

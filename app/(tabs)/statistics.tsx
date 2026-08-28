@@ -1,6 +1,7 @@
 import { Alert } from "@/src/components/CustomAlert";
 import { useHabitStore } from "@/src/context/habitStoreDB";
 import { Theme, useColors, useTheme } from "@/src/context/themeContext";
+import { NotificationService } from "@/src/services/notificationService";
 import { FrequencyType, HabitType, TargetType } from "@/src/types";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import DateTimePicker from "@react-native-community/datetimepicker";
@@ -212,6 +213,25 @@ export default function StatisticsScreen() {
 	const [showFrequencyPicker, setShowFrequencyPicker] = useState(false);
 	const [showTimePicker, setShowTimePicker] = useState(false);
 
+	// "times_per_day" window: from/to and the gap between occurrences
+	const [editWindowStart, setEditWindowStart] = useState("09:00");
+	const [editWindowEnd, setEditWindowEnd] = useState("21:00");
+	const [editWindowInterval, setEditWindowInterval] = useState(120);
+	const [showWindowPicker, setShowWindowPicker] = useState<
+		"start" | "end" | null
+	>(null);
+
+	const editWindowSlots = useMemo(
+		() =>
+			NotificationService.expandDailyWindow(
+				editWindowStart,
+				editWindowEnd,
+				editWindowInterval,
+				editFrequencyValue
+			),
+		[editWindowStart, editWindowEnd, editWindowInterval, editFrequencyValue]
+	);
+
 	// Habit type fields
 	const [editHabitType, setEditHabitType] = useState<HabitType>("yesno");
 	const [editUnit, setEditUnit] = useState("");
@@ -312,10 +332,14 @@ export default function StatisticsScreen() {
 			setEditUnit(selectedHabit.unit || "");
 			setEditTarget(selectedHabit.target?.toString() || "");
 			setEditTargetType(selectedHabit.targetType || "at_least");
+			setEditWindowStart(selectedHabit.frequency?.startTime || reminderTimeStr);
+			setEditWindowEnd(selectedHabit.frequency?.endTime || "21:00");
+			setEditWindowInterval(selectedHabit.frequency?.intervalMinutes || 120);
 			// Reset pickers
 			setShowIconPicker(false);
 			setShowFrequencyPicker(false);
 			setShowTimePicker(false);
+			setShowWindowPicker(null);
 			editModalTranslateY.setValue(0);
 		}
 	}, [showEditModal, selectedHabit]);
@@ -621,6 +645,47 @@ export default function StatisticsScreen() {
 			return;
 		}
 
+		const updatedFrequency = {
+			type: editFrequencyType,
+			value:
+				editFrequencyType === "times_per_day"
+					? editWindowSlots.length
+					: editFrequencyValue,
+			secondValue:
+				editFrequencyType === "times_in_x_days"
+					? editFrequencySecondValue
+					: undefined,
+			days:
+				editFrequencyType === "specific_days" ? editSelectedDays : undefined,
+			startTime:
+				editFrequencyType === "times_per_day" ? editWindowStart : undefined,
+			endTime:
+				editFrequencyType === "times_per_day" ? editWindowEnd : undefined,
+			intervalMinutes:
+				editFrequencyType === "times_per_day" ? editWindowInterval : undefined,
+		};
+
+		const notificationTime =
+			editFrequencyType === "times_per_day"
+				? editWindowStart
+				: editReminderTime;
+
+		// Reminders are rescheduled from scratch so time/frequency edits take
+		// effect immediately instead of waiting for the next app launch.
+		try {
+			await NotificationService.cancelHabitNotifications(selectedHabit.id);
+			if (editReminderEnabled) {
+				await NotificationService.scheduleHabitReminders({
+					id: selectedHabit.id,
+					name: editName.trim(),
+					notificationTime,
+					frequency: updatedFrequency,
+				});
+			}
+		} catch (error) {
+			console.error("Failed to reschedule habit reminders:", error);
+		}
+
 		await updateHabit(selectedHabit.id, {
 			name: editName.trim(),
 			description: editDescription.trim(),
@@ -633,18 +698,9 @@ export default function StatisticsScreen() {
 			target:
 				editHabitType === "measurable" ? parseFloat(editTarget) : undefined,
 			targetType: editHabitType === "measurable" ? editTargetType : undefined,
-			frequency: {
-				type: editFrequencyType,
-				value: editFrequencyValue,
-				secondValue:
-					editFrequencyType === "times_in_x_days"
-						? editFrequencySecondValue
-						: undefined,
-				days:
-					editFrequencyType === "specific_days" ? editSelectedDays : undefined,
-			},
+			frequency: updatedFrequency,
 			reminderTime: editReminderTime,
-			notificationTime: editReminderTime,
+			notificationTime,
 			reminderEnabled: editReminderEnabled,
 			notificationEnabled: editReminderEnabled,
 			alarmEnabled: editAlarmEnabled,
@@ -1130,953 +1186,1122 @@ export default function StatisticsScreen() {
 				transparent={true}
 				onRequestClose={() => setShowEditModal(false)}
 			>
-				<TouchableWithoutFeedback onPress={() => setShowEditModal(false)}>
-					<View style={styles.modalOverlay}>
-						<TouchableWithoutFeedback>
-							<Animated.View
-								style={[
-									styles.modalContent,
-									{ transform: [{ translateY: editModalTranslateY }] },
-								]}
-							>
-								{/* Drag Handle */}
-								<View
-									{...editModalPanResponder.panHandlers}
-									style={styles.dragHandleContainer}
-								>
-									<View style={styles.dragHandle} />
-								</View>
+				{/* Backdrop is a sibling of the sheet: wrapping the sheet in a
+				    TouchableWithoutFeedback makes it claim the touch responder and
+				    swallows scroll gestures started on the sheet's background. */}
+				<View style={styles.modalOverlay}>
+					<TouchableWithoutFeedback onPress={() => setShowEditModal(false)}>
+						<View style={StyleSheet.absoluteFill} />
+					</TouchableWithoutFeedback>
+					<Animated.View
+						style={[
+							styles.modalContent,
+							{ transform: [{ translateY: editModalTranslateY }] },
+						]}
+					>
+						{/* Drag Handle */}
+						<View
+							{...editModalPanResponder.panHandlers}
+							style={styles.dragHandleContainer}
+						>
+							<View style={styles.dragHandle} />
+						</View>
 
-								<View style={styles.modalHeader}>
-									<Text style={styles.modalTitle}>Edit Habit</Text>
-									<TouchableOpacity onPress={() => setShowEditModal(false)}>
-										<Ionicons name="close" size={24} color={theme.text} />
+						<View style={styles.modalHeader}>
+							<Text style={styles.modalTitle}>Edit Habit</Text>
+							<TouchableOpacity onPress={() => setShowEditModal(false)}>
+								<Ionicons name="close" size={24} color={theme.text} />
+							</TouchableOpacity>
+						</View>
+
+						<ScrollView showsVerticalScrollIndicator={false}>
+							{/* Basic Info Section */}
+							<Text style={styles.sectionLabel}>BASIC INFO</Text>
+
+							{/* Habit Name */}
+							<View style={styles.inputGroup}>
+								<Text style={styles.inputLabel}>Name</Text>
+								<TextInput
+									style={styles.textInput}
+									value={editName}
+									onChangeText={setEditName}
+									placeholder="Habit name"
+									placeholderTextColor={theme.textMuted}
+								/>
+							</View>
+
+							{/* Question */}
+							<View style={styles.inputGroup}>
+								<Text style={styles.inputLabel}>Question (optional)</Text>
+								<TextInput
+									style={styles.textInput}
+									value={editQuestion}
+									onChangeText={setEditQuestion}
+									placeholder={`Did you complete ${
+										editName || "this habit"
+									} today?`}
+									placeholderTextColor={theme.textMuted}
+								/>
+								<Text style={styles.inputHint}>
+									Shown in notifications and check-ins
+								</Text>
+							</View>
+
+							{/* Description */}
+							<View style={styles.inputGroup}>
+								<Text style={styles.inputLabel}>Description (optional)</Text>
+								<TextInput
+									style={[styles.textInput, styles.textArea]}
+									value={editDescription}
+									onChangeText={setEditDescription}
+									placeholder="Add a description..."
+									placeholderTextColor={theme.textMuted}
+									multiline
+									numberOfLines={3}
+								/>
+							</View>
+
+							{/* Habit Type Section */}
+							<Text style={styles.sectionLabel}>HABIT TYPE</Text>
+							<View style={styles.inputGroup}>
+								<View style={{ flexDirection: "row", gap: 12 }}>
+									<TouchableOpacity
+										style={{
+											flex: 1,
+											padding: 16,
+											borderRadius: 14,
+											backgroundColor:
+												editHabitType === "yesno"
+													? editColor + "20"
+													: theme.surfaceLight,
+											borderWidth: 2,
+											borderColor:
+												editHabitType === "yesno" ? editColor : theme.border,
+											alignItems: "center",
+										}}
+										onPress={() => setEditHabitType("yesno")}
+									>
+										<Ionicons
+											name="checkmark-circle"
+											size={24}
+											color={
+												editHabitType === "yesno" ? editColor : theme.textMuted
+											}
+										/>
+										<Text
+											style={{
+												marginTop: 8,
+												fontWeight: "600",
+												color:
+													editHabitType === "yesno" ? editColor : theme.text,
+											}}
+										>
+											Yes/No
+										</Text>
+										<Text
+											style={{
+												fontSize: 11,
+												color: theme.textMuted,
+												marginTop: 2,
+											}}
+										>
+											Did you do it?
+										</Text>
+									</TouchableOpacity>
+									<TouchableOpacity
+										style={{
+											flex: 1,
+											padding: 16,
+											borderRadius: 14,
+											backgroundColor:
+												editHabitType === "measurable"
+													? editColor + "20"
+													: theme.surfaceLight,
+											borderWidth: 2,
+											borderColor:
+												editHabitType === "measurable"
+													? editColor
+													: theme.border,
+											alignItems: "center",
+										}}
+										onPress={() => setEditHabitType("measurable")}
+									>
+										<Ionicons
+											name="bar-chart"
+											size={24}
+											color={
+												editHabitType === "measurable"
+													? editColor
+													: theme.textMuted
+											}
+										/>
+										<Text
+											style={{
+												marginTop: 8,
+												fontWeight: "600",
+												color:
+													editHabitType === "measurable"
+														? editColor
+														: theme.text,
+											}}
+										>
+											Measurable
+										</Text>
+										<Text
+											style={{
+												fontSize: 11,
+												color: theme.textMuted,
+												marginTop: 2,
+											}}
+										>
+											Track a value
+										</Text>
 									</TouchableOpacity>
 								</View>
+							</View>
 
-								<ScrollView showsVerticalScrollIndicator={false}>
-									{/* Basic Info Section */}
-									<Text style={styles.sectionLabel}>BASIC INFO</Text>
-
-									{/* Habit Name */}
+							{/* Measurable Habit Fields */}
+							{editHabitType === "measurable" && (
+								<>
 									<View style={styles.inputGroup}>
-										<Text style={styles.inputLabel}>Name</Text>
+										<Text style={styles.inputLabel}>Unit *</Text>
 										<TextInput
 											style={styles.textInput}
-											value={editName}
-											onChangeText={setEditName}
-											placeholder="Habit name"
+											value={editUnit}
+											onChangeText={setEditUnit}
+											placeholder="e.g., glasses, pages, miles"
 											placeholderTextColor={theme.textMuted}
 										/>
 									</View>
 
-									{/* Question */}
 									<View style={styles.inputGroup}>
-										<Text style={styles.inputLabel}>Question (optional)</Text>
+										<Text style={styles.inputLabel}>Target *</Text>
 										<TextInput
 											style={styles.textInput}
-											value={editQuestion}
-											onChangeText={setEditQuestion}
-											placeholder={`Did you complete ${
-												editName || "this habit"
-											} today?`}
+											value={editTarget}
+											onChangeText={setEditTarget}
+											placeholder="e.g., 8"
 											placeholderTextColor={theme.textMuted}
-										/>
-										<Text style={styles.inputHint}>
-											Shown in notifications and check-ins
-										</Text>
-									</View>
-
-									{/* Description */}
-									<View style={styles.inputGroup}>
-										<Text style={styles.inputLabel}>
-											Description (optional)
-										</Text>
-										<TextInput
-											style={[styles.textInput, styles.textArea]}
-											value={editDescription}
-											onChangeText={setEditDescription}
-											placeholder="Add a description..."
-											placeholderTextColor={theme.textMuted}
-											multiline
-											numberOfLines={3}
+											keyboardType="numeric"
 										/>
 									</View>
 
-									{/* Habit Type Section */}
-									<Text style={styles.sectionLabel}>HABIT TYPE</Text>
 									<View style={styles.inputGroup}>
-										<View style={{ flexDirection: "row", gap: 12 }}>
-											<TouchableOpacity
-												style={{
-													flex: 1,
-													padding: 16,
-													borderRadius: 14,
-													backgroundColor:
-														editHabitType === "yesno"
-															? editColor + "20"
-															: theme.surfaceLight,
-													borderWidth: 2,
-													borderColor:
-														editHabitType === "yesno"
-															? editColor
-															: theme.border,
-													alignItems: "center",
-												}}
-												onPress={() => setEditHabitType("yesno")}
-											>
-												<Ionicons
-													name="checkmark-circle"
-													size={24}
-													color={
-														editHabitType === "yesno"
-															? editColor
-															: theme.textMuted
-													}
-												/>
-												<Text
-													style={{
-														marginTop: 8,
-														fontWeight: "600",
-														color:
-															editHabitType === "yesno"
-																? editColor
-																: theme.text,
-													}}
-												>
-													Yes/No
-												</Text>
-												<Text
-													style={{
-														fontSize: 11,
-														color: theme.textMuted,
-														marginTop: 2,
-													}}
-												>
-													Did you do it?
-												</Text>
-											</TouchableOpacity>
-											<TouchableOpacity
-												style={{
-													flex: 1,
-													padding: 16,
-													borderRadius: 14,
-													backgroundColor:
-														editHabitType === "measurable"
-															? editColor + "20"
-															: theme.surfaceLight,
-													borderWidth: 2,
-													borderColor:
-														editHabitType === "measurable"
-															? editColor
-															: theme.border,
-													alignItems: "center",
-												}}
-												onPress={() => setEditHabitType("measurable")}
-											>
-												<Ionicons
-													name="bar-chart"
-													size={24}
-													color={
-														editHabitType === "measurable"
-															? editColor
-															: theme.textMuted
-													}
-												/>
-												<Text
-													style={{
-														marginTop: 8,
-														fontWeight: "600",
-														color:
-															editHabitType === "measurable"
-																? editColor
-																: theme.text,
-													}}
-												>
-													Measurable
-												</Text>
-												<Text
-													style={{
-														fontSize: 11,
-														color: theme.textMuted,
-														marginTop: 2,
-													}}
-												>
-													Track a value
-												</Text>
-											</TouchableOpacity>
-										</View>
-									</View>
-
-									{/* Measurable Habit Fields */}
-									{editHabitType === "measurable" && (
-										<>
-											<View style={styles.inputGroup}>
-												<Text style={styles.inputLabel}>Unit *</Text>
-												<TextInput
-													style={styles.textInput}
-													value={editUnit}
-													onChangeText={setEditUnit}
-													placeholder="e.g., glasses, pages, miles"
-													placeholderTextColor={theme.textMuted}
-												/>
-											</View>
-
-											<View style={styles.inputGroup}>
-												<Text style={styles.inputLabel}>Target *</Text>
-												<TextInput
-													style={styles.textInput}
-													value={editTarget}
-													onChangeText={setEditTarget}
-													placeholder="e.g., 8"
-													placeholderTextColor={theme.textMuted}
-													keyboardType="numeric"
-												/>
-											</View>
-
-											<View style={styles.inputGroup}>
-												<Text style={styles.inputLabel}>Target Type</Text>
-												<View style={{ flexDirection: "row", gap: 8 }}>
-													{[
-														{
-															value: "at_least" as TargetType,
-															label: "At Least",
-														},
-														{
-															value: "at_most" as TargetType,
-															label: "At Most",
-														},
-														{
-															value: "exactly" as TargetType,
-															label: "Exactly",
-														},
-													].map((option) => (
-														<TouchableOpacity
-															key={option.value}
-															style={{
-																flex: 1,
-																paddingVertical: 12,
-																borderRadius: 10,
-																backgroundColor:
-																	editTargetType === option.value
-																		? editColor + "20"
-																		: theme.surfaceLight,
-																borderWidth: 1,
-																borderColor:
-																	editTargetType === option.value
-																		? editColor
-																		: theme.border,
-																alignItems: "center",
-															}}
-															onPress={() => setEditTargetType(option.value)}
-														>
-															<Text
-																style={{
-																	fontSize: 13,
-																	fontWeight: "500",
-																	color:
-																		editTargetType === option.value
-																			? editColor
-																			: theme.textSecondary,
-																}}
-															>
-																{option.label}
-															</Text>
-														</TouchableOpacity>
-													))}
-												</View>
-											</View>
-										</>
-									)}
-
-									{/* Appearance Section */}
-									<Text style={styles.sectionLabel}>APPEARANCE</Text>
-
-									{/* Color Selection */}
-									<View style={styles.inputGroup}>
-										<Text style={styles.inputLabel}>Color</Text>
-										<View style={styles.colorGrid}>
-											{HABIT_COLORS.map((color) => (
+										<Text style={styles.inputLabel}>Target Type</Text>
+										<View style={{ flexDirection: "row", gap: 8 }}>
+											{[
+												{
+													value: "at_least" as TargetType,
+													label: "At Least",
+												},
+												{
+													value: "at_most" as TargetType,
+													label: "At Most",
+												},
+												{
+													value: "exactly" as TargetType,
+													label: "Exactly",
+												},
+											].map((option) => (
 												<TouchableOpacity
-													key={color}
-													style={[
-														styles.colorOption,
-														{ backgroundColor: color },
-														editColor === color && styles.colorOptionSelected,
-													]}
-													onPress={() => setEditColor(color)}
+													key={option.value}
+													style={{
+														flex: 1,
+														paddingVertical: 12,
+														borderRadius: 10,
+														backgroundColor:
+															editTargetType === option.value
+																? editColor + "20"
+																: theme.surfaceLight,
+														borderWidth: 1,
+														borderColor:
+															editTargetType === option.value
+																? editColor
+																: theme.border,
+														alignItems: "center",
+													}}
+													onPress={() => setEditTargetType(option.value)}
 												>
-													{editColor === color && (
-														<Ionicons name="checkmark" size={18} color="#fff" />
-													)}
+													<Text
+														style={{
+															fontSize: 13,
+															fontWeight: "500",
+															color:
+																editTargetType === option.value
+																	? editColor
+																	: theme.textSecondary,
+														}}
+													>
+														{option.label}
+													</Text>
 												</TouchableOpacity>
 											))}
 										</View>
 									</View>
+								</>
+							)}
 
-									{/* Icon Selection */}
-									<View style={styles.inputGroup}>
-										<Text style={styles.inputLabel}>Icon</Text>
+							{/* Appearance Section */}
+							<Text style={styles.sectionLabel}>APPEARANCE</Text>
+
+							{/* Color Selection */}
+							<View style={styles.inputGroup}>
+								<Text style={styles.inputLabel}>Color</Text>
+								<View style={styles.colorGrid}>
+									{HABIT_COLORS.map((color) => (
 										<TouchableOpacity
-											style={styles.iconSelector}
-											onPress={() => setShowIconPicker(!showIconPicker)}
+											key={color}
+											style={[
+												styles.colorOption,
+												{ backgroundColor: color },
+												editColor === color && styles.colorOptionSelected,
+											]}
+											onPress={() => setEditColor(color)}
 										>
-											<View
+											{editColor === color && (
+												<Ionicons name="checkmark" size={18} color="#fff" />
+											)}
+										</TouchableOpacity>
+									))}
+								</View>
+							</View>
+
+							{/* Icon Selection */}
+							<View style={styles.inputGroup}>
+								<Text style={styles.inputLabel}>Icon</Text>
+								<TouchableOpacity
+									style={styles.iconSelector}
+									onPress={() => setShowIconPicker(!showIconPicker)}
+								>
+									<View
+										style={[
+											styles.selectedIcon,
+											{ backgroundColor: editColor + "20" },
+										]}
+									>
+										<Ionicons
+											name={editIcon as any}
+											size={24}
+											color={editColor}
+										/>
+									</View>
+									<Text style={styles.iconSelectorText}>
+										{showIconPicker ? "Hide icons" : "Change icon"}
+									</Text>
+									<Ionicons
+										name={showIconPicker ? "chevron-up" : "chevron-down"}
+										size={20}
+										color={theme.textSecondary}
+									/>
+								</TouchableOpacity>
+
+								{showIconPicker && (
+									<View style={styles.iconGrid}>
+										{HABIT_ICONS.map((icon) => (
+											<TouchableOpacity
+												key={icon}
 												style={[
-													styles.selectedIcon,
-													{ backgroundColor: editColor + "20" },
+													styles.iconOption,
+													editIcon === icon && {
+														backgroundColor: editColor + "20",
+													},
 												]}
+												onPress={() => {
+													setEditIcon(icon);
+													setShowIconPicker(false);
+												}}
 											>
 												<Ionicons
-													name={editIcon as any}
+													name={icon as any}
 													size={24}
-													color={editColor}
+													color={
+														editIcon === icon ? editColor : theme.textSecondary
+													}
 												/>
-											</View>
-											<Text style={styles.iconSelectorText}>
-												{showIconPicker ? "Hide icons" : "Change icon"}
-											</Text>
-											<Ionicons
-												name={showIconPicker ? "chevron-up" : "chevron-down"}
-												size={20}
-												color={theme.textSecondary}
-											/>
-										</TouchableOpacity>
+											</TouchableOpacity>
+										))}
+									</View>
+								)}
+							</View>
 
-										{showIconPicker && (
-											<View style={styles.iconGrid}>
-												{HABIT_ICONS.map((icon) => (
-													<TouchableOpacity
-														key={icon}
+							{/* Schedule Section */}
+							<Text style={styles.sectionLabel}>SCHEDULE</Text>
+
+							{/* Frequency */}
+							<View style={styles.inputGroup}>
+								<Text style={styles.inputLabel}>Frequency</Text>
+								<TouchableOpacity
+									style={styles.iconSelector}
+									onPress={() => setShowFrequencyPicker(!showFrequencyPicker)}
+								>
+									<View
+										style={[
+											styles.selectedIcon,
+											{ backgroundColor: editColor + "20" },
+										]}
+									>
+										<Ionicons name="repeat" size={24} color={editColor} />
+									</View>
+									<Text style={styles.iconSelectorText}>
+										{editFrequencyType === "daily"
+											? "Every day"
+											: editFrequencyType === "times_per_day"
+											? `${editWindowSlots.length}x/day ${editWindowStart}-${editWindowEnd}`
+											: editFrequencyType === "specific_days"
+											? `${editSelectedDays.length} days/week`
+											: editFrequencyType === "times_per_week"
+											? `${editFrequencyValue}x per week`
+											: editFrequencyType === "times_per_month"
+											? `${editFrequencyValue}x per month`
+											: editFrequencyType === "every_n_days"
+											? `Every ${editFrequencyValue} days`
+											: editFrequencyType === "times_in_x_days"
+											? `${editFrequencyValue}x in ${editFrequencySecondValue} days`
+											: "Custom"}
+									</Text>
+									<Ionicons
+										name={showFrequencyPicker ? "chevron-up" : "chevron-down"}
+										size={20}
+										color={theme.textSecondary}
+									/>
+								</TouchableOpacity>
+
+								{showFrequencyPicker && (
+									<View style={styles.frequencyPickerContainer}>
+										{/* Frequency Type Options */}
+										<View style={styles.frequencyOptions}>
+											{[
+												{
+													type: "daily" as FrequencyType,
+													label: "Daily",
+													icon: "today",
+													description: "Complete once every day",
+												},
+												{
+													type: "times_per_day" as FrequencyType,
+													label: "Multiple times/day",
+													icon: "repeat",
+													description: "Complete several times each day",
+												},
+												{
+													type: "specific_days" as FrequencyType,
+													label: "Specific days",
+													icon: "calendar",
+													description: "Choose which days of the week",
+												},
+												{
+													type: "times_per_week" as FrequencyType,
+													label: "Times per week",
+													icon: "calendar-outline",
+													description: "Flexible weekly goal",
+												},
+												{
+													type: "times_per_month" as FrequencyType,
+													label: "Times per month",
+													icon: "calendar-number-outline",
+													description: "Monthly completion goal",
+												},
+												{
+													type: "every_n_days" as FrequencyType,
+													label: "Every N days",
+													icon: "refresh",
+													description: "Custom interval between completions",
+												},
+												{
+													type: "times_in_x_days" as FrequencyType,
+													label: "Times in X days",
+													icon: "timer-outline",
+													description: "Complete N times within X days",
+												},
+											].map((option) => (
+												<TouchableOpacity
+													key={option.type}
+													style={[
+														styles.frequencyOptionEnhanced,
+														editFrequencyType === option.type && {
+															backgroundColor: editColor + "15",
+															borderColor: editColor,
+														},
+													]}
+													onPress={() => {
+														setEditFrequencyType(option.type);
+														if (option.type === "daily") {
+															setEditFrequencyValue(1);
+														} else if (option.type === "times_per_day") {
+															setEditFrequencyValue(2);
+														} else if (option.type === "times_per_week") {
+															setEditFrequencyValue(3);
+														} else if (option.type === "times_per_month") {
+															setEditFrequencyValue(10);
+														} else if (option.type === "every_n_days") {
+															setEditFrequencyValue(2);
+														} else if (option.type === "times_in_x_days") {
+															setEditFrequencyValue(3);
+															setEditFrequencySecondValue(14);
+														}
+													}}
+												>
+													<View
 														style={[
-															styles.iconOption,
-															editIcon === icon && {
-																backgroundColor: editColor + "20",
+															styles.frequencyOptionIconBox,
+															{
+																backgroundColor:
+																	editFrequencyType === option.type
+																		? editColor + "20"
+																		: theme.border,
 															},
 														]}
-														onPress={() => {
-															setEditIcon(icon);
-															setShowIconPicker(false);
-														}}
 													>
 														<Ionicons
-															name={icon as any}
-															size={24}
+															name={option.icon as any}
+															size={20}
 															color={
-																editIcon === icon
+																editFrequencyType === option.type
 																	? editColor
 																	: theme.textSecondary
 															}
 														/>
-													</TouchableOpacity>
-												))}
-											</View>
-										)}
-									</View>
-
-									{/* Schedule Section */}
-									<Text style={styles.sectionLabel}>SCHEDULE</Text>
-
-									{/* Frequency */}
-									<View style={styles.inputGroup}>
-										<Text style={styles.inputLabel}>Frequency</Text>
-										<TouchableOpacity
-											style={styles.iconSelector}
-											onPress={() =>
-												setShowFrequencyPicker(!showFrequencyPicker)
-											}
-										>
-											<View
-												style={[
-													styles.selectedIcon,
-													{ backgroundColor: editColor + "20" },
-												]}
-											>
-												<Ionicons name="repeat" size={24} color={editColor} />
-											</View>
-											<Text style={styles.iconSelectorText}>
-												{editFrequencyType === "daily"
-													? "Every day"
-													: editFrequencyType === "times_per_day"
-													? `${editFrequencyValue}x per day`
-													: editFrequencyType === "specific_days"
-													? `${editSelectedDays.length} days/week`
-													: editFrequencyType === "times_per_week"
-													? `${editFrequencyValue}x per week`
-													: editFrequencyType === "times_per_month"
-													? `${editFrequencyValue}x per month`
-													: editFrequencyType === "every_n_days"
-													? `Every ${editFrequencyValue} days`
-													: editFrequencyType === "times_in_x_days"
-													? `${editFrequencyValue}x in ${editFrequencySecondValue} days`
-													: "Custom"}
-											</Text>
-											<Ionicons
-												name={
-													showFrequencyPicker ? "chevron-up" : "chevron-down"
-												}
-												size={20}
-												color={theme.textSecondary}
-											/>
-										</TouchableOpacity>
-
-										{showFrequencyPicker && (
-											<View style={styles.frequencyPickerContainer}>
-												{/* Frequency Type Options */}
-												<View style={styles.frequencyOptions}>
-													{[
-														{
-															type: "daily" as FrequencyType,
-															label: "Daily",
-															icon: "today",
-															description: "Complete once every day",
-														},
-														{
-															type: "times_per_day" as FrequencyType,
-															label: "Multiple times/day",
-															icon: "repeat",
-															description: "Complete several times each day",
-														},
-														{
-															type: "specific_days" as FrequencyType,
-															label: "Specific days",
-															icon: "calendar",
-															description: "Choose which days of the week",
-														},
-														{
-															type: "times_per_week" as FrequencyType,
-															label: "Times per week",
-															icon: "calendar-outline",
-															description: "Flexible weekly goal",
-														},
-														{
-															type: "times_per_month" as FrequencyType,
-															label: "Times per month",
-															icon: "calendar-number-outline",
-															description: "Monthly completion goal",
-														},
-														{
-															type: "every_n_days" as FrequencyType,
-															label: "Every N days",
-															icon: "refresh",
-															description:
-																"Custom interval between completions",
-														},
-														{
-															type: "times_in_x_days" as FrequencyType,
-															label: "Times in X days",
-															icon: "timer-outline",
-															description: "Complete N times within X days",
-														},
-													].map((option) => (
-														<TouchableOpacity
-															key={option.type}
+													</View>
+													<View style={styles.frequencyOptionContent}>
+														<Text
 															style={[
-																styles.frequencyOptionEnhanced,
+																styles.frequencyOptionText,
 																editFrequencyType === option.type && {
-																	backgroundColor: editColor + "15",
+																	color: editColor,
+																},
+															]}
+														>
+															{option.label}
+														</Text>
+														<Text style={styles.frequencyOptionDescription}>
+															{option.description}
+														</Text>
+													</View>
+													{editFrequencyType === option.type && (
+														<Ionicons
+															name="checkmark-circle"
+															size={22}
+															color={editColor}
+														/>
+													)}
+												</TouchableOpacity>
+											))}
+										</View>
+
+										{/* Specific Days Selector */}
+										{editFrequencyType === "specific_days" && (
+											<View style={styles.daysSelector}>
+												<Text style={styles.daysSelectorLabel}>
+													Select days:
+												</Text>
+												<View style={styles.daysRow}>
+													{DAY_NAMES.map((day, index) => (
+														<TouchableOpacity
+															key={day}
+															style={[
+																styles.dayButton,
+																editSelectedDays.includes(index) && {
+																	backgroundColor: editColor,
 																	borderColor: editColor,
 																},
 															]}
-															onPress={() => {
-																setEditFrequencyType(option.type);
-																if (option.type === "daily") {
-																	setEditFrequencyValue(1);
-																} else if (option.type === "times_per_day") {
-																	setEditFrequencyValue(2);
-																} else if (option.type === "times_per_week") {
-																	setEditFrequencyValue(3);
-																} else if (option.type === "times_per_month") {
-																	setEditFrequencyValue(10);
-																} else if (option.type === "every_n_days") {
-																	setEditFrequencyValue(2);
-																} else if (option.type === "times_in_x_days") {
-																	setEditFrequencyValue(3);
-																	setEditFrequencySecondValue(14);
-																}
-															}}
+															onPress={() => toggleEditDay(index)}
 														>
-															<View
+															<Text
 																style={[
-																	styles.frequencyOptionIconBox,
-																	{
-																		backgroundColor:
-																			editFrequencyType === option.type
-																				? editColor + "20"
-																				: theme.border,
+																	styles.dayButtonText,
+																	editSelectedDays.includes(index) && {
+																		color: "#fff",
 																	},
 																]}
 															>
-																<Ionicons
-																	name={option.icon as any}
-																	size={20}
-																	color={
-																		editFrequencyType === option.type
-																			? editColor
-																			: theme.textSecondary
-																	}
-																/>
-															</View>
-															<View style={styles.frequencyOptionContent}>
-																<Text
-																	style={[
-																		styles.frequencyOptionText,
-																		editFrequencyType === option.type && {
-																			color: editColor,
-																		},
-																	]}
-																>
-																	{option.label}
-																</Text>
-																<Text style={styles.frequencyOptionDescription}>
-																	{option.description}
-																</Text>
-															</View>
-															{editFrequencyType === option.type && (
-																<Ionicons
-																	name="checkmark-circle"
-																	size={22}
-																	color={editColor}
-																/>
-															)}
+																{day}
+															</Text>
+														</TouchableOpacity>
+													))}
+												</View>
+											</View>
+										)}
+
+										{/* Window Selector for times_per_day */}
+										{editFrequencyType === "times_per_day" && (
+											<View
+												style={[
+													styles.frequencyValueContainer,
+													{ flexDirection: "column", gap: 12 },
+												]}
+											>
+												<View style={{ flexDirection: "row", gap: 12 }}>
+													{(
+														[
+															["start", "From", editWindowStart],
+															["end", "To", editWindowEnd],
+														] as const
+													).map(([key, label, value]) => (
+														<TouchableOpacity
+															key={key}
+															style={{
+																flex: 1,
+																padding: 12,
+																borderRadius: 10,
+																backgroundColor: theme.background,
+																borderWidth: 1,
+																borderColor: theme.border,
+															}}
+															onPress={() =>
+																setShowWindowPicker(
+																	showWindowPicker === key ? null : key
+																)
+															}
+														>
+															<Text
+																style={{
+																	fontSize: 12,
+																	color: theme.textMuted,
+																	marginBottom: 4,
+																}}
+															>
+																{label}
+															</Text>
+															<Text
+																style={{
+																	fontSize: 18,
+																	fontWeight: "700",
+																	color: editColor,
+																}}
+															>
+																{value}
+															</Text>
 														</TouchableOpacity>
 													))}
 												</View>
 
-												{/* Specific Days Selector */}
-												{editFrequencyType === "specific_days" && (
-													<View style={styles.daysSelector}>
-														<Text style={styles.daysSelectorLabel}>
-															Select days:
-														</Text>
-														<View style={styles.daysRow}>
-															{DAY_NAMES.map((day, index) => (
-																<TouchableOpacity
-																	key={day}
-																	style={[
-																		styles.dayButton,
-																		editSelectedDays.includes(index) && {
-																			backgroundColor: editColor,
-																			borderColor: editColor,
-																		},
-																	]}
-																	onPress={() => toggleEditDay(index)}
-																>
-																	<Text
-																		style={[
-																			styles.dayButtonText,
-																			editSelectedDays.includes(index) && {
-																				color: "#fff",
-																			},
-																		]}
-																	>
-																		{day}
-																	</Text>
-																</TouchableOpacity>
-															))}
-														</View>
-													</View>
-												)}
-
-												{/* Value Selector for non-daily frequencies */}
-												{editFrequencyType !== "daily" &&
-													editFrequencyType !== "specific_days" &&
-													editFrequencyType !== "times_in_x_days" && (
-														<View style={styles.frequencyValueContainer}>
-															<Text style={styles.frequencyValueLabel}>
-																{editFrequencyType === "times_per_day"
-																	? "Times per day:"
-																	: editFrequencyType === "times_per_week"
-																	? "Times per week:"
-																	: editFrequencyType === "times_per_month"
-																	? "Times per month:"
-																	: "Every N days:"}
-															</Text>
-															<View style={styles.frequencyValueSelector}>
-																<TouchableOpacity
-																	style={[
-																		styles.frequencyValueButton,
-																		{ backgroundColor: editColor + "20" },
-																	]}
-																	onPress={() =>
-																		setEditFrequencyValue(
-																			Math.max(1, editFrequencyValue - 1)
-																		)
-																	}
-																>
-																	<Ionicons
-																		name="remove"
-																		size={20}
-																		color={editColor}
-																	/>
-																</TouchableOpacity>
-																<Text
-																	style={[
-																		styles.frequencyValueText,
-																		{ color: editColor },
-																	]}
-																>
-																	{editFrequencyValue}
-																</Text>
-																<TouchableOpacity
-																	style={[
-																		styles.frequencyValueButton,
-																		{ backgroundColor: editColor + "20" },
-																	]}
-																	onPress={() =>
-																		setEditFrequencyValue(
-																			editFrequencyValue + 1
-																		)
-																	}
-																>
-																	<Ionicons
-																		name="add"
-																		size={20}
-																		color={editColor}
-																	/>
-																</TouchableOpacity>
-															</View>
-														</View>
-													)}
-
-												{/* Times in X Days - Two Value Selectors */}
-												{editFrequencyType === "times_in_x_days" && (
-													<View style={{ gap: 16 }}>
-														<View style={styles.frequencyValueContainer}>
-															<Text style={styles.frequencyValueLabel}>
-																Complete N times:
-															</Text>
-															<View style={styles.frequencyValueSelector}>
-																<TouchableOpacity
-																	style={[
-																		styles.frequencyValueButton,
-																		{ backgroundColor: editColor + "20" },
-																	]}
-																	onPress={() =>
-																		setEditFrequencyValue(
-																			Math.max(1, editFrequencyValue - 1)
-																		)
-																	}
-																>
-																	<Ionicons
-																		name="remove"
-																		size={20}
-																		color={editColor}
-																	/>
-																</TouchableOpacity>
-																<Text
-																	style={[
-																		styles.frequencyValueText,
-																		{ color: editColor },
-																	]}
-																>
-																	{editFrequencyValue}
-																</Text>
-																<TouchableOpacity
-																	style={[
-																		styles.frequencyValueButton,
-																		{ backgroundColor: editColor + "20" },
-																	]}
-																	onPress={() =>
-																		setEditFrequencyValue(
-																			editFrequencyValue + 1
-																		)
-																	}
-																>
-																	<Ionicons
-																		name="add"
-																		size={20}
-																		color={editColor}
-																	/>
-																</TouchableOpacity>
-															</View>
-														</View>
-														<View style={styles.frequencyValueContainer}>
-															<Text style={styles.frequencyValueLabel}>
-																Within X days:
-															</Text>
-															<View style={styles.frequencyValueSelector}>
-																<TouchableOpacity
-																	style={[
-																		styles.frequencyValueButton,
-																		{ backgroundColor: editColor + "20" },
-																	]}
-																	onPress={() =>
-																		setEditFrequencySecondValue(
-																			Math.max(2, editFrequencySecondValue - 1)
-																		)
-																	}
-																>
-																	<Ionicons
-																		name="remove"
-																		size={20}
-																		color={editColor}
-																	/>
-																</TouchableOpacity>
-																<Text
-																	style={[
-																		styles.frequencyValueText,
-																		{ color: editColor },
-																	]}
-																>
-																	{editFrequencySecondValue}
-																</Text>
-																<TouchableOpacity
-																	style={[
-																		styles.frequencyValueButton,
-																		{ backgroundColor: editColor + "20" },
-																	]}
-																	onPress={() =>
-																		setEditFrequencySecondValue(
-																			editFrequencySecondValue + 1
-																		)
-																	}
-																>
-																	<Ionicons
-																		name="add"
-																		size={20}
-																		color={editColor}
-																	/>
-																</TouchableOpacity>
-															</View>
-														</View>
-													</View>
-												)}
-											</View>
-										)}
-									</View>
-
-									{/* Reminder Section */}
-									<Text style={styles.sectionLabel}>REMINDERS</Text>
-
-									{/* Reminder Toggle */}
-									<View style={styles.switchRow}>
-										<View style={styles.switchInfo}>
-											<View
-												style={[
-													styles.selectedIcon,
-													{ backgroundColor: editColor + "20" },
-												]}
-											>
-												<Ionicons
-													name="notifications"
-													size={24}
-													color={editColor}
-												/>
-											</View>
-											<View style={styles.switchTextContainer}>
-												<Text style={styles.switchTitle}>Daily Reminder</Text>
-												<Text style={styles.switchSubtitle}>
-													Get notified to complete your habit
-												</Text>
-											</View>
-										</View>
-										<Switch
-											value={editReminderEnabled}
-											onValueChange={setEditReminderEnabled}
-											trackColor={{
-												false: theme.border,
-												true: editColor + "60",
-											}}
-											thumbColor={
-												editReminderEnabled ? editColor : theme.textMuted
-											}
-										/>
-									</View>
-
-									{/* Alarm Toggle */}
-									<View style={styles.switchRow}>
-										<View style={styles.switchInfo}>
-											<View
-												style={[
-													styles.selectedIcon,
-													{ backgroundColor: editColor + "20" },
-												]}
-											>
-												<Ionicons name="alarm" size={24} color={editColor} />
-											</View>
-											<View style={styles.switchTextContainer}>
-												<Text style={styles.switchTitle}>Alarm Sound</Text>
-												<Text style={styles.switchSubtitle}>
-													Play alarm sound with notification
-												</Text>
-											</View>
-										</View>
-										<Switch
-											value={editAlarmEnabled}
-											onValueChange={setEditAlarmEnabled}
-											trackColor={{
-												false: theme.border,
-												true: editColor + "60",
-											}}
-											thumbColor={
-												editAlarmEnabled ? editColor : theme.textMuted
-											}
-										/>
-									</View>
-
-									{/* Reminder Time */}
-									{editReminderEnabled && (
-										<View style={styles.inputGroup}>
-											<Text style={styles.inputLabel}>Reminder Time</Text>
-											<TouchableOpacity
-												style={styles.iconSelector}
-												onPress={() => setShowTimePicker(true)}
-											>
-												<View
-													style={[
-														styles.selectedIcon,
-														{ backgroundColor: editColor + "20" },
-													]}
-												>
-													<Ionicons name="time" size={24} color={editColor} />
-												</View>
-												<View style={{ flex: 1 }}>
-													<Text style={styles.iconSelectorText}>
-														{formatTime(editSelectedTime)}
-													</Text>
-													<Text
-														style={{
-															fontSize: 13,
-															color: theme.textMuted,
-														}}
-													>
-														Tap to change
-													</Text>
-												</View>
-												<Ionicons
-													name="chevron-forward"
-													size={20}
-													color={theme.textSecondary}
-												/>
-											</TouchableOpacity>
-
-											{/* Time Picker (iOS shows inline, Android shows dialog) */}
-											{showTimePicker && (
-												<View
-													style={{
-														backgroundColor: theme.surfaceLight,
-														borderRadius: 14,
-														marginTop: 12,
-														overflow: "hidden",
-													}}
-												>
+												{showWindowPicker && (
 													<DateTimePicker
-														value={editSelectedTime}
+														value={(() => {
+															const [h, m] = (
+																showWindowPicker === "start"
+																	? editWindowStart
+																	: editWindowEnd
+															)
+																.split(":")
+																.map(Number);
+															const d = new Date();
+															d.setHours(h, m, 0, 0);
+															return d;
+														})()}
 														mode="time"
+														is24Hour
 														display={
 															Platform.OS === "ios" ? "spinner" : "default"
 														}
-														onChange={handleEditTimeChange}
-														textColor={theme.text}
-														themeVariant={theme.mode}
+														onChange={(_event, date) => {
+															if (Platform.OS === "android") {
+																setShowWindowPicker(null);
+															}
+															if (!date) return;
+															const next = `${date
+																.getHours()
+																.toString()
+																.padStart(2, "0")}:${date
+																.getMinutes()
+																.toString()
+																.padStart(2, "0")}`;
+															if (showWindowPicker === "start") {
+																setEditWindowStart(next);
+															} else {
+																setEditWindowEnd(next);
+															}
+														}}
 													/>
-													{Platform.OS === "ios" && (
+												)}
+
+												<View
+													style={{
+														flexDirection: "row",
+														alignItems: "center",
+														justifyContent: "space-between",
+													}}
+												>
+													<Text style={styles.frequencyValueLabel}>Every</Text>
+													<View style={styles.frequencyValueSelector}>
 														<TouchableOpacity
-															style={{
-																padding: 14,
-																backgroundColor: editColor,
-																alignItems: "center",
-															}}
-															onPress={() => setShowTimePicker(false)}
+															style={[
+																styles.frequencyValueButton,
+																{ backgroundColor: editColor + "20" },
+															]}
+															onPress={() =>
+																setEditWindowInterval((v) =>
+																	Math.max(15, v - 15)
+																)
+															}
 														>
-															<Text
-																style={{ color: "#FFFFFF", fontWeight: "600" }}
-															>
-																Done
-															</Text>
+															<Ionicons
+																name="remove"
+																size={20}
+																color={editColor}
+															/>
 														</TouchableOpacity>
-													)}
+														<Text
+															style={[
+																styles.frequencyValueText,
+																{
+																	color: editColor,
+																	fontSize: 16,
+																	minWidth: 76,
+																},
+															]}
+														>
+															{editWindowInterval >= 60
+																? `${Math.floor(editWindowInterval / 60)}h${
+																		editWindowInterval % 60
+																			? ` ${editWindowInterval % 60}m`
+																			: ""
+																  }`
+																: `${editWindowInterval}m`}
+														</Text>
+														<TouchableOpacity
+															style={[
+																styles.frequencyValueButton,
+																{ backgroundColor: editColor + "20" },
+															]}
+															onPress={() =>
+																setEditWindowInterval((v) =>
+																	Math.min(12 * 60, v + 15)
+																)
+															}
+														>
+															<Ionicons
+																name="add"
+																size={20}
+																color={editColor}
+															/>
+														</TouchableOpacity>
+													</View>
 												</View>
+
+												<View>
+													<Text
+														style={{
+															fontSize: 12,
+															color: theme.textMuted,
+															marginBottom: 8,
+														}}
+													>
+														{editWindowSlots.length} reminder
+														{editWindowSlots.length === 1 ? "" : "s"} per day
+													</Text>
+													<View
+														style={{
+															flexDirection: "row",
+															flexWrap: "wrap",
+															gap: 6,
+														}}
+													>
+														{editWindowSlots.map((slot) => (
+															<View
+																key={slot}
+																style={{
+																	paddingHorizontal: 10,
+																	paddingVertical: 5,
+																	borderRadius: 8,
+																	backgroundColor: editColor + "20",
+																}}
+															>
+																<Text
+																	style={{
+																		fontSize: 12,
+																		fontWeight: "600",
+																		color: editColor,
+																	}}
+																>
+																	{slot}
+																</Text>
+															</View>
+														))}
+													</View>
+												</View>
+											</View>
+										)}
+
+										{/* Value Selector for non-daily frequencies */}
+										{editFrequencyType !== "daily" &&
+											editFrequencyType !== "specific_days" &&
+											editFrequencyType !== "times_per_day" &&
+											editFrequencyType !== "times_in_x_days" && (
+												<View style={styles.frequencyValueContainer}>
+													<Text style={styles.frequencyValueLabel}>
+														{editFrequencyType === "times_per_week"
+															? "Times per week:"
+															: editFrequencyType === "times_per_month"
+															? "Times per month:"
+															: "Every N days:"}
+													</Text>
+													<View style={styles.frequencyValueSelector}>
+														<TouchableOpacity
+															style={[
+																styles.frequencyValueButton,
+																{ backgroundColor: editColor + "20" },
+															]}
+															onPress={() =>
+																setEditFrequencyValue(
+																	Math.max(1, editFrequencyValue - 1)
+																)
+															}
+														>
+															<Ionicons
+																name="remove"
+																size={20}
+																color={editColor}
+															/>
+														</TouchableOpacity>
+														<Text
+															style={[
+																styles.frequencyValueText,
+																{ color: editColor },
+															]}
+														>
+															{editFrequencyValue}
+														</Text>
+														<TouchableOpacity
+															style={[
+																styles.frequencyValueButton,
+																{ backgroundColor: editColor + "20" },
+															]}
+															onPress={() =>
+																setEditFrequencyValue(editFrequencyValue + 1)
+															}
+														>
+															<Ionicons
+																name="add"
+																size={20}
+																color={editColor}
+															/>
+														</TouchableOpacity>
+													</View>
+												</View>
+											)}
+
+										{/* Times in X Days - Two Value Selectors */}
+										{editFrequencyType === "times_in_x_days" && (
+											<View style={{ gap: 16 }}>
+												<View style={styles.frequencyValueContainer}>
+													<Text style={styles.frequencyValueLabel}>
+														Complete N times:
+													</Text>
+													<View style={styles.frequencyValueSelector}>
+														<TouchableOpacity
+															style={[
+																styles.frequencyValueButton,
+																{ backgroundColor: editColor + "20" },
+															]}
+															onPress={() =>
+																setEditFrequencyValue(
+																	Math.max(1, editFrequencyValue - 1)
+																)
+															}
+														>
+															<Ionicons
+																name="remove"
+																size={20}
+																color={editColor}
+															/>
+														</TouchableOpacity>
+														<Text
+															style={[
+																styles.frequencyValueText,
+																{ color: editColor },
+															]}
+														>
+															{editFrequencyValue}
+														</Text>
+														<TouchableOpacity
+															style={[
+																styles.frequencyValueButton,
+																{ backgroundColor: editColor + "20" },
+															]}
+															onPress={() =>
+																setEditFrequencyValue(editFrequencyValue + 1)
+															}
+														>
+															<Ionicons
+																name="add"
+																size={20}
+																color={editColor}
+															/>
+														</TouchableOpacity>
+													</View>
+												</View>
+												<View style={styles.frequencyValueContainer}>
+													<Text style={styles.frequencyValueLabel}>
+														Within X days:
+													</Text>
+													<View style={styles.frequencyValueSelector}>
+														<TouchableOpacity
+															style={[
+																styles.frequencyValueButton,
+																{ backgroundColor: editColor + "20" },
+															]}
+															onPress={() =>
+																setEditFrequencySecondValue(
+																	Math.max(2, editFrequencySecondValue - 1)
+																)
+															}
+														>
+															<Ionicons
+																name="remove"
+																size={20}
+																color={editColor}
+															/>
+														</TouchableOpacity>
+														<Text
+															style={[
+																styles.frequencyValueText,
+																{ color: editColor },
+															]}
+														>
+															{editFrequencySecondValue}
+														</Text>
+														<TouchableOpacity
+															style={[
+																styles.frequencyValueButton,
+																{ backgroundColor: editColor + "20" },
+															]}
+															onPress={() =>
+																setEditFrequencySecondValue(
+																	editFrequencySecondValue + 1
+																)
+															}
+														>
+															<Ionicons
+																name="add"
+																size={20}
+																color={editColor}
+															/>
+														</TouchableOpacity>
+													</View>
+												</View>
+											</View>
+										)}
+									</View>
+								)}
+							</View>
+
+							{/* Reminder Section */}
+							<Text style={styles.sectionLabel}>REMINDERS</Text>
+
+							{/* Reminder Toggle */}
+							<View style={styles.switchRow}>
+								<View style={styles.switchInfo}>
+									<View
+										style={[
+											styles.selectedIcon,
+											{ backgroundColor: editColor + "20" },
+										]}
+									>
+										<Ionicons
+											name="notifications"
+											size={24}
+											color={editColor}
+										/>
+									</View>
+									<View style={styles.switchTextContainer}>
+										<Text style={styles.switchTitle}>Daily Reminder</Text>
+										<Text style={styles.switchSubtitle}>
+											Get notified to complete your habit
+										</Text>
+									</View>
+								</View>
+								<Switch
+									value={editReminderEnabled}
+									onValueChange={setEditReminderEnabled}
+									trackColor={{
+										false: theme.border,
+										true: editColor + "60",
+									}}
+									thumbColor={editReminderEnabled ? editColor : theme.textMuted}
+								/>
+							</View>
+
+							{/* Alarm Toggle */}
+							<View style={styles.switchRow}>
+								<View style={styles.switchInfo}>
+									<View
+										style={[
+											styles.selectedIcon,
+											{ backgroundColor: editColor + "20" },
+										]}
+									>
+										<Ionicons name="alarm" size={24} color={editColor} />
+									</View>
+									<View style={styles.switchTextContainer}>
+										<Text style={styles.switchTitle}>Alarm Sound</Text>
+										<Text style={styles.switchSubtitle}>
+											Play alarm sound with notification
+										</Text>
+									</View>
+								</View>
+								<Switch
+									value={editAlarmEnabled}
+									onValueChange={setEditAlarmEnabled}
+									trackColor={{
+										false: theme.border,
+										true: editColor + "60",
+									}}
+									thumbColor={editAlarmEnabled ? editColor : theme.textMuted}
+								/>
+							</View>
+
+							{/* Reminder Time — a times_per_day habit derives its reminders
+							    from the From/To window, so a single time would be ignored. */}
+							{editReminderEnabled && editFrequencyType !== "times_per_day" && (
+								<View style={styles.inputGroup}>
+									<Text style={styles.inputLabel}>Reminder Time</Text>
+									<TouchableOpacity
+										style={styles.iconSelector}
+										onPress={() => setShowTimePicker(true)}
+									>
+										<View
+											style={[
+												styles.selectedIcon,
+												{ backgroundColor: editColor + "20" },
+											]}
+										>
+											<Ionicons name="time" size={24} color={editColor} />
+										</View>
+										<View style={{ flex: 1 }}>
+											<Text style={styles.iconSelectorText}>
+												{formatTime(editSelectedTime)}
+											</Text>
+											<Text
+												style={{
+													fontSize: 13,
+													color: theme.textMuted,
+												}}
+											>
+												Tap to change
+											</Text>
+										</View>
+										<Ionicons
+											name="chevron-forward"
+											size={20}
+											color={theme.textSecondary}
+										/>
+									</TouchableOpacity>
+
+									{/* Time Picker (iOS shows inline, Android shows dialog) */}
+									{showTimePicker && (
+										<View
+											style={{
+												backgroundColor: theme.surfaceLight,
+												borderRadius: 14,
+												marginTop: 12,
+												overflow: "hidden",
+											}}
+										>
+											<DateTimePicker
+												value={editSelectedTime}
+												mode="time"
+												display={Platform.OS === "ios" ? "spinner" : "default"}
+												onChange={handleEditTimeChange}
+												textColor={theme.text}
+												themeVariant={theme.mode}
+											/>
+											{Platform.OS === "ios" && (
+												<TouchableOpacity
+													style={{
+														padding: 14,
+														backgroundColor: editColor,
+														alignItems: "center",
+													}}
+													onPress={() => setShowTimePicker(false)}
+												>
+													<Text style={{ color: "#FFFFFF", fontWeight: "600" }}>
+														Done
+													</Text>
+												</TouchableOpacity>
 											)}
 										</View>
 									)}
+								</View>
+							)}
 
-									{/* Notes Section */}
-									<Text style={styles.sectionLabel}>NOTES</Text>
+							{/* Notes Section */}
+							<Text style={styles.sectionLabel}>NOTES</Text>
 
-									{/* Notes */}
-									<View style={styles.inputGroup}>
-										<Text style={styles.inputLabel}>
-											Personal Notes (optional)
-										</Text>
-										<TextInput
-											style={[styles.textInput, styles.textArea]}
-											value={editNotes}
-											onChangeText={setEditNotes}
-											placeholder="Add personal notes, tips, or motivation..."
-											placeholderTextColor={theme.textMuted}
-											multiline
-											numberOfLines={4}
+							{/* Notes */}
+							<View style={styles.inputGroup}>
+								<Text style={styles.inputLabel}>Personal Notes (optional)</Text>
+								<TextInput
+									style={[styles.textInput, styles.textArea]}
+									value={editNotes}
+									onChangeText={setEditNotes}
+									placeholder="Add personal notes, tips, or motivation..."
+									placeholderTextColor={theme.textMuted}
+									multiline
+									numberOfLines={4}
+								/>
+							</View>
+
+							{/* Preview */}
+							<Text style={styles.sectionLabel}>PREVIEW</Text>
+							<View style={styles.inputGroup}>
+								<View style={styles.previewCard}>
+									<View
+										style={[
+											styles.previewIcon,
+											{ backgroundColor: editColor + "20" },
+										]}
+									>
+										<Ionicons
+											name={editIcon as any}
+											size={28}
+											color={editColor}
 										/>
 									</View>
-
-									{/* Preview */}
-									<Text style={styles.sectionLabel}>PREVIEW</Text>
-									<View style={styles.inputGroup}>
-										<View style={styles.previewCard}>
-											<View
-												style={[
-													styles.previewIcon,
-													{ backgroundColor: editColor + "20" },
-												]}
-											>
-												<Ionicons
-													name={editIcon as any}
-													size={28}
-													color={editColor}
-												/>
-											</View>
-											<View style={styles.previewInfo}>
-												<Text
-													style={[styles.previewName, { color: editColor }]}
-												>
-													{editName || "Habit Name"}
-												</Text>
-												<Text
-													style={styles.previewDescription}
-													numberOfLines={1}
-												>
-													{editHabitType === "measurable"
-														? `${editTarget || "?"} ${editUnit || "units"} • `
-														: ""}
-													{editFrequencyType === "daily"
-														? "Every day"
-														: editFrequencyType === "times_per_day"
-														? `${editFrequencyValue}x per day`
-														: editFrequencyType === "specific_days"
-														? `${editSelectedDays.length} days/week`
-														: editFrequencyType === "times_per_week"
-														? `${editFrequencyValue}x per week`
-														: editFrequencyType === "times_per_month"
-														? `${editFrequencyValue}x per month`
-														: editFrequencyType === "every_n_days"
-														? `Every ${editFrequencyValue} days`
-														: editFrequencyType === "times_in_x_days"
-														? `${editFrequencyValue}x in ${editFrequencySecondValue} days`
-														: "Custom"}
-													{editReminderEnabled
-														? ` • ${editReminderTime}`
-														: " • No reminder"}
-												</Text>
-											</View>
-										</View>
+									<View style={styles.previewInfo}>
+										<Text style={[styles.previewName, { color: editColor }]}>
+											{editName || "Habit Name"}
+										</Text>
+										<Text style={styles.previewDescription} numberOfLines={1}>
+											{editHabitType === "measurable"
+												? `${editTarget || "?"} ${editUnit || "units"} • `
+												: ""}
+											{editFrequencyType === "daily"
+												? "Every day"
+												: editFrequencyType === "times_per_day"
+												? `${editWindowSlots.length}x/day ${editWindowStart}-${editWindowEnd}`
+												: editFrequencyType === "specific_days"
+												? `${editSelectedDays.length} days/week`
+												: editFrequencyType === "times_per_week"
+												? `${editFrequencyValue}x per week`
+												: editFrequencyType === "times_per_month"
+												? `${editFrequencyValue}x per month`
+												: editFrequencyType === "every_n_days"
+												? `Every ${editFrequencyValue} days`
+												: editFrequencyType === "times_in_x_days"
+												? `${editFrequencyValue}x in ${editFrequencySecondValue} days`
+												: "Custom"}
+											{editReminderEnabled
+												? ` • ${editReminderTime}`
+												: " • No reminder"}
+										</Text>
 									</View>
+								</View>
+							</View>
 
-									<View style={{ height: 20 }} />
-								</ScrollView>
+							<View style={{ height: 20 }} />
+						</ScrollView>
 
-								{/* Save Button */}
-								<TouchableOpacity
-									style={[styles.saveButton, { backgroundColor: editColor }]}
-									onPress={handleSaveEdit}
-								>
-									<Text style={styles.saveButtonText}>Save Changes</Text>
-								</TouchableOpacity>
-							</Animated.View>
-						</TouchableWithoutFeedback>
-					</View>
-				</TouchableWithoutFeedback>
+						{/* Save Button */}
+						<TouchableOpacity
+							style={[styles.saveButton, { backgroundColor: editColor }]}
+							onPress={handleSaveEdit}
+						>
+							<Text style={styles.saveButtonText}>Save Changes</Text>
+						</TouchableOpacity>
+					</Animated.View>
+				</View>
 			</Modal>
 		</SafeAreaView>
 	);

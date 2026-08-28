@@ -16,6 +16,12 @@ export interface FrequencyConfig {
 	value: number; // N value
 	secondValue?: number; // X value for "times_in_x_days"
 	days?: number[]; // Specific days of week (0-6) for some frequency types
+
+	// "times_per_day" window configuration.
+	// Reminders are spread from startTime to endTime, intervalMinutes apart.
+	startTime?: string; // HH:mm — first reminder of the day
+	endTime?: string; // HH:mm — no reminder is scheduled after this
+	intervalMinutes?: number; // gap between occurrences
 }
 
 // Target Type for Measurable Habits
@@ -42,7 +48,10 @@ export interface Habit {
 
 	// Reminders
 	notificationTime?: string; // HH:mm format (legacy support)
-	notificationId?: string; // ID of scheduled notification for cancellation
+	// ID of scheduled notification for cancellation. Only meaningful for habits
+	// with a single reminder; reminders are cancelled by matching the
+	// notification's `data.habitId` payload, so this is not required.
+	notificationId?: string;
 	reminderTime?: string; // HH:mm format
 	reminderEnabled?: boolean;
 	reminderDays?: number[]; // 0-6, Sunday to Saturday

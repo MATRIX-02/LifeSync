@@ -293,537 +293,521 @@ const CreateHabitModal: React.FC<CreateHabitModalProps> = ({
 			animationType="slide"
 			onRequestClose={handleClose}
 		>
-			<TouchableWithoutFeedback onPress={handleClose}>
-				<View style={styles.modalContainer}>
-					<TouchableWithoutFeedback>
-						<Animated.View
-							style={[styles.modalContent, { transform: [{ translateY }] }]}
-						>
-							{/* Drag Handle */}
-							<View
-								{...panResponder.panHandlers}
-								style={styles.dragHandleContainer}
-							>
-								<View style={styles.dragHandle} />
-							</View>
+			{/* Backdrop is a sibling of the sheet: wrapping the sheet in a
+			    TouchableWithoutFeedback makes it claim the touch responder and
+			    swallows scroll gestures started on the sheet's background. */}
+			<View style={styles.modalContainer}>
+				<TouchableWithoutFeedback onPress={handleClose}>
+					<View style={StyleSheet.absoluteFill} />
+				</TouchableWithoutFeedback>
+				<Animated.View
+					style={[styles.modalContent, { transform: [{ translateY }] }]}
+				>
+					{/* Drag Handle */}
+					<View
+						{...panResponder.panHandlers}
+						style={styles.dragHandleContainer}
+					>
+						<View style={styles.dragHandle} />
+					</View>
 
-							<View style={styles.modalHeader}>
-								<View style={{ width: 24 }} />
-								<Text style={styles.modalTitle}>New Habit</Text>
-								<TouchableOpacity onPress={handleClose}>
-									<Ionicons name="close" size={24} color={COLORS.text} />
-								</TouchableOpacity>
-							</View>
+					<View style={styles.modalHeader}>
+						<View style={{ width: 24 }} />
+						<Text style={styles.modalTitle}>New Habit</Text>
+						<TouchableOpacity onPress={handleClose}>
+							<Ionicons name="close" size={24} color={COLORS.text} />
+						</TouchableOpacity>
+					</View>
 
-							<ScrollView
-								showsVerticalScrollIndicator={false}
-								style={styles.modalScrollView}
-							>
-								{/* Basic Info */}
-								<Text style={styles.sectionLabel}>BASIC INFO</Text>
+					<ScrollView
+						showsVerticalScrollIndicator={false}
+						style={styles.modalScrollView}
+					>
+						{/* Basic Info */}
+						<Text style={styles.sectionLabel}>BASIC INFO</Text>
 
-								<TextInput
-									style={styles.input}
-									placeholder="Habit name"
-									value={habitName}
-									onChangeText={setHabitName}
-									placeholderTextColor={COLORS.textSecondary}
-								/>
+						<TextInput
+							style={styles.input}
+							placeholder="Habit name"
+							value={habitName}
+							onChangeText={setHabitName}
+							placeholderTextColor={COLORS.textSecondary}
+						/>
 
-								<TextInput
-									style={[styles.input, styles.descriptionInput]}
-									placeholder="Description (optional)"
-									value={description}
-									onChangeText={setDescription}
-									multiline
-									placeholderTextColor={COLORS.textSecondary}
-								/>
+						<TextInput
+							style={[styles.input, styles.descriptionInput]}
+							placeholder="Description (optional)"
+							value={description}
+							onChangeText={setDescription}
+							multiline
+							placeholderTextColor={COLORS.textSecondary}
+						/>
 
-								{/* Appearance */}
-								<Text style={styles.sectionLabel}>APPEARANCE</Text>
+						{/* Appearance */}
+						<Text style={styles.sectionLabel}>APPEARANCE</Text>
 
-								<Text style={styles.label}>Color</Text>
-								<View style={styles.colorPicker}>
-									{HABIT_COLORS.map((color) => (
-										<TouchableOpacity
-											key={color}
-											style={[
-												styles.colorOption,
-												{ backgroundColor: color },
-												selectedColor === color && styles.selectedColor,
-											]}
-											onPress={() => setSelectedColor(color)}
-										>
-											{selectedColor === color && (
-												<Ionicons name="checkmark" size={16} color="#fff" />
-											)}
-										</TouchableOpacity>
-									))}
-								</View>
-
-								<Text style={styles.label}>Icon</Text>
+						<Text style={styles.label}>Color</Text>
+						<View style={styles.colorPicker}>
+							{HABIT_COLORS.map((color) => (
 								<TouchableOpacity
-									style={styles.selector}
-									onPress={() => setShowIconPicker(!showIconPicker)}
+									key={color}
+									style={[
+										styles.colorOption,
+										{ backgroundColor: color },
+										selectedColor === color && styles.selectedColor,
+									]}
+									onPress={() => setSelectedColor(color)}
 								>
-									<View
+									{selectedColor === color && (
+										<Ionicons name="checkmark" size={16} color="#fff" />
+									)}
+								</TouchableOpacity>
+							))}
+						</View>
+
+						<Text style={styles.label}>Icon</Text>
+						<TouchableOpacity
+							style={styles.selector}
+							onPress={() => setShowIconPicker(!showIconPicker)}
+						>
+							<View
+								style={[
+									styles.selectorIcon,
+									{ backgroundColor: selectedColor + "20" },
+								]}
+							>
+								<Ionicons
+									name={selectedIcon as any}
+									size={24}
+									color={selectedColor}
+								/>
+							</View>
+							<Text style={styles.selectorText}>
+								{showIconPicker ? "Hide icons" : "Change icon"}
+							</Text>
+							<Ionicons
+								name={showIconPicker ? "chevron-up" : "chevron-down"}
+								size={20}
+								color={COLORS.textSecondary}
+							/>
+						</TouchableOpacity>
+
+						{showIconPicker && (
+							<View style={styles.iconGrid}>
+								{HABIT_ICONS.map((icon) => (
+									<TouchableOpacity
+										key={icon}
 										style={[
-											styles.selectorIcon,
-											{ backgroundColor: selectedColor + "20" },
+											styles.iconOption,
+											selectedIcon === icon && {
+												backgroundColor: selectedColor + "20",
+											},
 										]}
+										onPress={() => {
+											setSelectedIcon(icon);
+											setShowIconPicker(false);
+										}}
 									>
 										<Ionicons
-											name={selectedIcon as any}
+											name={icon as any}
 											size={24}
-											color={selectedColor}
+											color={
+												selectedIcon === icon
+													? selectedColor
+													: COLORS.textSecondary
+											}
 										/>
-									</View>
-									<Text style={styles.selectorText}>
-										{showIconPicker ? "Hide icons" : "Change icon"}
-									</Text>
-									<Ionicons
-										name={showIconPicker ? "chevron-up" : "chevron-down"}
-										size={20}
-										color={COLORS.textSecondary}
-									/>
-								</TouchableOpacity>
+									</TouchableOpacity>
+								))}
+							</View>
+						)}
 
-								{showIconPicker && (
-									<View style={styles.iconGrid}>
-										{HABIT_ICONS.map((icon) => (
-											<TouchableOpacity
-												key={icon}
-												style={[
-													styles.iconOption,
-													selectedIcon === icon && {
-														backgroundColor: selectedColor + "20",
-													},
-												]}
-												onPress={() => {
-													setSelectedIcon(icon);
-													setShowIconPicker(false);
-												}}
-											>
-												<Ionicons
-													name={icon as any}
-													size={24}
-													color={
-														selectedIcon === icon
-															? selectedColor
-															: COLORS.textSecondary
-													}
-												/>
-											</TouchableOpacity>
-										))}
-									</View>
-								)}
+						{/* Schedule */}
+						<Text style={styles.sectionLabel}>SCHEDULE</Text>
 
-								{/* Schedule */}
-								<Text style={styles.sectionLabel}>SCHEDULE</Text>
+						<Text style={styles.label}>Frequency</Text>
+						<TouchableOpacity
+							style={styles.selector}
+							onPress={() => setShowFrequencyPicker(!showFrequencyPicker)}
+						>
+							<View
+								style={[
+									styles.selectorIcon,
+									{ backgroundColor: selectedColor + "20" },
+								]}
+							>
+								<Ionicons name="repeat" size={24} color={selectedColor} />
+							</View>
+							<Text style={styles.selectorText}>{getFrequencyLabel()}</Text>
+							<Ionicons
+								name={showFrequencyPicker ? "chevron-up" : "chevron-down"}
+								size={20}
+								color={COLORS.textSecondary}
+							/>
+						</TouchableOpacity>
 
-								<Text style={styles.label}>Frequency</Text>
-								<TouchableOpacity
-									style={styles.selector}
-									onPress={() => setShowFrequencyPicker(!showFrequencyPicker)}
-								>
-									<View
+						{showFrequencyPicker && (
+							<View style={styles.frequencyPickerContainer}>
+								{/* Frequency Type Options */}
+								{[
+									{
+										type: "daily" as FrequencyType,
+										label: "Every day",
+										icon: "today",
+										description: "Complete once daily",
+									},
+									{
+										type: "times_per_day" as FrequencyType,
+										label: "Multiple times/day",
+										icon: "repeat",
+										description: "Complete several times each day",
+									},
+									{
+										type: "specific_days" as FrequencyType,
+										label: "Specific days",
+										icon: "calendar",
+										description: "Choose which days of the week",
+									},
+									{
+										type: "times_per_week" as FrequencyType,
+										label: "Times per week",
+										icon: "calendar-outline",
+										description: "Flexible weekly goal",
+									},
+									{
+										type: "times_per_month" as FrequencyType,
+										label: "Times per month",
+										icon: "calendar-number-outline",
+										description: "Monthly completion goal",
+									},
+									{
+										type: "every_n_days" as FrequencyType,
+										label: "Every N days",
+										icon: "refresh",
+										description: "Custom interval between completions",
+									},
+								].map((option) => (
+									<TouchableOpacity
+										key={option.type}
 										style={[
-											styles.selectorIcon,
-											{ backgroundColor: selectedColor + "20" },
+											styles.frequencyOption,
+											frequencyType === option.type && {
+												backgroundColor: selectedColor + "15",
+												borderColor: selectedColor,
+											},
 										]}
+										onPress={() => {
+											setFrequencyType(option.type);
+											if (option.type === "daily") setFrequencyValue(1);
+											else if (option.type === "times_per_day")
+												setFrequencyValue(2);
+											else if (option.type === "times_per_week")
+												setFrequencyValue(3);
+											else if (option.type === "times_per_month")
+												setFrequencyValue(10);
+											else if (option.type === "every_n_days")
+												setFrequencyValue(2);
+										}}
 									>
-										<Ionicons name="repeat" size={24} color={selectedColor} />
-									</View>
-									<Text style={styles.selectorText}>{getFrequencyLabel()}</Text>
-									<Ionicons
-										name={showFrequencyPicker ? "chevron-up" : "chevron-down"}
-										size={20}
-										color={COLORS.textSecondary}
-									/>
-								</TouchableOpacity>
-
-								{showFrequencyPicker && (
-									<View style={styles.frequencyPickerContainer}>
-										{/* Frequency Type Options */}
-										{[
-											{
-												type: "daily" as FrequencyType,
-												label: "Every day",
-												icon: "today",
-												description: "Complete once daily",
-											},
-											{
-												type: "times_per_day" as FrequencyType,
-												label: "Multiple times/day",
-												icon: "repeat",
-												description: "Complete several times each day",
-											},
-											{
-												type: "specific_days" as FrequencyType,
-												label: "Specific days",
-												icon: "calendar",
-												description: "Choose which days of the week",
-											},
-											{
-												type: "times_per_week" as FrequencyType,
-												label: "Times per week",
-												icon: "calendar-outline",
-												description: "Flexible weekly goal",
-											},
-											{
-												type: "times_per_month" as FrequencyType,
-												label: "Times per month",
-												icon: "calendar-number-outline",
-												description: "Monthly completion goal",
-											},
-											{
-												type: "every_n_days" as FrequencyType,
-												label: "Every N days",
-												icon: "refresh",
-												description: "Custom interval between completions",
-											},
-										].map((option) => (
-											<TouchableOpacity
-												key={option.type}
+										<View
+											style={[
+												styles.frequencyOptionIcon,
+												{
+													backgroundColor:
+														frequencyType === option.type
+															? selectedColor + "20"
+															: COLORS.border,
+												},
+											]}
+										>
+											<Ionicons
+												name={option.icon as any}
+												size={20}
+												color={
+													frequencyType === option.type
+														? selectedColor
+														: COLORS.textSecondary
+												}
+											/>
+										</View>
+										<View style={styles.frequencyOptionContent}>
+											<Text
 												style={[
-													styles.frequencyOption,
+													styles.frequencyOptionText,
 													frequencyType === option.type && {
-														backgroundColor: selectedColor + "15",
-														borderColor: selectedColor,
+														color: selectedColor,
 													},
 												]}
-												onPress={() => {
-													setFrequencyType(option.type);
-													if (option.type === "daily") setFrequencyValue(1);
-													else if (option.type === "times_per_day")
-														setFrequencyValue(2);
-													else if (option.type === "times_per_week")
-														setFrequencyValue(3);
-													else if (option.type === "times_per_month")
-														setFrequencyValue(10);
-													else if (option.type === "every_n_days")
-														setFrequencyValue(2);
-												}}
 											>
-												<View
+												{option.label}
+											</Text>
+											<Text style={styles.frequencyOptionDescription}>
+												{option.description}
+											</Text>
+										</View>
+										{frequencyType === option.type && (
+											<Ionicons
+												name="checkmark-circle"
+												size={22}
+												color={selectedColor}
+											/>
+										)}
+									</TouchableOpacity>
+								))}
+
+								{/* Specific Days Selector */}
+								{frequencyType === "specific_days" && (
+									<View style={styles.daysSelector}>
+										<Text style={styles.daysSelectorLabel}>Select days:</Text>
+										<View style={styles.daysRow}>
+											{DAY_NAMES.map((day, index) => (
+												<TouchableOpacity
+													key={day}
 													style={[
-														styles.frequencyOptionIcon,
-														{
-															backgroundColor:
-																frequencyType === option.type
-																	? selectedColor + "20"
-																	: COLORS.border,
+														styles.dayButton,
+														selectedDays.includes(index) && {
+															backgroundColor: selectedColor,
+															borderColor: selectedColor,
 														},
 													]}
+													onPress={() => toggleDay(index)}
 												>
-													<Ionicons
-														name={option.icon as any}
-														size={20}
-														color={
-															frequencyType === option.type
-																? selectedColor
-																: COLORS.textSecondary
-														}
-													/>
-												</View>
-												<View style={styles.frequencyOptionContent}>
 													<Text
 														style={[
-															styles.frequencyOptionText,
-															frequencyType === option.type && {
-																color: selectedColor,
+															styles.dayButtonText,
+															selectedDays.includes(index) && {
+																color: "#fff",
 															},
 														]}
 													>
-														{option.label}
+														{day}
 													</Text>
-													<Text style={styles.frequencyOptionDescription}>
-														{option.description}
-													</Text>
-												</View>
-												{frequencyType === option.type && (
+												</TouchableOpacity>
+											))}
+										</View>
+									</View>
+								)}
+
+								{/* Value Selector for non-daily frequencies */}
+								{frequencyType !== "daily" &&
+									frequencyType !== "specific_days" && (
+										<View style={styles.frequencyValueContainer}>
+											<Text style={styles.frequencyValueLabel}>
+												{frequencyType === "times_per_day"
+													? "Times per day:"
+													: frequencyType === "times_per_week"
+													? "Times per week:"
+													: frequencyType === "times_per_month"
+													? "Times per month:"
+													: "Every N days:"}
+											</Text>
+											<View style={styles.frequencyValueSelector}>
+												<TouchableOpacity
+													style={[
+														styles.frequencyValueButton,
+														{ backgroundColor: selectedColor + "20" },
+													]}
+													onPress={() =>
+														setFrequencyValue(Math.max(1, frequencyValue - 1))
+													}
+												>
 													<Ionicons
-														name="checkmark-circle"
-														size={22}
+														name="remove"
+														size={20}
 														color={selectedColor}
 													/>
-												)}
-											</TouchableOpacity>
-										))}
-
-										{/* Specific Days Selector */}
-										{frequencyType === "specific_days" && (
-											<View style={styles.daysSelector}>
-												<Text style={styles.daysSelectorLabel}>
-													Select days:
+												</TouchableOpacity>
+												<Text
+													style={[
+														styles.frequencyValueText,
+														{ color: selectedColor },
+													]}
+												>
+													{frequencyValue}
 												</Text>
-												<View style={styles.daysRow}>
-													{DAY_NAMES.map((day, index) => (
-														<TouchableOpacity
-															key={day}
-															style={[
-																styles.dayButton,
-																selectedDays.includes(index) && {
-																	backgroundColor: selectedColor,
-																	borderColor: selectedColor,
-																},
-															]}
-															onPress={() => toggleDay(index)}
-														>
-															<Text
-																style={[
-																	styles.dayButtonText,
-																	selectedDays.includes(index) && {
-																		color: "#fff",
-																	},
-																]}
-															>
-																{day}
-															</Text>
-														</TouchableOpacity>
-													))}
-												</View>
+												<TouchableOpacity
+													style={[
+														styles.frequencyValueButton,
+														{ backgroundColor: selectedColor + "20" },
+													]}
+													onPress={() => setFrequencyValue(frequencyValue + 1)}
+												>
+													<Ionicons
+														name="add"
+														size={20}
+														color={selectedColor}
+													/>
+												</TouchableOpacity>
 											</View>
-										)}
-
-										{/* Value Selector for non-daily frequencies */}
-										{frequencyType !== "daily" &&
-											frequencyType !== "specific_days" && (
-												<View style={styles.frequencyValueContainer}>
-													<Text style={styles.frequencyValueLabel}>
-														{frequencyType === "times_per_day"
-															? "Times per day:"
-															: frequencyType === "times_per_week"
-															? "Times per week:"
-															: frequencyType === "times_per_month"
-															? "Times per month:"
-															: "Every N days:"}
-													</Text>
-													<View style={styles.frequencyValueSelector}>
-														<TouchableOpacity
-															style={[
-																styles.frequencyValueButton,
-																{ backgroundColor: selectedColor + "20" },
-															]}
-															onPress={() =>
-																setFrequencyValue(
-																	Math.max(1, frequencyValue - 1)
-																)
-															}
-														>
-															<Ionicons
-																name="remove"
-																size={20}
-																color={selectedColor}
-															/>
-														</TouchableOpacity>
-														<Text
-															style={[
-																styles.frequencyValueText,
-																{ color: selectedColor },
-															]}
-														>
-															{frequencyValue}
-														</Text>
-														<TouchableOpacity
-															style={[
-																styles.frequencyValueButton,
-																{ backgroundColor: selectedColor + "20" },
-															]}
-															onPress={() =>
-																setFrequencyValue(frequencyValue + 1)
-															}
-														>
-															<Ionicons
-																name="add"
-																size={20}
-																color={selectedColor}
-															/>
-														</TouchableOpacity>
-													</View>
-												</View>
-											)}
-									</View>
-								)}
-
-								{/* Reminders */}
-								<Text style={styles.sectionLabel}>REMINDERS</Text>
-
-								<View style={styles.switchRow}>
-									<View style={styles.switchInfo}>
-										<View
-											style={[
-												styles.selectorIcon,
-												{ backgroundColor: selectedColor + "20" },
-											]}
-										>
-											<Ionicons
-												name="notifications"
-												size={24}
-												color={selectedColor}
-											/>
 										</View>
-										<View style={styles.switchTextContainer}>
-											<Text style={styles.switchTitle}>Daily Reminder</Text>
-											<Text style={styles.switchSubtitle}>
-												Get notified to complete your habit
-											</Text>
-										</View>
-									</View>
-									<Switch
-										value={notificationsEnabled}
-										onValueChange={setNotificationsEnabled}
-										trackColor={{
-											false: COLORS.border,
-											true: selectedColor + "60",
-										}}
-										thumbColor={
-											notificationsEnabled
-												? selectedColor
-												: COLORS.textSecondary
-										}
+									)}
+							</View>
+						)}
+
+						{/* Reminders */}
+						<Text style={styles.sectionLabel}>REMINDERS</Text>
+
+						<View style={styles.switchRow}>
+							<View style={styles.switchInfo}>
+								<View
+									style={[
+										styles.selectorIcon,
+										{ backgroundColor: selectedColor + "20" },
+									]}
+								>
+									<Ionicons
+										name="notifications"
+										size={24}
+										color={selectedColor}
 									/>
 								</View>
+								<View style={styles.switchTextContainer}>
+									<Text style={styles.switchTitle}>Daily Reminder</Text>
+									<Text style={styles.switchSubtitle}>
+										Get notified to complete your habit
+									</Text>
+								</View>
+							</View>
+							<Switch
+								value={notificationsEnabled}
+								onValueChange={setNotificationsEnabled}
+								trackColor={{
+									false: COLORS.border,
+									true: selectedColor + "60",
+								}}
+								thumbColor={
+									notificationsEnabled ? selectedColor : COLORS.textSecondary
+								}
+							/>
+						</View>
 
-								{notificationsEnabled && (
-									<>
-										<Text style={styles.label}>Reminder Time</Text>
-										<TouchableOpacity
-											style={styles.selector}
-											onPress={() => setShowTimePicker(!showTimePicker)}
-										>
-											<View
-												style={[
-													styles.selectorIcon,
-													{ backgroundColor: selectedColor + "20" },
-												]}
-											>
-												<Ionicons name="time" size={24} color={selectedColor} />
-											</View>
-											<Text style={styles.selectorText}>
-												{notificationTime}
-											</Text>
-											<Ionicons
-												name={showTimePicker ? "chevron-up" : "chevron-down"}
-												size={20}
-												color={COLORS.textSecondary}
-											/>
-										</TouchableOpacity>
-
-										{showTimePicker && (
-											<View style={styles.timePickerContainer}>
-												<ScrollView
-													horizontal
-													showsHorizontalScrollIndicator={false}
-												>
-													<View style={styles.timeOptions}>
-														{[
-															"06:00",
-															"07:00",
-															"08:00",
-															"09:00",
-															"10:00",
-															"11:00",
-															"12:00",
-															"13:00",
-															"14:00",
-															"15:00",
-															"16:00",
-															"17:00",
-															"18:00",
-															"19:00",
-															"20:00",
-															"21:00",
-															"22:00",
-														].map((time) => (
-															<TouchableOpacity
-																key={time}
-																style={[
-																	styles.timeOption,
-																	notificationTime === time && {
-																		backgroundColor: selectedColor,
-																		borderColor: selectedColor,
-																	},
-																]}
-																onPress={() => {
-																	setNotificationTime(time);
-																	setShowTimePicker(false);
-																}}
-															>
-																<Text
-																	style={[
-																		styles.timeOptionText,
-																		notificationTime === time && {
-																			color: "#fff",
-																		},
-																	]}
-																>
-																	{time}
-																</Text>
-															</TouchableOpacity>
-														))}
-													</View>
-												</ScrollView>
-											</View>
-										)}
-									</>
-								)}
-
-								{/* Preview */}
-								<Text style={styles.sectionLabel}>PREVIEW</Text>
-								<View style={styles.previewCard}>
+						{notificationsEnabled && (
+							<>
+								<Text style={styles.label}>Reminder Time</Text>
+								<TouchableOpacity
+									style={styles.selector}
+									onPress={() => setShowTimePicker(!showTimePicker)}
+								>
 									<View
 										style={[
-											styles.previewIcon,
+											styles.selectorIcon,
 											{ backgroundColor: selectedColor + "20" },
 										]}
 									>
-										<Ionicons
-											name={selectedIcon as any}
-											size={28}
-											color={selectedColor}
-										/>
+										<Ionicons name="time" size={24} color={selectedColor} />
 									</View>
-									<View style={styles.previewInfo}>
-										<Text
-											style={[styles.previewName, { color: selectedColor }]}
+									<Text style={styles.selectorText}>{notificationTime}</Text>
+									<Ionicons
+										name={showTimePicker ? "chevron-up" : "chevron-down"}
+										size={20}
+										color={COLORS.textSecondary}
+									/>
+								</TouchableOpacity>
+
+								{showTimePicker && (
+									<View style={styles.timePickerContainer}>
+										<ScrollView
+											horizontal
+											showsHorizontalScrollIndicator={false}
 										>
-											{habitName || "Habit Name"}
-										</Text>
-										<Text style={styles.previewDescription}>
-											{getFrequencyLabel()}
-											{notificationsEnabled
-												? ` • ${notificationTime}`
-												: " • No reminder"}
-										</Text>
+											<View style={styles.timeOptions}>
+												{[
+													"06:00",
+													"07:00",
+													"08:00",
+													"09:00",
+													"10:00",
+													"11:00",
+													"12:00",
+													"13:00",
+													"14:00",
+													"15:00",
+													"16:00",
+													"17:00",
+													"18:00",
+													"19:00",
+													"20:00",
+													"21:00",
+													"22:00",
+												].map((time) => (
+													<TouchableOpacity
+														key={time}
+														style={[
+															styles.timeOption,
+															notificationTime === time && {
+																backgroundColor: selectedColor,
+																borderColor: selectedColor,
+															},
+														]}
+														onPress={() => {
+															setNotificationTime(time);
+															setShowTimePicker(false);
+														}}
+													>
+														<Text
+															style={[
+																styles.timeOptionText,
+																notificationTime === time && {
+																	color: "#fff",
+																},
+															]}
+														>
+															{time}
+														</Text>
+													</TouchableOpacity>
+												))}
+											</View>
+										</ScrollView>
 									</View>
-								</View>
+								)}
+							</>
+						)}
 
-								<View style={{ height: 100 }} />
-							</ScrollView>
-
-							{/* Sticky Footer Buttons */}
-							<View style={styles.stickyFooter}>
-								<TouchableOpacity
-									style={styles.cancelButton}
-									onPress={handleClose}
-								>
-									<Text style={styles.cancelButtonText}>Cancel</Text>
-								</TouchableOpacity>
-								<TouchableOpacity
-									style={[
-										styles.createButton,
-										{ backgroundColor: selectedColor },
-									]}
-									onPress={handleCreateHabit}
-								>
-									<Text style={styles.createButtonText}>Create Habit</Text>
-								</TouchableOpacity>
+						{/* Preview */}
+						<Text style={styles.sectionLabel}>PREVIEW</Text>
+						<View style={styles.previewCard}>
+							<View
+								style={[
+									styles.previewIcon,
+									{ backgroundColor: selectedColor + "20" },
+								]}
+							>
+								<Ionicons
+									name={selectedIcon as any}
+									size={28}
+									color={selectedColor}
+								/>
 							</View>
-						</Animated.View>
-					</TouchableWithoutFeedback>
-				</View>
-			</TouchableWithoutFeedback>
+							<View style={styles.previewInfo}>
+								<Text style={[styles.previewName, { color: selectedColor }]}>
+									{habitName || "Habit Name"}
+								</Text>
+								<Text style={styles.previewDescription}>
+									{getFrequencyLabel()}
+									{notificationsEnabled
+										? ` • ${notificationTime}`
+										: " • No reminder"}
+								</Text>
+							</View>
+						</View>
+
+						<View style={{ height: 100 }} />
+					</ScrollView>
+
+					{/* Sticky Footer Buttons */}
+					<View style={styles.stickyFooter}>
+						<TouchableOpacity style={styles.cancelButton} onPress={handleClose}>
+							<Text style={styles.cancelButtonText}>Cancel</Text>
+						</TouchableOpacity>
+						<TouchableOpacity
+							style={[styles.createButton, { backgroundColor: selectedColor }]}
+							onPress={handleCreateHabit}
+						>
+							<Text style={styles.createButtonText}>Create Habit</Text>
+						</TouchableOpacity>
+					</View>
+				</Animated.View>
+			</View>
 		</Modal>
 	);
 };

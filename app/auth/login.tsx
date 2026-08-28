@@ -117,6 +117,16 @@ export default function LoginScreen() {
 		}
 	};
 
+	const DEV_EMAIL = "dev@lifesync.test";
+	const DEV_PASSWORD = "devpassword123";
+
+	const handleDevLogin = async () => {
+		const { error } = await signInWithEmail(DEV_EMAIL, DEV_PASSWORD);
+		if (!error) {
+			router.replace("/(tabs)");
+		}
+	};
+
 	const styles = createStyles(theme);
 
 	return (
@@ -328,6 +338,18 @@ export default function LoginScreen() {
 					<Ionicons name="logo-google" size={24} color={theme.text} />
 					<Text style={styles.socialButtonText}>Continue with Google</Text>
 				</TouchableOpacity>
+
+				{/* Dev-only Quick Login */}
+				{__DEV__ && (
+					<TouchableOpacity
+						style={[styles.button, styles.devButton]}
+						onPress={handleDevLogin}
+						disabled={isLoading}
+					>
+						<Ionicons name="bug-outline" size={20} color="#fff" />
+						<Text style={styles.buttonText}>Dev Login</Text>
+					</TouchableOpacity>
+				)}
 
 				{/* Sign Up Link */}
 				<View style={styles.signupContainer}>
@@ -564,6 +586,11 @@ const createStyles = (theme: any) =>
 			borderWidth: 1,
 			borderColor: theme.border,
 			gap: 12,
+		},
+		devButton: {
+			backgroundColor: "#9333ea",
+			marginTop: 12,
+			gap: 8,
 		},
 		socialButtonText: {
 			color: theme.text,
