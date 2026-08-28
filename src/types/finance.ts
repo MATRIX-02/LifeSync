@@ -66,8 +66,10 @@ export interface Transaction {
 	amount: number;
 	category: ExpenseCategory | IncomeCategory;
 	description?: string;
+	// The `finance_transactions` table has a `note` column and no `notes`.
+	// A phantom `notes?` used to sit here, and three read sites used it — the
+	// edit form never pre-filled and the detail view never showed the note.
 	note?: string;
-	notes?: string;
 	date: string;
 	time: string;
 	accountId: string;
@@ -129,7 +131,6 @@ export interface SavingsGoal {
 	linkedAccountId?: string; // Account linked to this goal
 	createdAt: string;
 	updatedAt: string;
-	targetDate?: string;
 }
 
 export interface GoalContribution {

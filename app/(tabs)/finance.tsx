@@ -1,7 +1,10 @@
 // Finance Tracker - Main Screen
 
 import { useSubscriptionCheck } from "@/src/components/PremiumFeatureGate";
-import { SharedDrawer } from "@/src/components/SharedDrawer";
+import {
+	DrawerEdgeSwipe,
+	SharedDrawer,
+} from "@/src/components/SharedDrawer";
 import { useFinanceStore } from "@/src/context/financeStoreDB";
 import { useModuleStore } from "@/src/context/moduleContext";
 import { Theme, useColors, useTheme } from "@/src/context/themeContext";
@@ -219,6 +222,13 @@ export default function FinanceScreen() {
 			/>
 
 			{/* Main Content */}
+			{/* Swipe from the left edge to open the drawer */}
+			<DrawerEdgeSwipe
+				drawerAnim={drawerAnim}
+				drawerOpen={drawerOpen}
+				setDrawerOpen={setDrawerOpen}
+			/>
+
 			{/* Drawer Overlay */}
 			{drawerOpen && (
 				<TouchableOpacity

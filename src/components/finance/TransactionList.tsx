@@ -209,7 +209,7 @@ export default function TransactionList({
 			amount: transaction.amount.toString(),
 			description: transaction.description || "",
 			category: transaction.category as ExpenseCategory | IncomeCategory,
-			note: transaction.notes || "",
+			note: transaction.note || "",
 		});
 		setShowEditModal(true);
 	};
@@ -766,11 +766,11 @@ export default function TransactionList({
 												</>
 											);
 										})()}
-										{selectedTransaction.notes && (
+										{selectedTransaction.note && (
 											<View style={styles.detailRow}>
 												<Text style={styles.detailLabel}>Note</Text>
 												<Text style={styles.detailValue}>
-													{selectedTransaction.notes}
+													{selectedTransaction.note}
 												</Text>
 											</View>
 										)}

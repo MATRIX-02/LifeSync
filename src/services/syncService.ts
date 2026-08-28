@@ -40,6 +40,17 @@ const objectToSnakeCase = (obj: any): any => {
 	for (const key in obj) {
 		if (obj.hasOwnProperty(key)) {
 			const value = obj[key];
+			// A key literally named "undefined" is never a real column. It comes
+			// from an `obj[someUndefinedVar] = ...` write upstream, and PostgREST
+			// rejects the ENTIRE request over it (PGRST204), taking every other
+			// row with it. Drop it rather than fail the sync.
+			if (key === "undefined") {
+				console.warn(
+					'Sync: dropping bogus "undefined" key from payload. Sibling keys:',
+					Object.keys(obj).join(", ")
+				);
+				continue;
+			}
 			// Skip undefined values and convert Date objects
 			if (value === undefined) continue;
 			if (value instanceof Date) {
@@ -86,6 +97,25 @@ const assignIdIfMissing = (obj: any, key: string = "id"): string => {
 		obj[key] = newId;
 	} catch {}
 	return newId;
+};
+
+// Helper: Coerce a foreign-key-ish value for a Postgres `uuid` column.
+// Postgres rejects "" and legacy non-UUID ids with 22P02 ("invalid input syntax
+// for type uuid"), which fails the ENTIRE upsert — not just the offending row.
+// Local data predates the UUID convention and often carries "" or an old id.
+const uuidOrNull = (value: any): string | null =>
+	isValidUUID(value) ? value : null;
+
+// Helper: Null out every uuid-typed reference column on a payload object.
+// Keys are the snake_case column names as they appear in the table.
+const sanitizeUUIDRefs = (
+	row: Record<string, any>,
+	columns: string[]
+): Record<string, any> => {
+	for (const col of columns) {
+		if (col in row) row[col] = uuidOrNull(row[col]);
+	}
+	return row;
 };
 
 // Helper: Convert snake_case to camelCase
@@ -733,13 +763,10 @@ export const syncFinanceToCloud = async (
 				objectToSnakeCase({
 					...t,
 					id: assignIdIfMissing(t, "id"),
-					account_id: t.accountId
-						? isValidUUID(t.accountId)
-							? t.accountId
-							: null
-						: null,
 					user_id: userId,
 				})
+			).map((t: any) =>
+				sanitizeUUIDRefs(t, ["account_id", "to_account_id", "recurring_id"])
 			);
 
 			const chunkSize = 500;
@@ -762,14 +789,9 @@ export const syncFinanceToCloud = async (
 				objectToSnakeCase({
 					...r,
 					id: assignIdIfMissing(r, "id"),
-					account_id: r.accountId
-						? isValidUUID(r.accountId)
-							? r.accountId
-							: null
-						: null,
 					user_id: userId,
 				})
-			);
+			).map((r: any) => sanitizeUUIDRefs(r, ["account_id"]));
 
 			const { error: recurringError } = await (
 				supabase.from("recurring_transactions") as any
@@ -803,7 +825,7 @@ export const syncFinanceToCloud = async (
 					id: assignIdIfMissing(g, "id"),
 					user_id: userId,
 				})
-			);
+			).map((g: any) => sanitizeUUIDRefs(g, ["linked_account_id"]));
 
 			const { error: goalsError } = await (
 				supabase.from("savings_goals") as any
@@ -820,6 +842,8 @@ export const syncFinanceToCloud = async (
 					id: assignIdIfMissing(r, "id"),
 					user_id: userId,
 				})
+			).map((r: any) =>
+				sanitizeUUIDRefs(r, ["paid_from_account_id", "account_id"])
 			);
 
 			const { error: remindersError } = await (
@@ -837,6 +861,8 @@ export const syncFinanceToCloud = async (
 					id: assignIdIfMissing(d, "id"),
 					user_id: userId,
 				})
+			).map((d: any) =>
+				sanitizeUUIDRefs(d, ["linked_account_id", "linked_credit_card_id"])
 			);
 
 			const { error: debtsError } = await (
@@ -853,11 +879,14 @@ export const syncFinanceToCloud = async (
 					...g,
 					id: assignIdIfMissing(g, "id"),
 					user_id: userId,
-					members: JSON.stringify(g.members || []),
-					expenses: JSON.stringify(g.expenses || []),
-					settlements: JSON.stringify(g.settlements || []),
+					// members/expenses/settlements are jsonb columns — pass the
+					// arrays through. Stringifying them double-encodes, storing a
+					// JSON string inside jsonb instead of an array.
+					members: g.members || [],
+					expenses: g.expenses || [],
+					settlements: g.settlements || [],
 				})
-			);
+			).map((g: any) => sanitizeUUIDRefs(g, ["created_by"]));
 
 			const { error: groupsError } = await (
 				supabase.from("split_groups") as any
@@ -918,8 +947,31 @@ export const fetchFinanceFromCloud = async (
 				.from("user_sync_status")
 				.select("finance_currency")
 				.eq("user_id", userId)
-				.single(),
+				.maybeSingle(),
 		]);
+
+		// Surface per-query failures. supabase-js resolves rather than throws, so
+		// without this an RLS denial or a missing table looks identical to "the
+		// user has no data" — and the caller then overwrites good local state
+		// with an empty array.
+		const failures = [
+			["finance_accounts", accountsRes.error],
+			["finance_transactions", transactionsRes.error],
+			["recurring_transactions", recurringRes.error],
+			["finance_budgets", budgetsRes.error],
+			["savings_goals", goalsRes.error],
+			["bill_reminders", remindersRes.error],
+			["finance_debts", debtsRes.error],
+			["split_groups", groupsRes.error],
+		].filter(([, err]) => err) as [string, any][];
+
+		if (failures.length > 0) {
+			const message = failures
+				.map(([table, err]) => `${table}: ${err.message}`)
+				.join("; ");
+			console.error("fetchFinanceFromCloud failed:", message);
+			return { data: null, error: message };
+		}
 
 		// Parse JSON fields for split groups and convert to camelCase
 		const splitGroups = (groupsRes.data || []).map((g: any) => {
@@ -971,166 +1023,370 @@ export const syncStudyToCloud = async (
 	}
 ): Promise<SyncResult> => {
 	try {
-		// Sync study goals
-		if (studyData.studyGoals && studyData.studyGoals.length > 0) {
-			const goalsWithUser = studyData.studyGoals.map((g) => {
-				assignIdIfMissing(g, "id");
-				return objectToSnakeCase({
-					...g,
-					id: g.id,
-					user_id: userId,
-				});
-			});
+		// study_subjects.goal_id, flashcards.deck_id and friends are real foreign
+		// keys. Two things break them, and either one raises 23503 and fails the
+		// whole study sync:
+		//
+		//   1. assignIdIfMissing() rewrites a parent's non-UUID id, but children
+		//      still point at the OLD id.
+		//   2. A child references a parent that was deleted locally.
+		//
+		// So: record every id rewrite, then resolve each child reference through
+		// that map and null it only when we can prove the parent doesn't exist.
+		const idRemap = new Map<string, string>();
 
-			const { error: goalsError } = await (
-				supabase.from("study_goals") as any
-			).upsert(goalsWithUser, { onConflict: "id" });
+		const withId = (obj: any): string => {
+			const original = obj?.id;
+			const finalId = assignIdIfMissing(obj, "id");
+			if (original && original !== finalId) idRemap.set(original, finalId);
+			return finalId;
+		};
 
-			if (goalsError) throw goalsError;
+		// Authoritative parent ids, read back after the parent upsert so that
+		// references to rows already in the cloud (but absent from this payload)
+		// survive. Returns null if we can't tell, in which case we leave the
+		// reference alone rather than destroying a good association.
+		const loadParentIds = async (
+			table: string
+		): Promise<Set<string> | null> => {
+			const { data, error } = await (supabase.from(table) as any)
+				.select("id")
+				.eq("user_id", userId);
+			if (error) {
+				console.warn(
+					`Could not load ${table} ids for FK check:`,
+					error.message
+				);
+				return null;
+			}
+			return new Set((data || []).map((r: any) => r.id));
+		};
+
+		const resolveRef = (
+			value: any,
+			valid: Set<string> | null
+		): string | null => {
+			if (!value) return null;
+			const mapped = idRemap.get(value) ?? value;
+			if (!isValidUUID(mapped)) return null;
+			if (!valid) return mapped;
+			return valid.has(mapped) ? mapped : null;
+		};
+
+		// Which of the three reference columns actually exist on each table, and
+		// whether they are NOT NULL (from information_schema). This matters twice:
+		//   - a ref column a table does NOT have must be stripped, or PostgREST
+		//     rejects the whole request with 42703;
+		//   - a NOT NULL ref that cannot be resolved cannot be nulled (23502), so
+		//     the row is skipped instead of failing the batch.
+		type RefSpec = {
+			column: string;
+			valid: Set<string> | null;
+			required: boolean;
+		};
+		const ALL_REF_COLUMNS = ["goal_id", "subject_id", "deck_id"];
+
+		let skipped = 0;
+
+		const prepare = (
+			table: string,
+			rows: any[],
+			specs: RefSpec[]
+		): any[] => {
+			const out: any[] = [];
+			for (const r of rows) {
+				withId(r);
+				const row = objectToSnakeCase({ ...r, id: r.id, user_id: userId });
+
+				// Drop reference columns this table doesn't have.
+				const known = new Set(specs.map((sp) => sp.column));
+				for (const col of ALL_REF_COLUMNS) {
+					if (!known.has(col)) delete row[col];
+				}
+
+				// Strip anything this table has no column for, before the FK
+				// handling below re-adds the reference columns it does have.
+				applyWhitelist(table, row);
+
+				let usable = true;
+				for (const spec of specs) {
+					const resolved = resolveRef(row[spec.column], spec.valid);
+					if (resolved === null && spec.required) {
+						usable = false;
+						break;
+					}
+					row[spec.column] = resolved;
+				}
+
+				if (usable) out.push(row);
+				else skipped++;
+			}
+			return out;
+		};
+
+		// Columns that actually exist, straight from information_schema.
+		//
+		// The local types have drifted well past the schema — 30+ fields across
+		// these tables have no column. Sending even one makes PostgREST reject
+		// the ENTIRE request (42703 / PGRST204), which is why a single stale
+		// field takes the whole study sync down with it.
+		//
+		const TABLE_COLUMNS: Record<string, string[]> = {
+			study_subjects: [
+				"id",
+				"user_id",
+				"goal_id",
+				"name",
+				"description",
+				"color",
+				"icon",
+				"priority",
+				"difficulty",
+				"progress",
+				"target_hours",
+				"completed_hours",
+				"created_at",
+				"updated_at",
+				"hours_spent",
+				"order",
+				"status",
+			],
+			study_sessions: [
+				"id",
+				"user_id",
+				"goal_id",
+				"subject_id",
+				"type",
+				"start_time",
+				"end_time",
+				"duration",
+				"is_active",
+				"break_minutes",
+				"focus_score",
+				"notes",
+				"pomodoro_count",
+				"created_at",
+				"updated_at",
+				"breaks_taken",
+				"total_break_time",
+			],
+			study_goals: [
+				"id",
+				"user_id",
+				"name",
+				"description",
+				"goal_type",
+				"target_date",
+				"target_score",
+				"status",
+				"priority",
+				"color",
+				"icon",
+				"daily_target_minutes",
+				"created_at",
+				"updated_at",
+				"start_date",
+				"total_hours_spent",
+				"total_hours_target",
+				"type",
+			],
+			flashcard_decks: [
+				"id",
+				"user_id",
+				"goal_id",
+				"subject_id",
+				"name",
+				"description",
+				"card_count",
+				"mastered_count",
+				"created_at",
+				"updated_at",
+				"next_review_at",
+				"last_reviewed_at",
+			],
+			flashcards: [
+				"id",
+				"user_id",
+				"deck_id",
+				"front",
+				"back",
+				"tags",
+				"ease_factor",
+				"interval",
+				"repetitions",
+				"next_review_date",
+				"last_reviewed_at",
+				"created_at",
+				"updated_at",
+				"next_review_at",
+				"review_count",
+				"correct_count",
+				"repetition_level",
+				"difficulty",
+				"status",
+			],
+			revision_schedule: [
+				"id",
+				"user_id",
+				"subject_id",
+				"scheduled_date",
+				"type",
+				"status",
+				"notes",
+				"completed_at",
+				"created_at",
+				"updated_at",
+			],
+			mock_tests: [
+				"id",
+				"user_id",
+				"goal_id",
+				"name",
+				"date",
+				"duration_minutes",
+				"total_marks",
+				"obtained_marks",
+				"percentage",
+				"subject_wise_scores",
+				"notes",
+				"created_at",
+				"updated_at",
+			],
+			daily_plans: [
+				"id",
+				"user_id",
+				"date",
+				"tasks",
+				"notes",
+				"completed",
+				"created_at",
+				"updated_at",
+			],
+			study_notes: [
+				"id",
+				"user_id",
+				"subject_id",
+				"goal_id",
+				"title",
+				"content",
+				"tags",
+				"is_pinned",
+				"created_at",
+				"updated_at",
+			],
+		};
+
+		const droppedFields = new Set<string>();
+
+		const applyWhitelist = (table: string, row: Record<string, any>) => {
+			const allowed = TABLE_COLUMNS[table];
+			if (!allowed) return;
+			for (const key of Object.keys(row)) {
+				if (!allowed.includes(key)) {
+					droppedFields.add(`${table}.${key}`);
+					delete row[key];
+				}
+			}
+		};
+
+		const upsertAll = async (table: string, rows: any[]): Promise<void> => {
+			const chunkSize = 500;
+			for (let i = 0; i < rows.length; i += chunkSize) {
+				const { error } = await (supabase.from(table) as any).upsert(
+					rows.slice(i, i + chunkSize),
+					{ onConflict: "id" }
+				);
+				if (error) throw error;
+			}
+		};
+
+		// --- Parents first, in dependency order ---
+
+		// Study goals (no parents)
+		if (studyData.studyGoals?.length > 0) {
+			await upsertAll("study_goals", prepare("study_goals", studyData.studyGoals, []));
+		}
+		const goalIds = await loadParentIds("study_goals");
+
+		// study_subjects.goal_id is NOT NULL
+		if (studyData.subjects?.length > 0) {
+			await upsertAll(
+				"study_subjects",
+				prepare("study_subjects", studyData.subjects, [
+					{ column: "goal_id", valid: goalIds, required: true },
+				])
+			);
+		}
+		const subjectIds = await loadParentIds("study_subjects");
+
+		// flashcard_decks.goal_id / subject_id are both nullable
+		if (studyData.flashcardDecks?.length > 0) {
+			await upsertAll(
+				"flashcard_decks",
+				prepare("flashcard_decks", studyData.flashcardDecks, [
+					{ column: "goal_id", valid: goalIds, required: false },
+					{ column: "subject_id", valid: subjectIds, required: false },
+				])
+			);
+		}
+		const deckIds = await loadParentIds("flashcard_decks");
+
+		// --- Children ---
+		const children: [string, any[] | undefined, RefSpec[]][] = [
+			[
+				"study_sessions",
+				studyData.studySessions,
+				[
+					{ column: "goal_id", valid: goalIds, required: false },
+					{ column: "subject_id", valid: subjectIds, required: false },
+				],
+			],
+			[
+				"flashcards",
+				studyData.flashcards,
+				[{ column: "deck_id", valid: deckIds, required: true }],
+			],
+			[
+				"revision_schedule",
+				studyData.revisionSchedule,
+				[{ column: "subject_id", valid: subjectIds, required: true }],
+			],
+			[
+				"mock_tests",
+				studyData.mockTests,
+				[{ column: "goal_id", valid: goalIds, required: true }],
+			],
+			// daily_plans has none of the reference columns
+			["daily_plans", studyData.dailyPlans, []],
+			[
+				"study_notes",
+				studyData.studyNotes,
+				[
+					{ column: "goal_id", valid: goalIds, required: false },
+					{ column: "subject_id", valid: subjectIds, required: false },
+				],
+			],
+		];
+
+		for (const [table, rows, specs] of children) {
+			if (rows && rows.length > 0) {
+				await upsertAll(table, prepare(table, rows, specs));
+			}
 		}
 
-		// Sync subjects
-		if (studyData.subjects && studyData.subjects.length > 0) {
-			const subjectsWithUser = studyData.subjects.map((s) => {
-				assignIdIfMissing(s, "id");
-				return objectToSnakeCase({
-					...s,
-					id: s.id,
-					user_id: userId,
-				});
-			});
-
-			const { error: subjectsError } = await (
-				supabase.from("study_subjects") as any
-			).upsert(subjectsWithUser, { onConflict: "id" });
-
-			if (subjectsError) throw subjectsError;
+		if (skipped > 0) {
+			console.warn(
+				`Study sync: skipped ${skipped} row(s) whose required parent no longer exists.`
+			);
 		}
 
-		// Sync study sessions
-		if (studyData.studySessions && studyData.studySessions.length > 0) {
-			const sessionsWithUser = studyData.studySessions.map((s) => {
-				assignIdIfMissing(s, "id");
-				return objectToSnakeCase({
-					...s,
-					id: s.id,
-					user_id: userId,
-				});
-			});
-
-			const { error: sessionsError } = await (
-				supabase.from("study_sessions") as any
-			).upsert(sessionsWithUser, { onConflict: "id" });
-
-			if (sessionsError) throw sessionsError;
-		}
-
-		// Sync flashcard decks
-		if (studyData.flashcardDecks && studyData.flashcardDecks.length > 0) {
-			const decksWithUser = studyData.flashcardDecks.map((d) => {
-				assignIdIfMissing(d, "id");
-				return objectToSnakeCase({
-					...d,
-					id: d.id,
-					user_id: userId,
-				});
-			});
-
-			const { error: decksError } = await (
-				supabase.from("flashcard_decks") as any
-			).upsert(decksWithUser, { onConflict: "id" });
-
-			if (decksError) throw decksError;
-		}
-
-		// Sync flashcards
-		if (studyData.flashcards && studyData.flashcards.length > 0) {
-			const cardsWithUser = studyData.flashcards.map((c) => {
-				assignIdIfMissing(c, "id");
-				return objectToSnakeCase({
-					...c,
-					id: c.id,
-					user_id: userId,
-				});
-			});
-
-			const { error: cardsError } = await (
-				supabase.from("flashcards") as any
-			).upsert(cardsWithUser, { onConflict: "id" });
-
-			if (cardsError) throw cardsError;
-		}
-
-		// Sync revision schedule
-		if (studyData.revisionSchedule && studyData.revisionSchedule.length > 0) {
-			const revisionWithUser = studyData.revisionSchedule.map((r) => {
-				assignIdIfMissing(r, "id");
-				return objectToSnakeCase({
-					...r,
-					id: r.id,
-					user_id: userId,
-				});
-			});
-
-			const { error: revisionError } = await (
-				supabase.from("revision_schedule") as any
-			).upsert(revisionWithUser, { onConflict: "id" });
-
-			if (revisionError) throw revisionError;
-		}
-
-		// Sync mock tests
-		if (studyData.mockTests && studyData.mockTests.length > 0) {
-			const testsWithUser = studyData.mockTests.map((t) => {
-				assignIdIfMissing(t, "id");
-				return objectToSnakeCase({
-					...t,
-					id: t.id,
-					user_id: userId,
-				});
-			});
-
-			const { error: testsError } = await (
-				supabase.from("mock_tests") as any
-			).upsert(testsWithUser, { onConflict: "id" });
-
-			if (testsError) throw testsError;
-		}
-
-		// Sync daily plans
-		if (studyData.dailyPlans && studyData.dailyPlans.length > 0) {
-			const plansWithUser = studyData.dailyPlans.map((p) => {
-				assignIdIfMissing(p, "id");
-				return objectToSnakeCase({
-					...p,
-					id: p.id,
-					user_id: userId,
-				});
-			});
-
-			const { error: plansError } = await (
-				supabase.from("daily_plans") as any
-			).upsert(plansWithUser, { onConflict: "id" });
-
-			if (plansError) throw plansError;
-		}
-
-		// Sync study notes
-		if (studyData.studyNotes && studyData.studyNotes.length > 0) {
-			const notesWithUser = studyData.studyNotes.map((n) => {
-				assignIdIfMissing(n, "id");
-				return objectToSnakeCase({
-					...n,
-					id: n.id,
-					user_id: userId,
-				});
-			});
-
-			const { error: notesError } = await (
-				supabase.from("study_notes") as any
-			).upsert(notesWithUser, { onConflict: "id" });
-
-			if (notesError) throw notesError;
+		if (droppedFields.size > 0) {
+			// These fields exist in the app but have no column, so they do not
+			// persist. Each one needs a migration before it will round-trip.
+			console.warn(
+				"Study sync: dropped fields with no matching column:",
+				[...droppedFields].sort().join(", ")
+			);
 		}
 
 		// Update sync timestamp

@@ -797,9 +797,9 @@ export default function BudgetManager({
 								</View>
 								<View style={styles.savingsInfo}>
 									<Text style={styles.savingsName}>{goal.name}</Text>
-									{goal.targetDate && (
+									{goal.deadline && (
 										<Text style={styles.savingsDeadline}>
-											Due: {new Date(goal.targetDate).toLocaleDateString()}
+											Due: {new Date(goal.deadline).toLocaleDateString()}
 										</Text>
 									)}
 								</View>

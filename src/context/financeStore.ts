@@ -1969,16 +1969,36 @@ export const useFinanceStore = create<FinanceStore>()(
 						console.error("fetchFinanceFromCloud error:", error);
 						return;
 					}
+					// Accounts and transactions are the only entities this store
+					// writes to Supabase on every mutation, so the cloud is
+					// authoritative for them and may legitimately be empty.
+					//
+					// Budgets, savings goals, bill reminders, debts, recurring
+					// transactions and split groups are mutated LOCALLY ONLY —
+					// they reach the cloud solely via an explicit "Sync to Cloud".
+					// Overwriting them with an empty cloud result destroys data
+					// the user has never had a chance to push. Only take the
+					// cloud copy when it actually has rows.
+					const preferCloud = <T,>(cloud: T[] | undefined, local: T[]): T[] =>
+						cloud && cloud.length > 0 ? cloud : local;
+					const state = get();
+
 					set({
 						accounts: data.accounts || [],
 						transactions: data.transactions || [],
-						recurringTransactions: data.recurringTransactions || [],
-						budgets: data.budgets || [],
-						savingsGoals: data.savingsGoals || [],
-						billReminders: data.billReminders || [],
-						debts: data.debts || [],
-						splitGroups: data.splitGroups || [],
-						currency: data.currency || "₹",
+						recurringTransactions: preferCloud(
+							data.recurringTransactions,
+							state.recurringTransactions
+						),
+						budgets: preferCloud(data.budgets, state.budgets),
+						savingsGoals: preferCloud(data.savingsGoals, state.savingsGoals),
+						billReminders: preferCloud(
+							data.billReminders,
+							state.billReminders
+						),
+						debts: preferCloud(data.debts, state.debts),
+						splitGroups: preferCloud(data.splitGroups, state.splitGroups),
+						currency: data.currency || state.currency || "₹",
 					});
 					console.log("Finance store initialized from cloud");
 				} catch (err) {

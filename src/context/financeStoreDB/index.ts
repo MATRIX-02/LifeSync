@@ -53,6 +53,7 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
 				billsRes,
 				debtsRes,
 				groupsRes,
+				syncStatusRes,
 			] = await Promise.all([
 				supabase.from("finance_accounts").select("*").eq("user_id", userId),
 				supabase
@@ -69,7 +70,36 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
 				supabase.from("bill_reminders").select("*").eq("user_id", userId),
 				supabase.from("finance_debts").select("*").eq("user_id", userId),
 				supabase.from("split_groups").select("*").eq("user_id", userId),
+				supabase
+					.from("user_sync_status")
+					.select("finance_currency")
+					.eq("user_id", userId)
+					.maybeSingle(),
 			]);
+
+			// supabase-js resolves instead of throwing, so without this check an
+			// RLS denial or schema error is indistinguishable from "no data" and
+			// the Money Hub silently renders empty. initialize() also runs on every
+			// app resume, so a transient failure would blank a populated screen.
+			const failures = [
+				["finance_accounts", accountsRes.error],
+				["finance_transactions", transactionsRes.error],
+				["recurring_transactions", recurringRes.error],
+				["finance_budgets", budgetsRes.error],
+				["savings_goals", goalsRes.error],
+				["bill_reminders", billsRes.error],
+				["finance_debts", debtsRes.error],
+				["split_groups", groupsRes.error],
+			].filter(([, err]) => err) as [string, any][];
+
+			if (failures.length > 0) {
+				console.error(
+					"❌ Finance load failed, keeping existing state:",
+					failures.map(([t, e]) => `${t}: ${e.message}`).join("; ")
+				);
+				set({ isLoading: false });
+				return;
+			}
 
 			const accounts = (accountsRes.data || []).map((a: any) =>
 				objectToCamelCase(a)
@@ -137,6 +167,10 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
 				billReminders,
 				debts,
 				splitGroups,
+				// Currency preference lives on user_sync_status; keep the current
+				// value if the row doesn't exist yet rather than resetting it.
+				currency:
+					(syncStatusRes?.data as any)?.finance_currency || get().currency,
 				isLoading: false,
 			});
 		} catch (error) {
@@ -564,7 +598,7 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
 		const dbData = objectToSnakeCase({
 			...newGoal,
 			user_id: userId,
-			contributions: JSON.stringify(newGoal.contributions),
+			contributions: newGoal.contributions,
 		});
 		const { error } = await supabase.from("savings_goals").insert(dbData);
 		if (error) {
@@ -580,7 +614,7 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
 
 		const dbUpdates: any = { ...updates, updated_at: new Date().toISOString() };
 		if (updates.contributions)
-			dbUpdates.contributions = JSON.stringify(updates.contributions);
+			dbUpdates.contributions = updates.contributions;
 
 		const { error } = await supabase
 			.from("savings_goals")
@@ -757,6 +791,7 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
 				time: new Date().toTimeString().split(" ")[0],
 				accountId,
 				paymentMethod: "net_banking",
+				isRecurring: false,
 			});
 		}
 
@@ -810,7 +845,7 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
 		const dbData = objectToSnakeCase({
 			...newDebt,
 			user_id: userId,
-			payments: JSON.stringify(newDebt.payments),
+			payments: newDebt.payments,
 		});
 		const { error } = await supabase.from("finance_debts").insert(dbData);
 		if (error) {
@@ -825,7 +860,7 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
 		if (!userId) return;
 
 		const dbUpdates: any = { ...updates, updated_at: new Date().toISOString() };
-		if (updates.payments) dbUpdates.payments = JSON.stringify(updates.payments);
+		if (updates.payments) dbUpdates.payments = updates.payments;
 
 		const { error } = await supabase
 			.from("finance_debts")
@@ -915,9 +950,9 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
 		const dbData = objectToSnakeCase({
 			...newGroup,
 			user_id: userId,
-			members: JSON.stringify(newGroup.members),
-			expenses: JSON.stringify([]),
-			settlements: JSON.stringify([]),
+			members: newGroup.members,
+			expenses: [],
+			settlements: [],
 		});
 		const { error } = await supabase.from("split_groups").insert(dbData);
 		if (error) {
@@ -932,10 +967,9 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
 		if (!userId) return;
 
 		const dbUpdates: any = { ...updates, updated_at: new Date().toISOString() };
-		if (updates.members) dbUpdates.members = JSON.stringify(updates.members);
-		if (updates.expenses) dbUpdates.expenses = JSON.stringify(updates.expenses);
-		if (updates.settlements)
-			dbUpdates.settlements = JSON.stringify(updates.settlements);
+		if (updates.members) dbUpdates.members = updates.members;
+		if (updates.expenses) dbUpdates.expenses = updates.expenses;
+		if (updates.settlements) dbUpdates.settlements = updates.settlements;
 
 		const { error } = await supabase
 			.from("split_groups")
@@ -1269,7 +1303,22 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
 	},
 
 	getNetWorth: () => get().accounts.reduce((sum, acc) => sum + acc.balance, 0),
-	setCurrency: (currency) => set({ currency }),
+	setCurrency: (currency) => {
+		set({ currency });
+		// Persist alongside the other sync state so the preference follows the
+		// user to another device; initialize() reads it back from here.
+		const { userId } = get();
+		if (!userId) return;
+		supabase
+			.from("user_sync_status")
+			.upsert(
+				{ user_id: userId, finance_currency: currency },
+				{ onConflict: "user_id" }
+			)
+			.then(({ error }: any) => {
+				if (error) console.error("Error saving currency preference:", error);
+			});
+	},
 
 	// Import/Export
 	importData: async (data) => {
@@ -1317,7 +1366,7 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
 					objectToSnakeCase({
 						...g,
 						user_id: userId,
-						contributions: JSON.stringify(g.contributions || []),
+						contributions: g.contributions || [],
 					})
 				);
 				await supabase
@@ -1337,7 +1386,7 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
 					objectToSnakeCase({
 						...d,
 						user_id: userId,
-						payments: JSON.stringify(d.payments || []),
+						payments: d.payments || [],
 					})
 				);
 				await supabase
@@ -1349,9 +1398,9 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
 					objectToSnakeCase({
 						...g,
 						user_id: userId,
-						members: JSON.stringify(g.members || []),
-						expenses: JSON.stringify(g.expenses || []),
-						settlements: JSON.stringify(g.settlements || []),
+						members: g.members || [],
+						expenses: g.expenses || [],
+						settlements: g.settlements || [],
 					})
 				);
 				await supabase

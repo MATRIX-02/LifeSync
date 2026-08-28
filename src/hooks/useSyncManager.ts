@@ -5,6 +5,7 @@ import { useAuthStore } from "../context/authStore";
 import { useFinanceStore } from "../context/financeStoreDB";
 import { useHabitStore } from "../context/habitStoreDB";
 import { useWorkoutStore } from "../context/workoutStoreDB";
+import { migrateLocalFinanceToCloud } from "../services/financeLocalMigration";
 import { buildSyncPayload } from "../services/syncPayload";
 import {
 	getAutoSyncEnabled,
@@ -46,6 +47,12 @@ export const useSyncManager = () => {
 
 		try {
 			console.log("📥 Fetching data from cloud (database-first)...");
+
+			// The finance store is database-first and does not persist locally,
+			// so any data still stranded in the old AsyncStorage blob has to go
+			// up BEFORE we initialize, or initialize() will load a cloud copy
+			// that is missing it. No-ops after the first successful run.
+			await migrateLocalFinanceToCloud(user.id);
 
 			// Initialize all stores from database in parallel (database-first approach)
 			await Promise.all([

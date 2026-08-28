@@ -39,10 +39,13 @@ Zustand throughout, but in two generations:
 | Store | Reality |
 |---|---|
 | `habitStoreDB.ts` | Genuinely database-first — every operation hits Supabase directly |
-| `financeStoreDB.ts`, `workoutStoreDB.ts` | **Re-export shims** over the legacy stores (`export { useFinanceStore } from "./financeStore"`) |
-| `habitStore.ts` | Legacy AsyncStorage + `persist`. Still imported by `moduleContext.ts` and the dead `SettingsScreen` |
+| `financeStoreDB/` | Genuinely database-first — every mutator is `async` and writes to Supabase. Its `types.ts` re-exports `src/types/finance.ts`; do not fork a local copy, the divergence silently dropped fields |
+| `workoutStoreDB.ts` | **Re-export shim** over the legacy store (`export { useWorkoutStore } from "./workoutStore"`) |
+| `habitStore.ts`, `financeStore.ts` | Legacy AsyncStorage + `persist`. `habitStore` is still imported by `moduleContext.ts`; `financeStore` is now only referenced by the dead `SettingsScreen` |
 
 So `habitStore.ts` and `habitStoreDB.ts` are **different stores with different data**. App code should use `habitStoreDB`; be aware `moduleContext.toggleModule` reads the legacy one when rescheduling notifications.
+
+**Watch for shadowed modules.** `src/context/financeStoreDB.ts` (a shim) sat next to `src/context/financeStoreDB/` (a complete database-first store) for a long time. Metro resolves `"./financeStoreDB"` to the **file**, not the directory, so the real store was dead code and the whole Money Hub silently ran on the legacy AsyncStorage store. The shim has been deleted. If you add a `*StoreDB.ts` alongside a `*StoreDB/`, you will reintroduce this.
 
 `useSyncManager` (mounted in the root layout) calls `store.initialize(userId)` for habits/workouts/finance on auth, and `src/services/syncService.ts` provides explicit `syncXToCloud` / `fetchXFromCloud` plus auto-sync on a user-set interval.
 
@@ -60,6 +63,8 @@ Two consequences that will bite:
 - `src/services/syncService.ts` — the `user_habits` upsert (write) and `fetchHabitsFromCloud` (read)
 
 Miss one and the field is silently dropped on save or lost on cloud restore. Anything not listed in these mappers does not persist, regardless of what the TypeScript type says.
+
+**3. `jsonb` columns take arrays, not strings.** `savings_goals.contributions`, `finance_debts.payments` and `split_groups.members` / `expenses` / `settlements` are all `jsonb`. `JSON.stringify`-ing them double-encodes — a JSON *string* lands inside the jsonb column instead of an array. Pass the array through. The read paths tolerate both (`typeof x === "string" ? JSON.parse(x) : x`), which is what let this go unnoticed.
 
 ## Notifications
 

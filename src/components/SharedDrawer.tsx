@@ -8,6 +8,7 @@ import {
 	Animated,
 	Dimensions,
 	Image,
+	PanResponder,
 	StyleSheet,
 	Text,
 	TouchableOpacity,
@@ -15,6 +16,115 @@ import {
 } from "react-native";
 
 const { width } = Dimensions.get("window");
+
+// Must match the drawer's own width, and the closed offset every screen seeds
+// its Animated.Value with (-width * 0.8).
+const DRAWER_WIDTH = width * 0.8;
+
+// How wide the invisible grab strip along the left edge is. Taps inside it are
+// swallowed, so keep it narrow enough to sit clear of interactive content.
+const EDGE_WIDTH = 24;
+
+// Fraction of the drawer you must drag past for the release to open it.
+const OPEN_THRESHOLD = 0.33;
+// A flick this fast opens regardless of distance.
+const OPEN_VELOCITY = 0.5;
+
+interface DrawerEdgeSwipeProps {
+	drawerAnim: Animated.Value;
+	drawerOpen: boolean;
+	setDrawerOpen: (open: boolean) => void;
+}
+
+/**
+ * Invisible left-edge strip that opens the drawer on a swipe-right, tracking
+ * the finger as it moves and snapping open or closed on release.
+ *
+ * Render it as a sibling of SharedDrawer. It sits below the drawer and its
+ * overlay in the stacking order, so it never intercepts their touches.
+ */
+export const DrawerEdgeSwipe: React.FC<DrawerEdgeSwipeProps> = ({
+	drawerAnim,
+	drawerOpen,
+	setDrawerOpen,
+}) => {
+	// PanResponder closes over its callbacks, so keep the latest `drawerOpen`
+	// in a ref rather than rebuilding the responder on every render.
+	const isOpenRef = React.useRef(drawerOpen);
+	isOpenRef.current = drawerOpen;
+
+	const panResponder = React.useMemo(
+		() =>
+			PanResponder.create({
+				// Let plain taps through to the responder chain; only claim the
+				// gesture once it's clearly a horizontal drag to the right.
+				onStartShouldSetPanResponder: () => false,
+				onMoveShouldSetPanResponder: (_evt, gesture) =>
+					!isOpenRef.current &&
+					gesture.dx > 8 &&
+					Math.abs(gesture.dx) > Math.abs(gesture.dy) * 1.5,
+
+				onPanResponderMove: (_evt, gesture) => {
+					const next = Math.min(0, Math.max(-DRAWER_WIDTH, -DRAWER_WIDTH + gesture.dx));
+					drawerAnim.setValue(next);
+				},
+
+				onPanResponderRelease: (_evt, gesture) => {
+					const shouldOpen =
+						gesture.dx > DRAWER_WIDTH * OPEN_THRESHOLD ||
+						gesture.vx > OPEN_VELOCITY;
+
+					if (shouldOpen) {
+						// Flipping the flag runs the screen's own animation effect,
+						// which drives drawerAnim to 0 and renders the overlay.
+						setDrawerOpen(true);
+						return;
+					}
+
+					// Cancelled: drawerOpen never changed, so that effect won't fire.
+					// Settle the value back ourselves.
+					Animated.timing(drawerAnim, {
+						toValue: -DRAWER_WIDTH,
+						duration: 200,
+						useNativeDriver: true,
+					}).start();
+				},
+
+				onPanResponderTerminate: () => {
+					Animated.timing(drawerAnim, {
+						toValue: -DRAWER_WIDTH,
+						duration: 200,
+						useNativeDriver: true,
+					}).start();
+				},
+			}),
+		[drawerAnim, setDrawerOpen]
+	);
+
+	// Nothing to grab while the drawer is open — the overlay handles dismissal.
+	if (drawerOpen) return null;
+
+	return (
+		<View
+			{...panResponder.panHandlers}
+			style={edgeStyles.edge}
+			// Keeps the strip out of the accessibility tree; it's a gesture affordance.
+			accessible={false}
+		/>
+	);
+};
+
+const edgeStyles = StyleSheet.create({
+	edge: {
+		position: "absolute",
+		top: 0,
+		left: 0,
+		bottom: 0,
+		width: EDGE_WIDTH,
+		// Below the overlay (10) and the drawer (20), above ordinary content.
+		zIndex: 5,
+	},
+});
 
 interface SharedDrawerProps {
 	theme: Theme;

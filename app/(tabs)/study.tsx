@@ -1,7 +1,10 @@
 // Study Hub - Main Screen for all types of learning and exam preparation
 
 import { useSubscriptionCheck } from "@/src/components/PremiumFeatureGate";
-import { SharedDrawer } from "@/src/components/SharedDrawer";
+import {
+	DrawerEdgeSwipe,
+	SharedDrawer,
+} from "@/src/components/SharedDrawer";
 import RevisionScheduler from "@/src/components/study/RevisionScheduler";
 import StudyAnalytics from "@/src/components/study/StudyAnalytics";
 import StudyDashboard from "@/src/components/study/StudyDashboard";
@@ -192,6 +195,13 @@ export default function StudyScreen() {
 			<StatusBar
 				barStyle={isDark ? "light-content" : "dark-content"}
 				backgroundColor={theme.background}
+			/>
+
+			{/* Swipe from the left edge to open the drawer */}
+			<DrawerEdgeSwipe
+				drawerAnim={drawerAnim}
+				drawerOpen={drawerOpen}
+				setDrawerOpen={setDrawerOpen}
 			/>
 
 			{/* Drawer Overlay */}

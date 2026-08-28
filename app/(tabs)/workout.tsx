@@ -1,7 +1,10 @@
 // Workout Tracker Main Screen - Tab-based navigation
 
 import { useSubscriptionCheck } from "@/src/components/PremiumFeatureGate";
-import { SharedDrawer } from "@/src/components/SharedDrawer";
+import {
+	DrawerEdgeSwipe,
+	SharedDrawer,
+} from "@/src/components/SharedDrawer";
 import {
 	ActiveWorkoutScreen,
 	NutriPlan,
@@ -209,6 +212,13 @@ export default function WorkoutTrackerScreen() {
 			<StatusBar
 				barStyle={isDark ? "light-content" : "dark-content"}
 				backgroundColor={theme.background}
+			/>
+
+			{/* Swipe from the left edge to open the drawer */}
+			<DrawerEdgeSwipe
+				drawerAnim={drawerAnim}
+				drawerOpen={drawerOpen}
+				setDrawerOpen={setDrawerOpen}
 			/>
 
 			{/* Drawer Overlay */}

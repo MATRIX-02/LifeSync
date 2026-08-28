@@ -29,7 +29,10 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import Svg, { Circle } from "react-native-svg";
 
 import { useSubscriptionCheck } from "@/src/components/PremiumFeatureGate";
-import { SharedDrawer } from "@/src/components/SharedDrawer";
+import {
+	DrawerEdgeSwipe,
+	SharedDrawer,
+} from "@/src/components/SharedDrawer";
 import { useAuthStore } from "@/src/context/authStore";
 import { useHabitStore } from "@/src/context/habitStoreDB";
 import { useModuleStore } from "@/src/context/moduleContext";
@@ -382,6 +385,13 @@ export default function DashboardScreen() {
 			<StatusBar
 				barStyle={isDark ? "light-content" : "dark-content"}
 				backgroundColor={theme.background}
+			/>
+
+			{/* Swipe from the left edge to open the drawer */}
+			<DrawerEdgeSwipe
+				drawerAnim={drawerAnim}
+				drawerOpen={drawerOpen}
+				setDrawerOpen={setDrawerOpen}
 			/>
 
 			{/* Drawer Overlay */}
