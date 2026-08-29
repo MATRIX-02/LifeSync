@@ -39,6 +39,7 @@ import { useModuleStore } from "@/src/context/moduleContext";
 import { Theme, useColors, useTheme } from "@/src/context/themeContext";
 import { useWorkoutStore } from "@/src/context/workoutStoreDB";
 import { NotificationService } from "@/src/services/notificationService";
+import { generateUUID } from "@/src/utils/uuid";
 import {
 	FrequencyType,
 	Habit,
@@ -132,8 +133,11 @@ export default function DashboardScreen() {
 		stats,
 		logs,
 		getActiveHabits,
+		getArchivedHabits,
+		unarchiveHabit,
 		searchHabits,
 		isHabitCompletedOnDate,
+		getProgressForDate,
 	} = useHabitStore();
 	const { profile: authProfile, user } = useAuthStore();
 	const [drawerOpen, setDrawerOpen] = useState(false);
@@ -148,6 +152,7 @@ export default function DashboardScreen() {
 	const [daysOffset, setDaysOffset] = useState(0); // For scrollable date navigation
 	const [viewMode, setViewMode] = useState<"week" | "grid">("week"); // Habit view mode
 	const [gridZoom, setGridZoom] = useState(1); // Grid view zoom level (0.5 to 2)
+	const [showArchived, setShowArchived] = useState(false);
 
 	// Load view mode preference on mount
 	useEffect(() => {
@@ -174,6 +179,51 @@ export default function DashboardScreen() {
 	}, [viewMode]);
 
 	const activeHabits = getActiveHabits();
+	const archivedHabits = getArchivedHabits();
+
+	const handleRestoreHabit = async (habit: Habit) => {
+		// Restoring puts the habit back into the active count, so it has to pass
+		// the same plan limit that creating one does.
+		if (!canAddHabit(activeHabits.length)) {
+			const limitText = isUnlimited(limits.maxHabits)
+				? "unlimited"
+				: limits.maxHabits.toString();
+			showUpgradeAlert(
+				"Habit Limit Reached",
+				`Your plan allows up to ${limitText} active habits. Upgrade your plan to restore this one.`
+			);
+			return;
+		}
+
+		await unarchiveHabit(habit.id);
+
+		// Archiving cancelled this habit's reminders, so put them back.
+		if (habit.notificationEnabled && habit.notificationTime) {
+			try {
+				await NotificationService.scheduleHabitReminders(habit);
+			} catch (error) {
+				console.error("Failed to reschedule reminders on restore:", error);
+			}
+		}
+	};
+
+	const handleDeleteArchivedHabit = (habit: Habit) => {
+		Alert.alert(
+			"Delete Permanently",
+			`Delete "${habit.name}" and all of its history? This cannot be undone.`,
+			[
+				{ text: "Cancel", style: "cancel" },
+				{
+					text: "Delete",
+					style: "destructive",
+					onPress: async () => {
+						await NotificationService.cancelHabitNotifications(habit.id);
+						deleteHabit(habit.id);
+					},
+				},
+			]
+		);
+	};
 
 	// Sort habits based on selected sort option
 	const sortedHabits = useMemo(() => {
@@ -326,7 +376,8 @@ export default function DashboardScreen() {
 				text: "Archive",
 				onPress: async () => {
 					await NotificationService.cancelHabitNotifications(habit.id);
-					archiveHabit(habit.id);
+					await archiveHabit(habit.id);
+					setShowArchived(true);
 				},
 			},
 			{
@@ -582,6 +633,7 @@ export default function DashboardScreen() {
 									habit={habit}
 									last5Days={getLast5Days()}
 									isHabitCompletedOnDate={isHabitCompletedOnDate}
+									getProgressForDate={getProgressForDate}
 									logsLength={logs.length}
 									onToggleDate={(date) => toggleHabitForDate(habit.id, date)}
 									onHabitPress={() =>
@@ -606,6 +658,7 @@ export default function DashboardScreen() {
 									key={habit.id}
 									habit={habit}
 									isHabitCompletedOnDate={isHabitCompletedOnDate}
+									getProgressForDate={getProgressForDate}
 									logsLength={logs.length}
 									onToggleDate={(date) => toggleHabitForDate(habit.id, date)}
 									onHabitPress={() =>
@@ -623,6 +676,76 @@ export default function DashboardScreen() {
 						</ScrollView>
 					)}
 				</View>
+
+				{/* Archived Habits */}
+				{archivedHabits.length > 0 && (
+					<View style={styles.archivedSection}>
+						<TouchableOpacity
+							style={styles.archivedHeader}
+							onPress={() => setShowArchived(!showArchived)}
+							activeOpacity={0.7}
+						>
+							<Ionicons
+								name="archive-outline"
+								size={18}
+								color={theme.textSecondary}
+							/>
+							<Text style={styles.archivedTitle}>
+								Archived ({archivedHabits.length})
+							</Text>
+							<Ionicons
+								name={showArchived ? "chevron-up" : "chevron-down"}
+								size={18}
+								color={theme.textSecondary}
+							/>
+						</TouchableOpacity>
+
+						{showArchived &&
+							archivedHabits.map((habit: Habit) => (
+								<View key={habit.id} style={styles.archivedItem}>
+									<View
+										style={[
+											styles.archivedIcon,
+											{ backgroundColor: habit.color + "20" },
+										]}
+									>
+										<Ionicons
+											name={(habit.icon as any) || "checkmark-circle-outline"}
+											size={18}
+											color={habit.color}
+										/>
+									</View>
+									<View style={styles.archivedInfo}>
+										<Text style={styles.archivedName} numberOfLines={1}>
+											{habit.name}
+										</Text>
+										{habit.archivedAt && (
+											<Text style={styles.archivedDate}>
+												Archived{" "}
+												{new Date(habit.archivedAt).toLocaleDateString()}
+											</Text>
+										)}
+									</View>
+									<TouchableOpacity
+										style={styles.archivedAction}
+										onPress={() => handleRestoreHabit(habit)}
+									>
+										<Ionicons
+											name="arrow-undo-outline"
+											size={20}
+											color={theme.primary}
+										/>
+									</TouchableOpacity>
+									<TouchableOpacity
+										style={styles.archivedAction}
+										onPress={() => handleDeleteArchivedHabit(habit)}
+									>
+										<Ionicons name="trash-outline" size={20} color={theme.error} />
+									</TouchableOpacity>
+								</View>
+							))}
+					</View>
+				)}
 			</ScrollView>
 
 			{/* Sort Menu Popover */}
@@ -822,6 +945,10 @@ interface HabitRowItemProps {
 	habit: Habit;
 	last5Days: Date[];
 	isHabitCompletedOnDate: (habitId: string, date: Date) => boolean;
+	getProgressForDate: (
+		habitId: string,
+		date: Date
+	) => { done: number; target: number };
 	logsLength: number; // Used to trigger re-render when logs change
 	onToggleDate: (date: Date) => void;
 	onHabitPress: () => void;
@@ -833,6 +960,7 @@ const HabitRowItem: React.FC<HabitRowItemProps> = ({
 	habit,
 	last5Days,
 	isHabitCompletedOnDate,
+	getProgressForDate,
 	logsLength,
 	onToggleDate,
 	onHabitPress,
@@ -912,7 +1040,8 @@ const HabitRowItem: React.FC<HabitRowItemProps> = ({
 			{/* Day checkmarks - tappable to toggle */}
 			<View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
 				{last5Days.map((date, index) => {
-					const isCompleted = isHabitCompletedOnDate(habit.id, date);
+					const { done, target } = getProgressForDate(habit.id, date);
+					const isCompleted = done >= target;
 
 					return (
 						<TouchableOpacity
@@ -920,20 +1049,31 @@ const HabitRowItem: React.FC<HabitRowItemProps> = ({
 							style={{
 								width: 28,
 								alignItems: "center",
-								padding: 4,
+								justifyContent: "center",
+								paddingVertical: 4,
+								paddingHorizontal: 1,
 							}}
 							onPress={() => onToggleDate(date)}
 						>
 							{isCompleted ? (
 								<Ionicons name="checkmark" size={18} color={habit.color} />
 							) : (
+								// Counts like "1/24" are wider than the 28px column, which
+								// must stay in step with the day headers above. Constrain the
+								// Text and let it shrink rather than wrap onto a second line.
 								<Text
+									numberOfLines={1}
+									adjustsFontSizeToFit
+									minimumFontScale={0.5}
 									style={{
-										fontSize: 14,
-										color: theme.textMuted,
+										width: "100%",
+										textAlign: "center",
+										fontSize: target > 1 ? 11 : 14,
+										fontWeight: done > 0 ? "700" : "400",
+										color: done > 0 ? habit.color : theme.textMuted,
 									}}
 								>
-									×
+									{target > 1 ? `${done}/${target}` : "×"}
 								</Text>
 							)}
 						</TouchableOpacity>
@@ -948,6 +1088,10 @@ const HabitRowItem: React.FC<HabitRowItemProps> = ({
 interface HabitGridItemProps {
 	habit: Habit;
 	isHabitCompletedOnDate: (habitId: string, date: Date) => boolean;
+	getProgressForDate: (
+		habitId: string,
+		date: Date
+	) => { done: number; target: number };
 	logsLength: number; // Used to trigger re-render when logs change
 	onToggleDate: (date: Date) => void;
 	onHabitPress: () => void;
@@ -984,6 +1128,7 @@ const GRID_PERIODS: { key: GridPeriod; label: string; days: number }[] = [
 const HabitGridItem: React.FC<HabitGridItemProps> = ({
 	habit,
 	isHabitCompletedOnDate,
+	getProgressForDate,
 	logsLength,
 	onToggleDate,
 	onHabitPress,
@@ -1133,12 +1278,18 @@ const HabitGridItem: React.FC<HabitGridItemProps> = ({
 		return Math.round((completedCount / 30) * 100);
 	}, [today, habit.id, isHabitCompletedOnDate, logsLength]);
 
-	// Get color for a date cell
+	// Get color for a date cell. A "times_per_day" habit shades by how much of
+	// the day's target is done, so 3/5 is visibly different from 0/5.
 	const getCellColor = (date: Date | null): string => {
 		if (!date || date > today) return "transparent";
-		const isCompleted = isHabitCompletedOnDate(habit.id, date);
-		if (isCompleted) return habit.color;
-		return isDark ? "#2d333b" : "#ebedf0";
+		const empty = isDark ? "#2d333b" : "#ebedf0";
+		const { done, target } = getProgressForDate(habit.id, date);
+		if (done >= target) return habit.color;
+		if (done === 0) return empty;
+		// 25% / 50% / 75% alpha bands, as an 8-digit hex suffix.
+		const ratio = done / target;
+		const alpha = ratio >= 0.75 ? "BF" : ratio >= 0.5 ? "80" : "40";
+		return habit.color + alpha;
 	};
 
 	// Check if date is today
@@ -1309,6 +1460,7 @@ const CreateHabitModal: React.FC<CreateHabitModalProps> = ({
 	const [showIconPicker, setShowIconPicker] = useState(false);
 	const [notificationEnabled, setNotificationEnabled] = useState(true);
 	const [alarmEnabled, setAlarmEnabled] = useState(false);
+	const [ringtoneEnabled, setRingtoneEnabled] = useState(true);
 	const [showFrequencyPicker, setShowFrequencyPicker] = useState(false);
 
 	// New habit type states
@@ -1456,7 +1608,7 @@ const CreateHabitModal: React.FC<CreateHabitModalProps> = ({
 		{ icon: "color-palette-outline", name: "Creative" },
 		{ icon: "headset-outline", name: "Podcast" },
 		{ icon: "mic-outline", name: "Voice" },
-		{ icon: "guitar-outline", name: "Guitar" },
+		{ icon: "musical-note-outline", name: "Guitar" },
 		// Social & Communication
 		{ icon: "call-outline", name: "Call" },
 		{ icon: "chatbubble-outline", name: "Chat" },
@@ -1587,6 +1739,7 @@ const CreateHabitModal: React.FC<CreateHabitModalProps> = ({
 		setShowFrequencyPicker(false);
 		setNotificationEnabled(true);
 		setAlarmEnabled(false);
+		setRingtoneEnabled(true);
 		setHabitType("yesno");
 		setUnit("");
 		setTarget("");
@@ -1632,7 +1785,7 @@ const CreateHabitModal: React.FC<CreateHabitModalProps> = ({
 		}
 
 		const newHabit: Habit = {
-			id: `habit_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+			id: generateUUID(),
 			name: habitName.trim(),
 			description: description.trim(),
 			color: selectedColor,
@@ -1669,7 +1822,7 @@ const CreateHabitModal: React.FC<CreateHabitModalProps> = ({
 					: formatTimeForStorage(selectedTime),
 			notificationEnabled,
 			alarmEnabled,
-			ringtoneEnabled: true,
+			ringtoneEnabled,
 			isArchived: false,
 			createdAt: new Date(),
 			updatedAt: new Date(),
@@ -2958,8 +3111,8 @@ const CreateHabitModal: React.FC<CreateHabitModalProps> = ({
 									</TouchableOpacity>
 								</View>
 							)}
-							/* A times_per_day habit derives its reminders from the From/To
-							window, so a single reminder time would be ignored. */
+							{/* A times_per_day habit derives its reminders from the From/To
+							window, so a single reminder time would be ignored. */}
 							{frequencyType !== "times_per_day" && (
 								<>
 									{/* Time Picker Section */}
@@ -3181,7 +3334,7 @@ const CreateHabitModal: React.FC<CreateHabitModalProps> = ({
 											Alarm
 										</Text>
 										<Text style={{ fontSize: 13, color: theme.textMuted }}>
-											Wake up with sound
+											Max priority, bypasses Do Not Disturb
 										</Text>
 									</View>
 								</View>
@@ -3209,6 +3362,78 @@ const CreateHabitModal: React.FC<CreateHabitModalProps> = ({
 									/>
 								</TouchableOpacity>
 							</View>
+							{/* Sound Toggle */}
+							<View
+								style={{
+									flexDirection: "row",
+									justifyContent: "space-between",
+									alignItems: "center",
+									backgroundColor: theme.surfaceLight,
+									borderRadius: 14,
+									padding: 16,
+									marginBottom: 20,
+									borderWidth: 1,
+									borderColor: theme.border,
+								}}
+							>
+								<View style={{ flexDirection: "row", alignItems: "center" }}>
+									<View
+										style={{
+											width: 44,
+											height: 44,
+											borderRadius: 12,
+											backgroundColor: selectedColor + "20",
+											justifyContent: "center",
+											alignItems: "center",
+											marginRight: 12,
+										}}
+									>
+										<Ionicons
+											name={ringtoneEnabled ? "volume-high" : "volume-mute"}
+											size={22}
+											color={selectedColor}
+										/>
+									</View>
+									<View>
+										<Text
+											style={{
+												fontSize: 16,
+												fontWeight: "600",
+												color: theme.text,
+											}}
+										>
+											Sound
+										</Text>
+										<Text style={{ fontSize: 13, color: theme.textMuted }}>
+											{ringtoneEnabled ? "Play a sound" : "Vibrate only"}
+										</Text>
+									</View>
+								</View>
+								<TouchableOpacity
+									style={{
+										width: 52,
+										height: 30,
+										borderRadius: 15,
+										backgroundColor: ringtoneEnabled
+											? selectedColor
+											: theme.border,
+										padding: 2,
+										justifyContent: "center",
+									}}
+									onPress={() => setRingtoneEnabled(!ringtoneEnabled)}
+								>
+									<View
+										style={{
+											width: 26,
+											height: 26,
+											borderRadius: 13,
+											backgroundColor: "#FFFFFF",
+											alignSelf: ringtoneEnabled ? "flex-end" : "flex-start",
+										}}
+									/>
+								</TouchableOpacity>
+							</View>
+
 							{/* Color Picker */}
 							<Text
 								style={{
@@ -3870,6 +4095,55 @@ const createStyles = (theme: Theme) =>
 		},
 
 		// Habits
+		archivedSection: {
+			marginHorizontal: 16,
+			marginTop: 8,
+			marginBottom: 24,
+		},
+		archivedHeader: {
+			flexDirection: "row",
+			alignItems: "center",
+			gap: 8,
+			paddingVertical: 12,
+		},
+		archivedTitle: {
+			flex: 1,
+			fontSize: 14,
+			fontWeight: "600",
+			color: theme.textSecondary,
+		},
+		archivedItem: {
+			flexDirection: "row",
+			alignItems: "center",
+			gap: 12,
+			backgroundColor: theme.surface,
+			borderRadius: 12,
+			padding: 12,
+			marginBottom: 8,
+		},
+		archivedIcon: {
+			width: 36,
+			height: 36,
+			borderRadius: 10,
+			justifyContent: "center",
+			alignItems: "center",
+		},
+		archivedInfo: {
+			flex: 1,
+		},
+		archivedName: {
+			fontSize: 15,
+			fontWeight: "600",
+			color: theme.text,
+		},
+		archivedDate: {
+			fontSize: 12,
+			color: theme.textMuted,
+			marginTop: 2,
+		},
+		archivedAction: {
+			padding: 6,
+		},
 		habitsSection: {
 			flex: 1,
 			paddingBottom: 40,

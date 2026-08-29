@@ -55,6 +55,10 @@ export default function FinanceDashboard({
 		getUpcomingBills,
 		getNetWorth,
 		updateAccount,
+		loadError,
+		isLoading,
+		userId,
+		initialize,
 	} = useFinanceStore();
 
 	const styles = createStyles(theme);
@@ -78,6 +82,8 @@ export default function FinanceDashboard({
 		ExpenseCategory | IncomeCategory
 	>("food");
 	const [selectedAccount, setSelectedAccount] = useState<string>("");
+	// Destination account, transfers only.
+	const [selectedToAccount, setSelectedToAccount] = useState<string>("");
 	const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("upi");
 
 	// Editing Account State
@@ -167,6 +173,16 @@ export default function FinanceDashboard({
 			Alert.alert("Error", "Please select an account");
 			return;
 		}
+		if (transactionType === "transfer") {
+			if (!selectedToAccount) {
+				Alert.alert("Error", "Please select the account to transfer to");
+				return;
+			}
+			if (selectedToAccount === selectedAccount) {
+				Alert.alert("Error", "Source and destination accounts must differ");
+				return;
+			}
+		}
 
 		// For credit card expenses, payment method is always credit_card
 		const selectedSourceAccount = accounts.find(
@@ -204,12 +220,15 @@ export default function FinanceDashboard({
 			date: today,
 			time: new Date().toTimeString().split(" ")[0],
 			accountId: selectedAccount,
+			toAccountId:
+				transactionType === "transfer" ? selectedToAccount : undefined,
 			paymentMethod: finalPaymentMethod as any,
 			isRecurring: false,
 		});
 
 		setAmount("");
 		setDescription("");
+		setSelectedToAccount("");
 		setShowAddTransaction(false);
 		Alert.alert("Success", "Transaction added successfully!");
 	};
@@ -269,6 +288,25 @@ export default function FinanceDashboard({
 
 	return (
 		<ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
+			{/* Load failure banner - the data on screen may be stale or empty */}
+			{loadError && (
+				<View style={styles.loadErrorBanner}>
+					<Ionicons name="cloud-offline-outline" size={18} color={theme.error} />
+					<Text style={styles.loadErrorText} numberOfLines={2}>
+						Couldn't load your finance data. Showing what's on this device.
+					</Text>
+					<TouchableOpacity
+						style={styles.loadErrorRetry}
+						disabled={isLoading}
+						onPress={() => userId && initialize(userId)}
+					>
+						<Text style={styles.loadErrorRetryText}>
+							{isLoading ? "..." : "Retry"}
+						</Text>
+					</TouchableOpacity>
+				</View>
+			)}
+
 			{/* Header */}
 			<View style={styles.header}>
 				<View>
@@ -936,6 +974,13 @@ export default function FinanceDashboard({
 												if (type === "income") setSelectedCategory("salary");
 												else if (type === "expense")
 													setSelectedCategory("food");
+												else {
+													// The category picker is hidden for transfers, so
+													// pin a neutral one instead of keeping whatever the
+													// previous type had selected.
+													setSelectedCategory("other");
+													setSelectedToAccount("");
+												}
 											}}
 										>
 											<Text
@@ -1027,7 +1072,9 @@ export default function FinanceDashboard({
 							)}
 
 							<View style={styles.formGroup}>
-								<Text style={styles.formLabel}>Account</Text>
+								<Text style={styles.formLabel}>
+									{transactionType === "transfer" ? "From Account" : "Account"}
+								</Text>
 								<View style={styles.accountSelector}>
 									{accounts.map((acc) => (
 										<TouchableOpacity
@@ -1071,6 +1118,46 @@ export default function FinanceDashboard({
 									</TouchableOpacity>
 								)}
 							</View>
+
+							{transactionType === "transfer" && (
+								<View style={styles.formGroup}>
+									<Text style={styles.formLabel}>To Account</Text>
+									<View style={styles.accountSelector}>
+										{accounts
+											.filter((acc) => acc.id !== selectedAccount)
+											.map((acc) => (
+												<TouchableOpacity
+													key={acc.id}
+													style={[
+														styles.accountOption,
+														selectedToAccount === acc.id && {
+															backgroundColor: acc.color + "20",
+															borderColor: acc.color,
+														},
+													]}
+													onPress={() => setSelectedToAccount(acc.id)}
+												>
+													<Text
+														style={[
+															styles.accountOptionText,
+															selectedToAccount === acc.id && {
+																color: acc.color,
+															},
+														]}
+													>
+														{acc.name}
+													</Text>
+												</TouchableOpacity>
+											))}
+									</View>
+									{accounts.filter((acc) => acc.id !== selectedAccount).length ===
+										0 && (
+										<Text style={styles.addAccountHintText}>
+											You need a second account to transfer to.
+										</Text>
+									)}
+								</View>
+							)}
 
 							<View style={styles.formGroup}>
 								<Text style={styles.formLabel}>Payment Method</Text>
@@ -1277,6 +1364,34 @@ export default function FinanceDashboard({
 
 const createStyles = (theme: Theme) =>
 	StyleSheet.create({
+		loadErrorBanner: {
+			flexDirection: "row",
+			alignItems: "center",
+			gap: 10,
+			marginHorizontal: 16,
+			marginTop: 12,
+			padding: 12,
+			borderRadius: 12,
+			borderWidth: 1,
+			borderColor: theme.error,
+			backgroundColor: theme.error + "15",
+		},
+		loadErrorText: {
+			flex: 1,
+			fontSize: 13,
+			color: theme.text,
+		},
+		loadErrorRetry: {
+			paddingHorizontal: 12,
+			paddingVertical: 6,
+			borderRadius: 8,
+			backgroundColor: theme.error,
+		},
+		loadErrorRetryText: {
+			fontSize: 13,
+			fontWeight: "600",
+			color: "#FFF",
+		},
 		container: {
 			flex: 1,
 			backgroundColor: theme.background,

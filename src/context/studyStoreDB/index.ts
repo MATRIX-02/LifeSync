@@ -61,6 +61,12 @@ export const useStudyStore = create<StudyStore>()((set, get) => ({
 	isLoading: false,
 	userId: null,
 
+	// Bind the signed-in user before any fetching. Mutators refuse to write
+	// without this, and initialize() sets it far too late in app startup.
+	setUserId: (userId: string | null) => {
+		set({ userId });
+	},
+
 	// ============ INITIALIZE ============
 	initialize: async (userId: string) => {
 		console.log("📚 Loading study data from database for user:", userId);
@@ -556,6 +562,26 @@ export const useStudyStore = create<StudyStore>()((set, get) => ({
 		}
 
 		set({ studySessions: studySessions.filter((s) => s.id !== id) });
+	},
+
+	deleteSessions: async (ids) => {
+		const { userId, studySessions } = get();
+		if (!userId || ids.length === 0) return;
+
+		const idSet = new Set(ids);
+
+		const { error } = await supabase
+			.from("study_sessions")
+			.delete()
+			.in("id", ids)
+			.eq("user_id", userId);
+
+		if (error) {
+			console.error("Error deleting sessions:", error);
+			return;
+		}
+
+		set({ studySessions: studySessions.filter((s) => !idSet.has(s.id)) });
 	},
 
 	getSessionsByDate: (date) => {

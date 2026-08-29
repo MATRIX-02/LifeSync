@@ -209,6 +209,7 @@ export default function StatisticsScreen() {
 	const [editSelectedTime, setEditSelectedTime] = useState(new Date());
 	const [editReminderEnabled, setEditReminderEnabled] = useState(true);
 	const [editAlarmEnabled, setEditAlarmEnabled] = useState(false);
+	const [editRingtoneEnabled, setEditRingtoneEnabled] = useState(true);
 	const [editNotes, setEditNotes] = useState("");
 	const [showFrequencyPicker, setShowFrequencyPicker] = useState(false);
 	const [showTimePicker, setShowTimePicker] = useState(false);
@@ -326,6 +327,7 @@ export default function StatisticsScreen() {
 					true
 			);
 			setEditAlarmEnabled(selectedHabit.alarmEnabled ?? false);
+			setEditRingtoneEnabled(selectedHabit.ringtoneEnabled ?? true);
 			setEditNotes(selectedHabit.notes || "");
 			// Habit type fields
 			setEditHabitType(selectedHabit.type || "yesno");
@@ -680,6 +682,8 @@ export default function StatisticsScreen() {
 					name: editName.trim(),
 					notificationTime,
 					frequency: updatedFrequency,
+					alarmEnabled: editAlarmEnabled,
+					ringtoneEnabled: editRingtoneEnabled,
 				});
 			}
 		} catch (error) {
@@ -704,6 +708,7 @@ export default function StatisticsScreen() {
 			reminderEnabled: editReminderEnabled,
 			notificationEnabled: editReminderEnabled,
 			alarmEnabled: editAlarmEnabled,
+			ringtoneEnabled: editRingtoneEnabled,
 			notes: editNotes.trim() || undefined,
 		});
 
@@ -2135,9 +2140,9 @@ export default function StatisticsScreen() {
 										<Ionicons name="alarm" size={24} color={editColor} />
 									</View>
 									<View style={styles.switchTextContainer}>
-										<Text style={styles.switchTitle}>Alarm Sound</Text>
+										<Text style={styles.switchTitle}>Alarm</Text>
 										<Text style={styles.switchSubtitle}>
-											Play alarm sound with notification
+											Max priority, bypasses Do Not Disturb
 										</Text>
 									</View>
 								</View>
@@ -2149,6 +2154,45 @@ export default function StatisticsScreen() {
 										true: editColor + "60",
 									}}
 									thumbColor={editAlarmEnabled ? editColor : theme.textMuted}
+								/>
+							</View>
+
+							{/* Sound Toggle */}
+							<View style={styles.switchRow}>
+								<View style={styles.switchInfo}>
+									<View
+										style={[
+											styles.selectedIcon,
+											{ backgroundColor: editColor + "20" },
+										]}
+									>
+										<Ionicons
+											name={
+												editRingtoneEnabled
+													? "volume-high"
+													: "volume-mute"
+											}
+											size={24}
+											color={editColor}
+										/>
+									</View>
+									<View style={styles.switchTextContainer}>
+										<Text style={styles.switchTitle}>Sound</Text>
+										<Text style={styles.switchSubtitle}>
+											{editRingtoneEnabled
+												? "Play a sound"
+												: "Vibrate only"}
+										</Text>
+									</View>
+								</View>
+								<Switch
+									value={editRingtoneEnabled}
+									onValueChange={setEditRingtoneEnabled}
+									trackColor={{
+										false: theme.border,
+										true: editColor + "60",
+									}}
+									thumbColor={editRingtoneEnabled ? editColor : theme.textMuted}
 								/>
 							</View>
 

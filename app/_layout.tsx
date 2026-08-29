@@ -6,14 +6,25 @@ import {
 } from "@react-navigation/native";
 import { useFonts } from "expo-font";
 import * as Notifications from "expo-notifications";
-import { Stack, useRouter, useSegments } from "expo-router";
+import {
+	Stack,
+	useRootNavigationState,
+	useRouter,
+	useSegments,
+} from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import { useEffect, useState } from "react";
-import { ActivityIndicator, StatusBar, View } from "react-native";
+import {
+	ActivityIndicator,
+	StatusBar,
+	StyleSheet,
+	View,
+} from "react-native";
 import "react-native-reanimated";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { AlertProvider } from "@/src/components/CustomAlert";
+import { SyncStatusBanner } from "@/src/components/SyncStatusBanner";
 import { isSupabaseConfigured } from "@/src/config/supabase";
 import { useAuthStore } from "@/src/context/authStore";
 import { useHabitStore } from "@/src/context/habitStoreDB";
@@ -116,6 +127,9 @@ export default function RootLayout() {
 			<ThemeProvider>
 				<AlertProvider>
 					<StatusBar translucent={false} />
+					{/* Sits above every screen: the user must be able to see that a
+					    change is saved locally but not yet on the server. */}
+					<SyncStatusBanner />
 					<RootLayoutNav />
 				</AlertProvider>
 			</ThemeProvider>
@@ -133,6 +147,11 @@ function RootLayoutNav() {
 	} = useAuthStore();
 	const segments = useSegments();
 	const router = useRouter();
+	// Undefined until the root navigator has actually mounted. Dispatching a
+	// navigation action before that produces the "not handled by any navigator"
+	// warning and the redirect is dropped on the floor.
+	const rootNavigationState = useRootNavigationState();
+	const navigatorReady = !!rootNavigationState?.key;
 	const [isInitialized, setIsInitialized] = useState(false);
 
 	// Persist and restore navigation state
@@ -177,6 +196,9 @@ function RootLayoutNav() {
 	// Handle auth state and route protection
 	useEffect(() => {
 		if (!isInitialized || authLoading) return;
+		// Wait for the navigator. This effect re-runs when navigatorReady flips,
+		// so the redirect still happens - just once there is something to receive it.
+		if (!navigatorReady) return;
 
 		// Skip auth check if Supabase is not configured (development mode)
 		if (!isSupabaseConfigured()) return;
@@ -192,10 +214,13 @@ function RootLayoutNav() {
 			// Wait for profile to be loaded before navigating away from auth screens
 			router.replace("/(tabs)");
 		}
-	}, [user, profile, segments, isInitialized, authLoading]);
+	}, [user, profile, segments, isInitialized, authLoading, navigatorReady]);
 
-	// Show loading screen while initializing
-	if (!isInitialized || (authLoading && isSupabaseConfigured())) {
+	// Only the very first initialization takes over the screen. Every later
+	// auth transition (sign in, sign out, password reset - eight places set
+	// isLoading) overlays a spinner instead, because unmounting the Stack
+	// throws away any navigation dispatched while it is gone.
+	if (!isInitialized) {
 		return (
 			<View
 				style={{
@@ -210,6 +235,8 @@ function RootLayoutNav() {
 		);
 	}
 
+	const showAuthOverlay = authLoading && isSupabaseConfigured();
+
 	return (
 		<NavigationThemeProvider value={isDark ? DarkTheme : DefaultTheme}>
 			<Stack>
@@ -219,6 +246,19 @@ function RootLayoutNav() {
 				<Stack.Screen name="subscription" options={{ headerShown: false }} />
 				<Stack.Screen name="modal" options={{ presentation: "modal" }} />
 			</Stack>
+			{showAuthOverlay && (
+				<View
+					style={{
+						...StyleSheet.absoluteFillObject,
+						justifyContent: "center",
+						alignItems: "center",
+						backgroundColor: isDark ? "#1a1a2e" : "#f8f9fa",
+					}}
+					pointerEvents="auto"
+				>
+					<ActivityIndicator size="large" color={theme.primary} />
+				</View>
+			)}
 		</NavigationThemeProvider>
 	);
 }

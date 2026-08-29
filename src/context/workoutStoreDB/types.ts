@@ -222,6 +222,7 @@ export interface WorkoutStore {
 	activePlanId: string | null;
 	isLoading: boolean;
 	userId: string | null;
+	setUserId: (userId: string | null) => void;
 
 	// Initialize
 	initialize: (userId: string) => Promise<void>;

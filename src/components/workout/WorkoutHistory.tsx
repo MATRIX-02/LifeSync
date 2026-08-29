@@ -31,7 +31,9 @@ export default function WorkoutHistory({
 	theme,
 	subscriptionCheck,
 }: WorkoutHistoryProps) {
-	const { workoutSessions, deleteWorkoutSession } = useWorkoutStore();
+	const { workoutSessions, deleteWorkoutSession, fitnessProfile } =
+		useWorkoutStore();
+	const weightUnit = fitnessProfile?.weightUnit || "kg";
 	const [expandedSession, setExpandedSession] = useState<string | null>(null);
 	const [filter, setFilter] = useState<"all" | "week" | "month">("all");
 
@@ -190,7 +192,7 @@ export default function WorkoutHistory({
 					</View>
 					<View style={styles.sessionRight}>
 						<Text style={styles.sessionVolume}>
-							{(session.totalVolume / 1000).toFixed(1)}k kg
+							{(session.totalVolume / 1000).toFixed(1)}k {weightUnit}
 						</Text>
 						<Ionicons
 							name={isExpanded ? "chevron-up" : "chevron-down"}

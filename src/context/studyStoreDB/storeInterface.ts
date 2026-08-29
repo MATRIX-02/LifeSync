@@ -33,6 +33,7 @@ export interface StudyStore {
 	activeSession: StudySession | null;
 	isLoading: boolean;
 	userId: string | null;
+	setUserId: (userId: string | null) => void;
 
 	// ============ INITIALIZE ============
 	initialize: (userId: string) => Promise<void>;
@@ -80,6 +81,7 @@ export interface StudyStore {
 	addBreak: (sessionId: string, duration: number) => void;
 	updateSession: (id: string, updates: Partial<StudySession>) => Promise<void>;
 	deleteSession: (id: string) => Promise<void>;
+	deleteSessions: (ids: string[]) => Promise<void>;
 	getSessionsByDate: (date: string) => StudySession[];
 	getSessionsBySubject: (subjectId: string) => StudySession[];
 	getTodaySessions: () => StudySession[];

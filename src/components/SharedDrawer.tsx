@@ -9,9 +9,11 @@ import {
 	Dimensions,
 	Image,
 	PanResponder,
+	ScrollView,
 	StyleSheet,
 	Text,
 	TouchableOpacity,
+	useWindowDimensions,
 	View,
 } from "react-native";
 
@@ -56,16 +58,29 @@ export const DrawerEdgeSwipe: React.FC<DrawerEdgeSwipeProps> = ({
 	const panResponder = React.useMemo(
 		() =>
 			PanResponder.create({
-				// Let plain taps through to the responder chain; only claim the
-				// gesture once it's clearly a horizontal drag to the right.
-				onStartShouldSetPanResponder: () => false,
-				onMoveShouldSetPanResponder: (_evt, gesture) =>
-					!isOpenRef.current &&
-					gesture.dx > 8 &&
-					Math.abs(gesture.dx) > Math.abs(gesture.dy) * 1.5,
+				// Claim the touch as soon as it lands in the strip, and capture it so
+				// the screen's ScrollView underneath can't take it first.
+				//
+				// Deferring to onMoveShouldSetPanResponder does not work here: the
+				// strip is an absolutely-positioned SIBLING of the content, not an
+				// ancestor. Declining at touch-start hands the responder to the
+				// ScrollView below, and RN only consults move-should-set on the
+				// ancestors of the current responder - so this strip was never asked
+				// again and the swipe never fired.
+				//
+				// The cost is that a vertical scroll begun inside these 24dp does not
+				// scroll. That is the trade-off this strip was always meant to make.
+				onStartShouldSetPanResponder: () => !isOpenRef.current,
+				onStartShouldSetPanResponderCapture: () => !isOpenRef.current,
+				onMoveShouldSetPanResponder: () => !isOpenRef.current,
+				onMoveShouldSetPanResponderCapture: () => !isOpenRef.current,
+				// Once we have the gesture, don't let a parent reclaim it mid-drag.
+				onPanResponderTerminationRequest: () => false,
 
 				onPanResponderMove: (_evt, gesture) => {
-					const next = Math.min(0, Math.max(-DRAWER_WIDTH, -DRAWER_WIDTH + gesture.dx));
+					// Ignore leftward drags; the drawer is already fully closed.
+					const dx = Math.max(0, gesture.dx);
+					const next = Math.min(0, Math.max(-DRAWER_WIDTH, -DRAWER_WIDTH + dx));
 					drawerAnim.setValue(next);
 				},
 
@@ -186,6 +201,10 @@ export const SharedDrawer: React.FC<SharedDrawerProps> = ({
 	const router = useRouter();
 	const { profile: authProfile, user } = useAuthStore();
 	const { enabledModules } = useModuleStore();
+	// In landscape the drawer is only a few hundred dp tall, so the tall profile
+	// header would push the module list off-screen.
+	const { width: winWidth, height: winHeight } = useWindowDimensions();
+	const isLandscape = winWidth > winHeight;
 
 	const userName =
 		authProfile?.full_name || user?.email?.split("@")[0] || "User";
@@ -261,10 +280,14 @@ export const SharedDrawer: React.FC<SharedDrawerProps> = ({
 
 	return (
 		<Animated.View
-			style={[styles.drawer, { transform: [{ translateX: drawerAnim }] }]}
+			style={[
+				styles.drawer,
+				isLandscape && styles.drawerLandscape,
+				{ transform: [{ translateX: drawerAnim }] },
+			]}
 		>
 			<TouchableOpacity
-				style={styles.drawerHeader}
+				style={[styles.drawerHeader, isLandscape && styles.drawerHeaderCompact]}
 				onPress={() => {
 					onCloseDrawer();
 					router.push({
@@ -277,11 +300,23 @@ export const SharedDrawer: React.FC<SharedDrawerProps> = ({
 				{authProfile?.avatar_url ? (
 					<Image
 						source={{ uri: authProfile.avatar_url }}
-						style={styles.drawerAvatarImage}
+						style={[
+							styles.drawerAvatarImage,
+							isLandscape && styles.drawerAvatarCompact,
+						]}
 					/>
 				) : (
-					<View style={styles.drawerAvatar}>
-						<Ionicons name="person" size={32} color={theme.textSecondary} />
+					<View
+						style={[
+							styles.drawerAvatar,
+							isLandscape && styles.drawerAvatarCompact,
+						]}
+					>
+						<Ionicons
+							name="person"
+							size={isLandscape ? 22 : 32}
+							color={theme.textSecondary}
+						/>
 					</View>
 				)}
 				<Text style={styles.drawerName}>{userName}</Text>
@@ -290,7 +325,11 @@ export const SharedDrawer: React.FC<SharedDrawerProps> = ({
 				</Text>
 			</TouchableOpacity>
 
-			<View style={styles.drawerContent}>
+			<ScrollView
+				style={styles.drawerContent}
+				contentContainerStyle={styles.drawerContentInner}
+				showsVerticalScrollIndicator={false}
+			>
 				<Text style={styles.drawerSectionTitle}>MODULES</Text>
 
 				{renderModuleItems()}
@@ -320,7 +359,7 @@ export const SharedDrawer: React.FC<SharedDrawerProps> = ({
 					</View>
 					<Ionicons name="chevron-forward" size={18} color={theme.textMuted} />
 				</TouchableOpacity>
-			</View>
+			</ScrollView>
 
 			<View style={styles.drawerFooter}>
 				<View style={styles.themeToggle}>
@@ -365,11 +404,23 @@ const createStyles = (theme: Theme) =>
 			shadowRadius: 10,
 			elevation: 10,
 		},
+		drawerLandscape: {
+			paddingTop: 16,
+		},
 		drawerHeader: {
 			alignItems: "center",
 			paddingVertical: 24,
 			borderBottomWidth: 1,
 			borderBottomColor: theme.border,
+		},
+		drawerHeaderCompact: {
+			paddingVertical: 10,
+		},
+		drawerAvatarCompact: {
+			width: 48,
+			height: 48,
+			borderRadius: 24,
+			marginBottom: 6,
 		},
 		drawerAvatar: {
 			width: 80,
@@ -398,8 +449,11 @@ const createStyles = (theme: Theme) =>
 		},
 		drawerContent: {
 			flex: 1,
+		},
+		drawerContentInner: {
 			paddingTop: 16,
 			paddingHorizontal: 16,
+			paddingBottom: 16,
 		},
 		drawerSectionTitle: {
 			fontSize: 11,

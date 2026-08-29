@@ -1886,6 +1886,80 @@ export default function SettingsScreen() {
 								style={styles.settingRow}
 								onPress={async () => {
 									try {
+										// requestPermissions() also (re)creates the "alarms" channel.
+										const granted =
+											await NotificationService.requestPermissions();
+										if (!granted) {
+											Alert.alert(
+												"Permission Denied",
+												"Enable notifications for LifeSync in your device settings, then try again."
+											);
+											return;
+										}
+
+										const diag =
+											await NotificationService.getAlarmDiagnostics();
+										await NotificationService.scheduleTestAlarm(10);
+
+										Alert.alert(
+											"Test Alarm Scheduled",
+											`Firing in 10 seconds on the "alarms" channel.
+
+` +
+												`Lock the screen now to check it wakes the device.
+
+` +
+												`Permission: ${diag.permission}
+` +
+												`Alarm channel: ${
+													diag.channelExists ? "created" : "MISSING"
+												}
+` +
+												`Channel importance: ${
+													diag.channelImportance ?? "n/a"
+												} (5 = max)
+` +
+												`Physical device: ${diag.isDevice ? "yes" : "NO"}
+
+` +
+												`If it is silent, check Android Settings > Apps > LifeSync > ` +
+												`Notifications > Alarms, and Special app access > Alarms & reminders.`
+										);
+									} catch (error) {
+										Alert.alert(
+											"Error",
+											"Failed to schedule the test alarm. Make sure you're on a real device, not Expo Go."
+										);
+									}
+								}}
+							>
+								<View
+									style={[
+										styles.settingIcon,
+										{ backgroundColor: "#F87171" + "20" },
+									]}
+								>
+									<Ionicons name="alarm" size={20} color="#F87171" />
+								</View>
+								<View style={styles.settingContent}>
+									<Text style={styles.settingLabel}>Test Alarm</Text>
+									<Text style={styles.settingDescription}>
+										Fire an alarm-channel notification in 10s
+									</Text>
+								</View>
+								<Ionicons
+									name="chevron-forward"
+									size={20}
+									color={theme.textMuted}
+								/>
+							</TouchableOpacity>
+
+							<View style={styles.divider} />
+
+							<TouchableOpacity
+								style={styles.settingRow}
+								onPress={async () => {
+									try {
 										const granted =
 											await NotificationService.requestPermissions();
 										if (!granted) {

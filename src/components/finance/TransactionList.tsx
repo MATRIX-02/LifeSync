@@ -53,8 +53,13 @@ export default function TransactionList({
 	subscriptionCheck,
 	currentMonthTransactionCount = 0,
 }: TransactionListProps) {
-	const { transactions, accounts, deleteTransaction, updateTransaction } =
-		useFinanceStore();
+	const {
+		transactions,
+		accounts,
+		deleteTransaction,
+		deleteTransactions,
+		updateTransaction,
+	} = useFinanceStore();
 
 	const styles = createStyles(theme);
 
@@ -67,6 +72,8 @@ export default function TransactionList({
 	const [selectedTransaction, setSelectedTransaction] =
 		useState<Transaction | null>(null);
 	const [showEditModal, setShowEditModal] = useState(false);
+	const [selectionMode, setSelectionMode] = useState(false);
+	const [selectedIds, setSelectedIds] = useState<string[]>([]);
 	const [editForm, setEditForm] = useState({
 		amount: "",
 		description: "",
@@ -204,6 +211,56 @@ export default function TransactionList({
 		);
 	};
 
+	const visibleTransactionIds = useMemo(
+		() => groupedTransactions.flatMap((g) => g.transactions.map((t) => t.id)),
+		[groupedTransactions]
+	);
+
+	const exitSelectionMode = () => {
+		setSelectionMode(false);
+		setSelectedIds([]);
+	};
+
+	const toggleSelection = (id: string) => {
+		setSelectedIds((prev) =>
+			prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+		);
+	};
+
+	const startSelection = (transaction: Transaction) => {
+		setSelectionMode(true);
+		setSelectedIds([transaction.id]);
+	};
+
+	const allVisibleSelected =
+		visibleTransactionIds.length > 0 &&
+		visibleTransactionIds.every((id) => selectedIds.includes(id));
+
+	const toggleSelectAll = () => {
+		setSelectedIds(allVisibleSelected ? [] : visibleTransactionIds);
+	};
+
+	const handleBulkDelete = () => {
+		if (selectedIds.length === 0) return;
+		Alert.alert(
+			"Delete Transactions",
+			`Delete ${selectedIds.length} transaction${
+				selectedIds.length > 1 ? "s" : ""
+			}? Account balances will be adjusted.`,
+			[
+				{ text: "Cancel", style: "cancel" },
+				{
+					text: "Delete",
+					style: "destructive",
+					onPress: async () => {
+						await deleteTransactions(selectedIds);
+						exitSelectionMode();
+					},
+				},
+			]
+		);
+	};
+
 	const handleEditTransaction = (transaction: Transaction) => {
 		setEditForm({
 			amount: transaction.amount.toString(),
@@ -317,13 +374,36 @@ export default function TransactionList({
 
 		const { account: closingBalanceAccount } = getClosingBalances(transaction);
 
+		const isSelected = selectedIds.includes(transaction.id);
+
 		return (
 			<TouchableOpacity
 				key={transaction.id}
-				style={styles.transactionItem}
-				onPress={() => setSelectedTransaction(transaction)}
+				style={[
+					styles.transactionItem,
+					isSelected && styles.transactionItemSelected,
+				]}
+				onPress={() =>
+					selectionMode
+						? toggleSelection(transaction.id)
+						: setSelectedTransaction(transaction)
+				}
+				onLongPress={() =>
+					selectionMode
+						? toggleSelection(transaction.id)
+						: startSelection(transaction)
+				}
+				delayLongPress={300}
 				activeOpacity={0.7}
 			>
+				{selectionMode && (
+					<Ionicons
+						name={isSelected ? "checkbox" : "square-outline"}
+						size={22}
+						color={isSelected ? theme.primary : theme.textMuted}
+						style={styles.selectionCheckbox}
+					/>
+				)}
 				<View
 					style={[
 						styles.transactionIcon,
@@ -341,8 +421,13 @@ export default function TransactionList({
 						{transaction.description}
 					</Text>
 					<Text style={styles.transactionMeta}>
-						{catInfo?.name || transaction.category} •{" "}
-						{getAccountName(transaction.accountId)}
+						{transaction.type === "transfer"
+							? `Transfer • ${getAccountName(
+									transaction.accountId
+							  )} → ${getAccountName(transaction.toAccountId || "")}`
+							: `${catInfo?.name || transaction.category} • ${getAccountName(
+									transaction.accountId
+							  )}`}
 					</Text>
 					<Text style={styles.transactionBalance} numberOfLines={1}>
 						Closing Balance ({getAccountName(transaction.accountId)}):{" "}
@@ -415,6 +500,42 @@ export default function TransactionList({
 
 	return (
 		<View style={styles.container}>
+			{/* Selection Bar */}
+			{selectionMode && (
+				<View style={styles.selectionBar}>
+					<TouchableOpacity
+						onPress={exitSelectionMode}
+						style={styles.selectionBarButton}
+					>
+						<Ionicons name="close" size={22} color={theme.text} />
+					</TouchableOpacity>
+					<Text style={styles.selectionBarText}>
+						{selectedIds.length} selected
+					</Text>
+					<TouchableOpacity
+						onPress={toggleSelectAll}
+						style={styles.selectionBarButton}
+					>
+						<Ionicons
+							name={allVisibleSelected ? "checkbox" : "checkbox-outline"}
+							size={22}
+							color={theme.text}
+						/>
+					</TouchableOpacity>
+					<TouchableOpacity
+						onPress={handleBulkDelete}
+						disabled={selectedIds.length === 0}
+						style={styles.selectionBarButton}
+					>
+						<Ionicons
+							name="trash"
+							size={22}
+							color={selectedIds.length === 0 ? theme.textMuted : theme.error}
+						/>
+					</TouchableOpacity>
+				</View>
+			)}
+
 			{/* Search Bar */}
 			<View style={styles.searchContainer}>
 				<View style={styles.searchBar}>
@@ -1083,6 +1204,31 @@ const createStyles = (theme: Theme) =>
 			borderRadius: 14,
 			marginBottom: 8,
 			gap: 12,
+		},
+		transactionItemSelected: {
+			borderWidth: 1,
+			borderColor: theme.primary,
+			backgroundColor: theme.primary + "15",
+		},
+		selectionCheckbox: {
+			marginRight: -4,
+		},
+		selectionBar: {
+			flexDirection: "row",
+			alignItems: "center",
+			gap: 12,
+			paddingHorizontal: 16,
+			paddingVertical: 10,
+			backgroundColor: theme.surface,
+		},
+		selectionBarText: {
+			flex: 1,
+			fontSize: 15,
+			fontWeight: "600",
+			color: theme.text,
+		},
+		selectionBarButton: {
+			padding: 4,
 		},
 		transactionIcon: {
 			width: 44,

@@ -9,6 +9,7 @@ import {
 	HabitStats,
 	UserProfile,
 } from "../types";
+import { generateUUID } from "../utils/uuid";
 
 // Helper: Convert camelCase to snake_case
 const toSnakeCase = (str: string): string => {
@@ -155,6 +156,13 @@ interface HabitStoreDB {
 	getHabitLogs: (habitId: string) => HabitLog[];
 	getLogsForDate: (habitId: string, date: Date) => HabitLog[];
 	isHabitCompletedOnDate: (habitId: string, date: Date) => boolean;
+	/** How many completions a habit needs on a given day, and how many it has. */
+	getProgressForDate: (
+		habitId: string,
+		date: Date
+	) => { done: number; target: number };
+	/** Remove a single completion, rather than clearing the whole day. */
+	removeOneLogForDate: (habitId: string, date: Date) => Promise<void>;
 
 	// Stats (computed locally from DB data)
 	calculateStats: (habitId: string) => HabitStats;
@@ -407,7 +415,7 @@ export const useHabitStore = create<HabitStoreDB>()((set, get) => ({
 		if (!userId) return;
 
 		const log: HabitLog = {
-			id: `log_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+			id: generateUUID(),
 			habitId,
 			completedAt: new Date(),
 			value,
@@ -450,7 +458,7 @@ export const useHabitStore = create<HabitStoreDB>()((set, get) => ({
 		targetDate.setHours(12, 0, 0, 0);
 
 		const log: HabitLog = {
-			id: `log_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+			id: generateUUID(),
 			habitId,
 			completedAt: targetDate,
 			value,
@@ -477,6 +485,36 @@ export const useHabitStore = create<HabitStoreDB>()((set, get) => ({
 	},
 
 	// Remove log for date
+	removeOneLogForDate: async (habitId: string, date: Date) => {
+		const userId = get().userId;
+		if (!userId) return;
+
+		// Most recent first, so undo removes the completion just added.
+		const logs = get()
+			.getLogsForDate(habitId, date)
+			.sort(
+				(a, b) =>
+					new Date(b.completedAt).getTime() - new Date(a.completedAt).getTime()
+			);
+		const log = logs[0];
+		if (!log) return;
+
+		try {
+			const { error } = await supabase
+				.from("habit_logs")
+				.delete()
+				.eq("id", log.id)
+				.eq("user_id", userId);
+			if (error) throw error;
+
+			set((state) => ({ logs: state.logs.filter((l) => l.id !== log.id) }));
+			get().calculateStats(habitId);
+		} catch (error: any) {
+			console.error("❌ Failed to remove habit log:", error);
+			set({ error: error.message });
+		}
+	},
+
 	removeLogForDate: async (habitId: string, date: Date) => {
 		const userId = get().userId;
 		if (!userId) return;
@@ -528,8 +566,12 @@ export const useHabitStore = create<HabitStoreDB>()((set, get) => ({
 
 	// Toggle habit for date
 	toggleHabitForDate: async (habitId: string, date: Date) => {
-		const isCompleted = get().isHabitCompletedOnDate(habitId, date);
-		if (isCompleted) {
+		const { done, target } = get().getProgressForDate(habitId, date);
+
+		// Multi-target habits count up one tap at a time (1/5, 2/5 …). Tapping
+		// again once full clears the day, which keeps "tap to undo" working with
+		// a single gesture - long-press is already the archive/delete menu.
+		if (done >= target) {
 			await get().removeLogForDate(habitId, date);
 		} else {
 			await get().logHabitForDate(habitId, date);
@@ -554,9 +596,21 @@ export const useHabitStore = create<HabitStoreDB>()((set, get) => ({
 		);
 	},
 
+	// A "times_per_day" habit is only done when it has been done that many
+	// times. Every other frequency needs exactly one completion for the day.
+	getProgressForDate: (habitId: string, date: Date) => {
+		const habit = get().getHabit(habitId);
+		const done = get().getLogsForDate(habitId, date).length;
+		const target =
+			habit?.frequency?.type === "times_per_day"
+				? Math.max(1, Number(habit.frequency.value) || 1)
+				: 1;
+		return { done, target };
+	},
+
 	isHabitCompletedOnDate: (habitId: string, date: Date) => {
-		const logs = get().getLogsForDate(habitId, date);
-		return logs.length > 0;
+		const { done, target } = get().getProgressForDate(habitId, date);
+		return done >= target;
 	},
 
 	// Stats calculation (runs locally on fetched data)

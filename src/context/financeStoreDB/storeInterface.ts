@@ -30,7 +30,12 @@ export interface FinanceStore {
 	splitGroups: SplitGroup[];
 	currency: string;
 	isLoading: boolean;
+	// Last load failure, or null. Non-null with data still present means the
+	// screen is showing a stale-but-valid snapshot.
+	loadError: string | null;
+	lastLoadedAt: number | null;
 	userId: string | null;
+	setUserId: (userId: string | null) => void;
 
 	// Initialize
 	initialize: (userId: string) => Promise<void>;
@@ -53,6 +58,7 @@ export interface FinanceStore {
 		updates: Partial<Transaction>
 	) => Promise<void>;
 	deleteTransaction: (id: string) => Promise<void>;
+	deleteTransactions: (ids: string[]) => Promise<void>;
 	getTransactionsByAccount: (accountId: string) => Transaction[];
 	getTransactionsByCategory: (category: string) => Transaction[];
 	getTransactionsByDateRange: (

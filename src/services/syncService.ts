@@ -299,8 +299,15 @@ export const syncHabitsToCloud = async (
 		// Upsert habits
 		if (habitsData.habits && habitsData.habits.length > 0) {
 			const habitsWithUser = habitsData.habits.map((habit) => {
-				// ensure a stable id exists on habit
-				assignIdIfMissing(habit, "id");
+				// DO NOT rewrite the id here.
+				//
+				// user_habits.id is a TEXT column, so it accepts any id the app
+				// generates. assignIdIfMissing() used to mint a fresh UUID for any
+				// legacy `habit_…` id and upsert under it - which conflicted with
+				// nothing, leaving the original row in place. That is what
+				// duplicated habits. New habits are created as UUIDs at source
+				// (utils/uuid.ts); legacy ids are migrated by
+				// supabase/migrations/20260829_habit_uuid_ids.sql.
 				// Flatten frequency object to match database columns
 				const { frequency, ...restHabit } = habit;
 				const flattenedHabit = {
@@ -343,7 +350,9 @@ export const syncHabitsToCloud = async (
 		// Upsert logs (batch in chunks to avoid payload limits)
 		if (habitsData.logs && habitsData.logs.length > 0) {
 			const logsWithUser = habitsData.logs.map((log) => {
-				assignIdIfMissing(log, "id");
+				// Same reasoning as habits above: habit_logs.id is TEXT, and
+				// rewriting the id here duplicated every log exactly once. It also
+				// broke the log's habit_id association when the parent was rewritten.
 				return objectToSnakeCase({
 					...log,
 					id: log.id,

@@ -164,6 +164,22 @@ export class NotificationService {
 				showBadge: true,
 			});
 
+			// Alarm channel. Android decides sound/vibration/DND behaviour from the
+			// channel, and channel settings are FROZEN after first creation - to
+			// change them you must use a new channel id, not edit this one.
+			await Notifications.setNotificationChannelAsync("alarms", {
+				name: "Alarms",
+				importance: Notifications.AndroidImportance.MAX,
+				sound: "default",
+				enableVibrate: true,
+				vibrationPattern: [0, 1000, 500, 1000, 500, 1000],
+				lightColor: "#F87171",
+				bypassDnd: true,
+				lockscreenVisibility:
+					Notifications.AndroidNotificationVisibility.PUBLIC,
+				showBadge: true,
+			});
+
 			// Also set up a default channel
 			await Notifications.setNotificationChannelAsync("default", {
 				name: "Default",
@@ -180,7 +196,9 @@ export class NotificationService {
 		title: string,
 		body: string,
 		trigger: Notifications.NotificationTriggerInput,
-		data?: Record<string, any>
+		data?: Record<string, any>,
+		channelId: string = "habit-reminders",
+		sound: string | boolean = "default"
 	): Promise<string> {
 		try {
 			const notificationId = await Notifications.scheduleNotificationAsync({
@@ -188,11 +206,11 @@ export class NotificationService {
 					title,
 					body,
 					data: data || {},
-					sound: "default",
+					sound,
 					badge: 1,
-					// Android specific - use the habit-reminders channel
+					// Android routes sound/vibration/DND through the channel
 					...(Platform.OS === "android" && {
-						channelId: "habit-reminders",
+						channelId,
 					}),
 				},
 				trigger,
@@ -274,6 +292,10 @@ export class NotificationService {
 		name: string;
 		notificationTime?: string;
 		frequency?: FrequencyConfig;
+		/** Route through the louder "alarms" channel (MAX importance, bypasses DND). */
+		alarmEnabled?: boolean;
+		/** false = deliver silently (vibration only). */
+		ringtoneEnabled?: boolean;
 	}): Promise<string[]> {
 		// Always start from a clean slate so edits never leave orphans behind.
 		await this.cancelHabitNotifications(habit.id);
@@ -282,10 +304,19 @@ export class NotificationService {
 		const baseTime = habit.notificationTime || "09:00";
 		const ids: string[] = [];
 
+		// Android takes importance, vibration and do-not-disturb behaviour from
+		// the CHANNEL, so an alarm habit has to be delivered on a different one.
+		const channelId = habit.alarmEnabled ? "alarms" : "habit-reminders";
+		// `false` is how expo-notifications expresses "silent"; null is not a
+		// valid value for this field.
+		const sound: string | boolean =
+			habit.ringtoneEnabled === false ? false : "default";
+		const title = habit.alarmEnabled ? "⏰ Habit Alarm" : "🎯 Habit Reminder";
+
 		const scheduleDaily = async (timeString: string, label?: string) => {
 			const [hour, minute] = timeString.split(":").map(Number);
 			const id = await this.scheduleNotification(
-				"🎯 Habit Reminder",
+				title,
 				label
 					? `Time to complete: ${habit.name} ${label}`
 					: `Time to complete: ${habit.name}`,
@@ -294,7 +325,9 @@ export class NotificationService {
 					hour,
 					minute,
 				},
-				{ habitId: habit.id, type: "habit_reminder" }
+				{ habitId: habit.id, type: "habit_reminder" },
+				channelId,
+				sound
 			);
 			ids.push(id);
 		};
@@ -313,7 +346,7 @@ export class NotificationService {
 			const [hour, minute] = baseTime.split(":").map(Number);
 			for (const day of frequency.days) {
 				const id = await this.scheduleNotification(
-					"🎯 Habit Reminder",
+					title,
 					`Time to complete: ${habit.name}`,
 					{
 						type: Notifications.SchedulableTriggerInputTypes.WEEKLY,
@@ -322,7 +355,9 @@ export class NotificationService {
 						hour,
 						minute,
 					},
-					{ habitId: habit.id, type: "habit_reminder" }
+					{ habitId: habit.id, type: "habit_reminder" },
+					channelId,
+					sound
 				);
 				ids.push(id);
 			}
@@ -407,6 +442,59 @@ export class NotificationService {
 			"Notifications are working correctly!",
 			{ type: "test" }
 		);
+	}
+
+	// ============ ALARMS ============
+
+	/**
+	 * Fires an alarm-channel notification after `seconds`.
+	 *
+	 * On Android the loud/bypass-DND behaviour comes from the "alarms" channel,
+	 * which requestPermissions() creates. This is a high-priority notification,
+	 * not a true full-screen alarm: waking the screen with an alarm UI needs
+	 * USE_FULL_SCREEN_INTENT and a native activity, which this app does not have.
+	 */
+	static async scheduleTestAlarm(seconds: number = 10): Promise<string> {
+		return this.scheduleNotification(
+			"⏰ Test Alarm",
+			"If you can hear this, alarm delivery is working.",
+			{
+				type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
+				seconds,
+				repeats: false,
+			},
+			{ type: "alarm_test" },
+			"alarms"
+		);
+	}
+
+	/**
+	 * What we can actually detect about alarm readiness from JS.
+	 * Exact-alarm ("Alarms & reminders") and battery-optimisation state are NOT
+	 * queryable through expo-notifications - they need a native module - so this
+	 * reports notification permission and channel config only.
+	 */
+	static async getAlarmDiagnostics(): Promise<{
+		permission: string;
+		canAskAgain: boolean;
+		channelExists: boolean;
+		channelImportance: number | null;
+		channelSound: string | null;
+		isDevice: boolean;
+	}> {
+		const perms = await Notifications.getPermissionsAsync();
+		let channel = null;
+		if (Platform.OS === "android") {
+			channel = await Notifications.getNotificationChannelAsync("alarms");
+		}
+		return {
+			permission: perms.status,
+			canAskAgain: perms.canAskAgain,
+			channelExists: Platform.OS !== "android" || !!channel,
+			channelImportance: channel?.importance ?? null,
+			channelSound: (channel?.sound as string) ?? null,
+			isDevice: Device.isDevice,
+		};
 	}
 
 	// ============ STUDY HUB NOTIFICATIONS ============
@@ -956,7 +1044,7 @@ export class NotificationService {
 						title,
 						body: `${body} - ${timeString} remaining`,
 						data: { type: "timer_progress", remaining: remainingSeconds },
-						sound: null, // Silent progress updates
+						sound: false, // Silent progress updates
 					},
 					trigger,
 				});

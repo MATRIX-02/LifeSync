@@ -136,11 +136,3 @@ export interface AppSettings {
 	};
 }
 
-export interface NavigationStackParamList {
-	HabitTrackerScreen: undefined;
-	CreateHabitScreen: undefined;
-	HabitDetailScreen: { habitId: string };
-	SettingsScreen: undefined;
-	StatisticsScreen: undefined;
-	ProfileScreen: undefined;
-}

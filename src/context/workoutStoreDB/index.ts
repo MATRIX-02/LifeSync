@@ -33,6 +33,12 @@ export const useWorkoutStore = create<WorkoutStore>()((set, get) => ({
 	isLoading: false,
 	userId: null,
 
+	// Bind the signed-in user before any fetching. Mutators refuse to write
+	// without this, and initialize() sets it far too late in app startup.
+	setUserId: (userId: string | null) => {
+		set({ userId });
+	},
+
 	// Initialize from database
 	initialize: async (userId: string) => {
 		console.log("📥 Loading workout data from database for user:", userId);

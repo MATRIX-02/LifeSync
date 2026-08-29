@@ -56,6 +56,7 @@ export default function WorkoutDashboard({
 		logBodyWeight,
 		customExercises,
 		addCustomExercise,
+		fitnessProfile,
 	} = useWorkoutStore();
 
 	// Modal states
@@ -102,19 +103,30 @@ export default function WorkoutDashboard({
 
 	// Weight logger state
 	const [newWeight, setNewWeight] = useState("");
-	const [weightUnit, setWeightUnit] = useState<"kg" | "lbs">("kg");
+	// Seeded from the fitness profile; the toggle below still lets the user
+	// log a one-off entry in the other unit.
+	const [weightUnit, setWeightUnit] = useState<"kg" | "lbs">(
+		fitnessProfile?.weightUnit || "kg"
+	);
 
 	const stats = getWorkoutStats();
 	const recentWorkouts = getRecentWorkouts(3);
 	const activePlan = getActivePlan();
 	const styles = createStyles(theme);
 
+	// (2) Show this week against the user's own weekly target when they have one.
+	const weeklyGoal = fitnessProfile?.weeklyWorkoutGoal || 0;
+	const weeklyGoalMet = weeklyGoal > 0 && stats.workoutsThisWeek >= weeklyGoal;
+
 	const quickStats = [
 		{
-			label: "This Week",
-			value: stats.workoutsThisWeek,
-			icon: "calendar",
-			color: theme.primary,
+			label: weeklyGoal > 0 ? "Weekly Goal" : "This Week",
+			value:
+				weeklyGoal > 0
+					? `${stats.workoutsThisWeek}/${weeklyGoal}`
+					: stats.workoutsThisWeek,
+			icon: weeklyGoalMet ? "checkmark-circle" : "calendar",
+			color: weeklyGoalMet ? theme.success : theme.primary,
 		},
 		{
 			label: "Streak",
@@ -543,7 +555,9 @@ export default function WorkoutDashboard({
 								<Text style={styles.recentVolumeValue}>
 									{Math.round(workout.totalVolume / 1000)}k
 								</Text>
-								<Text style={styles.recentVolumeLabel}>kg</Text>
+								<Text style={styles.recentVolumeLabel}>
+									{fitnessProfile?.weightUnit || "kg"}
+								</Text>
 							</View>
 						</TouchableOpacity>
 					))

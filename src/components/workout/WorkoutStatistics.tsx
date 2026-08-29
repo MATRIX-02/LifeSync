@@ -34,8 +34,13 @@ export default function WorkoutStatistics({
 	gender,
 	subscriptionCheck,
 }: WorkoutStatisticsProps) {
-	const { getWorkoutStats, workoutSessions, personalRecords } =
-		useWorkoutStore();
+	const {
+		getWorkoutStats,
+		workoutSessions,
+		personalRecords,
+		fitnessProfile,
+	} = useWorkoutStore();
+	const weightUnit = fitnessProfile?.weightUnit || "kg";
 
 	const [bodyView, setBodyView] = useState<"front" | "back">("front");
 	const [selectedMuscle, setSelectedMuscle] = useState<MuscleGroup | null>(
@@ -50,32 +55,49 @@ export default function WorkoutStatistics({
 	const panRef = useRef({ x: 0, y: 0 });
 	const scrollViewRef = useRef<ScrollView>(null);
 
-	// PanResponder for dragging the muscle map
+	// PanResponder for dragging the muscle map.
+	//
+	// The responder object is created ONCE, so its callbacks close over the very
+	// first render's state - where zoomLevel is 1. Reading `zoomLevel` directly in
+	// them made the guards permanently false (`1 > 1`) and the drag never started.
+	// Mirror the values into refs and read those instead.
+	const zoomRef = useRef(zoomLevel);
+	zoomRef.current = zoomLevel;
+	const panOffsetRef = useRef(panOffset);
+	panOffsetRef.current = panOffset;
+	const isPanningRef = useRef(isPanning);
+	isPanningRef.current = isPanning;
+
 	const panResponder = useRef(
 		PanResponder.create({
-			onStartShouldSetPanResponderCapture: () => zoomLevel > 1,
-			onMoveShouldSetPanResponderCapture: () => zoomLevel > 1 && isPanning,
+			onStartShouldSetPanResponderCapture: () => zoomRef.current > 1,
+			onMoveShouldSetPanResponderCapture: () => zoomRef.current > 1,
+			onPanResponderTerminationRequest: () => false,
 			onPanResponderGrant: () => {
-				if (zoomLevel > 1) {
-					setIsPanning(true);
-					panRef.current = { x: panOffset.x, y: panOffset.y };
-				}
+				if (zoomRef.current <= 1) return;
+				isPanningRef.current = true;
+				setIsPanning(true);
+				panRef.current = { ...panOffsetRef.current };
 			},
 			onPanResponderMove: (_, gestureState) => {
-				if (zoomLevel > 1 && isPanning) {
-					const maxPan = (zoomLevel - 1) * 150;
-					const newX = Math.max(
-						-maxPan,
-						Math.min(maxPan, panRef.current.x + gestureState.dx)
-					);
-					const newY = Math.max(
-						-maxPan,
-						Math.min(maxPan, panRef.current.y + gestureState.dy)
-					);
-					setPanOffset({ x: newX, y: newY });
-				}
+				if (zoomRef.current <= 1 || !isPanningRef.current) return;
+				const maxPan = (zoomRef.current - 1) * 150;
+				const newX = Math.max(
+					-maxPan,
+					Math.min(maxPan, panRef.current.x + gestureState.dx)
+				);
+				const newY = Math.max(
+					-maxPan,
+					Math.min(maxPan, panRef.current.y + gestureState.dy)
+				);
+				setPanOffset({ x: newX, y: newY });
 			},
 			onPanResponderRelease: () => {
+				isPanningRef.current = false;
+				setIsPanning(false);
+			},
+			onPanResponderTerminate: () => {
+				isPanningRef.current = false;
 				setIsPanning(false);
 			},
 		})
@@ -352,8 +374,8 @@ export default function WorkoutStatistics({
 				sets: e.sets,
 				volume:
 					e.volume >= 1000
-						? `${(e.volume / 1000).toFixed(1)}k kg`
-						: `${e.volume} kg`,
+						? `${(e.volume / 1000).toFixed(1)}k ${weightUnit}`
+						: `${e.volume} ${weightUnit}`,
 			}));
 	};
 
@@ -480,8 +502,15 @@ export default function WorkoutStatistics({
 				</View>
 
 				<View style={styles.muscleMapContainer}>
-					{/* Zoomable Body Map Area */}
-					<View style={styles.muscleMapZoomArea} {...panResponder.panHandlers}>
+					{/* Zoomable Body Map Area.
+					    The zoom controls sit OUTSIDE the pan-handling view: while
+					    zoomed it captures touches before its children, which made the
+					    buttons unpressable when they lived inside it. */}
+					<View style={styles.muscleMapZoomWrapper}>
+						<View
+							style={styles.muscleMapZoomArea}
+							{...panResponder.panHandlers}
+						>
 						<View
 							style={{
 								transform: [
@@ -548,43 +577,49 @@ export default function WorkoutStatistics({
 								)}
 							</View>
 						)}
-
-						{/* Zoom Controls - Bottom Right */}
-						<View style={styles.zoomControls}>
-							<TouchableOpacity
-								style={styles.zoomButton}
-								onPress={() => setZoomLevel(Math.min(zoomLevel + 0.2, 2))}
-							>
-								<Ionicons name="add" size={20} color={theme.text} />
-							</TouchableOpacity>
-							<Text style={styles.zoomText}>
-								{Math.round(zoomLevel * 100)}%
-							</Text>
-							<TouchableOpacity
-								style={styles.zoomButton}
-								onPress={() => setZoomLevel(Math.max(zoomLevel - 0.2, 0.6))}
-							>
-								<Ionicons name="remove" size={20} color={theme.text} />
-							</TouchableOpacity>
-							<TouchableOpacity
-								style={[styles.zoomButton, { marginLeft: 8 }]}
-								onPress={handleResetZoom}
-							>
-								<Ionicons
-									name="refresh"
-									size={16}
-									color={theme.textSecondary}
-								/>
-							</TouchableOpacity>
 						</View>
 
-						{/* Drag hint when zoomed */}
-						{zoomLevel > 1 && (
-							<View style={styles.dragHint}>
-								<Ionicons name="move" size={12} color={theme.textMuted} />
-								<Text style={styles.dragHintText}>Drag to pan</Text>
-							</View>
-						)}
+					{/* Zoom Controls - Bottom Right */}
+					<View style={styles.zoomControls}>
+						<TouchableOpacity
+							style={styles.zoomButton}
+							onPress={() => setZoomLevel(Math.min(zoomLevel + 0.2, 2))}
+						>
+							<Ionicons name="add" size={20} color={theme.text} />
+						</TouchableOpacity>
+						<Text style={styles.zoomText}>
+							{Math.round(zoomLevel * 100)}%
+						</Text>
+						<TouchableOpacity
+							style={styles.zoomButton}
+							onPress={() => {
+								const next = Math.max(zoomLevel - 0.2, 0.6);
+								setZoomLevel(next);
+								// No room to pan at or below 1x - don't strand the offset.
+								if (next <= 1) setPanOffset({ x: 0, y: 0 });
+							}}
+						>
+							<Ionicons name="remove" size={20} color={theme.text} />
+						</TouchableOpacity>
+						<TouchableOpacity
+							style={[styles.zoomButton, { marginLeft: 8 }]}
+							onPress={handleResetZoom}
+						>
+							<Ionicons
+								name="refresh"
+								size={16}
+								color={theme.textSecondary}
+							/>
+						</TouchableOpacity>
+					</View>
+
+					{/* Drag hint when zoomed */}
+					{zoomLevel > 1 && (
+						<View style={styles.dragHint}>
+							<Ionicons name="move" size={12} color={theme.textMuted} />
+							<Text style={styles.dragHintText}>Drag to pan</Text>
+						</View>
+					)}
 					</View>
 
 					{/* Muscle Legend */}
@@ -712,7 +747,7 @@ export default function WorkoutStatistics({
 								<Text style={styles.prNumber}>
 									{pr.value}
 									{pr.type === "weight"
-										? " kg"
+										? ` ${weightUnit}`
 										: pr.type === "reps"
 										? " reps"
 										: ""}
@@ -1259,6 +1294,11 @@ const createStyles = (theme: Theme) =>
 			textAlign: "center" as const,
 		},
 		// Muscle map zoom area
+		// Positioning context for the zoom controls, which must not be children
+		// of the pan-handling view.
+		muscleMapZoomWrapper: {
+			position: "relative" as const,
+		},
 		muscleMapZoomArea: {
 			overflow: "hidden" as const,
 			borderRadius: 16,

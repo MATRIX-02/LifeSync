@@ -11,11 +11,21 @@ export class AudioService {
 
 			this.soundObject = new Audio.Sound();
 
-			// Load default system sound or custom sound
-			const source =
-				soundFile || require("../../assets/sounds/default-ringtone.mp3");
+			// There is no bundled ringtone asset in this repo, so a caller must
+			// supply one. Previously this require()'d assets/sounds/default-ringtone.mp3,
+			// which does not exist.
+			if (!soundFile) {
+				console.warn(
+					"AudioService.playRingtone: no sound file supplied and no bundled default exists"
+				);
+				this.soundObject = null;
+				return;
+			}
 
-			await this.soundObject.loadAsync(source);
+			await this.soundObject.loadAsync(
+				typeof soundFile === "string" ? { uri: soundFile } : soundFile
+			);
+			await this.soundObject.setIsLoopingAsync(true);
 			await this.soundObject.playAsync();
 		} catch (error) {
 			console.error("Error playing ringtone:", error);

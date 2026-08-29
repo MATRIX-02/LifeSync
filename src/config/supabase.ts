@@ -3,6 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import { AppState, AppStateStatus } from "react-native";
 import "react-native-url-polyfill/auto";
 import { Database } from "../types/database";
+import { withWriteQueue } from "./supabaseWriteProxy";
 
 // Supabase configuration
 // Replace these with your actual Supabase project credentials
@@ -12,7 +13,7 @@ const SUPABASE_ANON_KEY =
 	process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || "YOUR_SUPABASE_ANON_KEY";
 
 // Create Supabase client with AsyncStorage for session persistence
-export const supabase = createClient<Database>(
+const rawSupabase = createClient<Database>(
 	SUPABASE_URL,
 	SUPABASE_ANON_KEY,
 	{
@@ -25,13 +26,26 @@ export const supabase = createClient<Database>(
 	}
 );
 
+/**
+ * The client the app uses. Writes through it are queue-aware: if the request
+ * fails for transport reasons it is persisted and replayed once the network is
+ * back, instead of being silently dropped. Reads are untouched.
+ */
+export const supabase = withWriteQueue(rawSupabase);
+
+/**
+ * The unwrapped client. Use ONLY for replaying the offline queue - going
+ * through `supabase` there would re-queue every failure forever.
+ */
+export const supabaseDirect = rawSupabase;
+
 // Auto-refresh session when app comes back to foreground
 // This ensures the token is always fresh
 AppState.addEventListener("change", (state: AppStateStatus) => {
 	if (state === "active") {
-		supabase.auth.startAutoRefresh();
+		rawSupabase.auth.startAutoRefresh();
 	} else {
-		supabase.auth.stopAutoRefresh();
+		rawSupabase.auth.stopAutoRefresh();
 	}
 });
 

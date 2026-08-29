@@ -8,11 +8,13 @@ import { useWorkoutStore } from "@/src/context/workoutStoreDB";
 import { MUSCLE_GROUP_INFO } from "@/src/data/exerciseDatabase";
 import { uploadAvatar } from "@/src/services/syncService";
 import {
+	DistanceUnit,
 	FitnessGoal,
 	FitnessLevel,
 	FitnessProfile,
 	Gender,
 	MuscleGroup,
+	WeightUnit,
 } from "@/src/types/workout";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import * as ImagePicker from "expo-image-picker";
@@ -90,6 +92,15 @@ export default function ProfileScreen() {
 	const [weeklyGoal, setWeeklyGoal] = useState(
 		fitnessProfile?.weeklyWorkoutGoal?.toString() || "3"
 	);
+	const [weightUnit, setWeightUnit] = useState<WeightUnit>(
+		fitnessProfile?.weightUnit || "kg"
+	);
+	const [distanceUnit, setDistanceUnit] = useState<DistanceUnit>(
+		fitnessProfile?.distanceUnit || "km"
+	);
+	// Free text, one entry per line. Matched against exercise muscle groups so
+	// the planner can warn about exercises that load an injured area.
+	const [injuries, setInjuries] = useState((fitnessProfile?.injuries || []).join("\n"));
 
 	const habits = getActiveHabits();
 	const stats = getOverallStats();
@@ -175,6 +186,9 @@ export default function ProfileScreen() {
 			setFitnessLevel(fitnessProfile.fitnessLevel);
 			setFitnessGoals(fitnessProfile.goals);
 			setWeeklyGoal(fitnessProfile.weeklyWorkoutGoal?.toString() || "3");
+			setWeightUnit(fitnessProfile.weightUnit || "kg");
+			setDistanceUnit(fitnessProfile.distanceUnit || "km");
+			setInjuries((fitnessProfile.injuries || []).join("\n"));
 		}
 	}, [fitnessProfile]);
 
@@ -377,8 +391,12 @@ export default function ProfileScreen() {
 			fitnessLevel,
 			goals: fitnessGoals,
 			weeklyWorkoutGoal: parseInt(weeklyGoal) || 3,
-			weightUnit: "kg",
-			distanceUnit: "km",
+			weightUnit,
+			distanceUnit,
+			injuries: injuries
+				.split("\n")
+				.map((line) => line.trim())
+				.filter(Boolean),
 		};
 
 		try {
@@ -1199,6 +1217,69 @@ export default function ProfileScreen() {
 									</View>
 								</View>
 
+								{/* Units */}
+								<View style={styles.inputGroup}>
+									<Text style={styles.inputLabel}>Units</Text>
+									<View style={styles.weeklyGoalSelector}>
+										{(["kg", "lbs"] as WeightUnit[]).map((unit) => (
+											<TouchableOpacity
+												key={unit}
+												style={[
+													styles.weeklyOption,
+													weightUnit === unit && styles.weeklyOptionActive,
+												]}
+												onPress={() => setWeightUnit(unit)}
+											>
+												<Text
+													style={[
+														styles.weeklyText,
+														weightUnit === unit && styles.weeklyTextActive,
+													]}
+												>
+													{unit}
+												</Text>
+											</TouchableOpacity>
+										))}
+										{(["km", "miles"] as DistanceUnit[]).map((unit) => (
+											<TouchableOpacity
+												key={unit}
+												style={[
+													styles.weeklyOption,
+													distanceUnit === unit && styles.weeklyOptionActive,
+												]}
+												onPress={() => setDistanceUnit(unit)}
+											>
+												<Text
+													style={[
+														styles.weeklyText,
+														distanceUnit === unit && styles.weeklyTextActive,
+													]}
+												>
+													{unit}
+												</Text>
+											</TouchableOpacity>
+										))}
+									</View>
+								</View>
+
+								{/* Injuries */}
+								<View style={styles.inputGroup}>
+									<Text style={styles.inputLabel}>
+										Injuries / areas to avoid (one per line)
+									</Text>
+									<TextInput
+										style={[styles.input, styles.injuriesInput]}
+										value={injuries}
+										onChangeText={setInjuries}
+										multiline
+										placeholder={"shoulders\nlower back"}
+										placeholderTextColor={theme.textMuted}
+									/>
+									<Text style={styles.inputHint}>
+										Exercises that load these areas are flagged in the planner.
+									</Text>
+								</View>
+
 								<TouchableOpacity
 									style={styles.cancelButton}
 									onPress={() => setIsEditing(false)}
@@ -1813,6 +1894,16 @@ const createStyles = (theme: Theme) =>
 			color: "#FFFFFF",
 		},
 
+		injuriesInput: {
+			minHeight: 80,
+			textAlignVertical: "top",
+			paddingTop: 12,
+		},
+		inputHint: {
+			fontSize: 12,
+			color: theme.textMuted,
+			marginTop: 6,
+		},
 		// Weekly Goal Selector
 		weeklyGoalSelector: {
 			flexDirection: "row",

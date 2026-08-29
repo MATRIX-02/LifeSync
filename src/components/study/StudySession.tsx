@@ -1,5 +1,6 @@
 // Study Session - Timer-based study session with Pomodoro support
 
+import { Alert } from "@/src/components/CustomAlert";
 import { SubscriptionCheckResult } from "@/src/components/PremiumFeatureGate";
 import { SessionType, useStudyStore } from "@/src/context/studyStoreDB/index";
 import { Theme } from "@/src/context/themeContext";
@@ -55,6 +56,7 @@ export default function StudySession({
 		resumeSession,
 		addBreak,
 		completePomodoro,
+		deleteSessions,
 	} = useStudyStore();
 
 	const styles = createStyles(theme);
@@ -75,6 +77,9 @@ export default function StudySession({
 		string | undefined
 	>();
 	const [selectedType, setSelectedType] = useState<SessionType>("study");
+	const [showAllSessions, setShowAllSessions] = useState(false);
+	const [selectionMode, setSelectionMode] = useState(false);
+	const [selectedSessionIds, setSelectedSessionIds] = useState<string[]>([]);
 	const [showEndModal, setShowEndModal] = useState(false);
 	const [focusScore, setFocusScore] = useState(7);
 
@@ -265,10 +270,56 @@ export default function StudySession({
 	};
 
 	// Recent sessions
-	const recentSessions = useMemo(
-		() => studySessions.filter((s) => !s.isActive).slice(0, 5),
+	const finishedSessions = useMemo(
+		() => studySessions.filter((s) => !s.isActive),
 		[studySessions]
 	);
+	const recentSessions = useMemo(
+		() => (showAllSessions ? finishedSessions : finishedSessions.slice(0, 5)),
+		[finishedSessions, showAllSessions]
+	);
+
+	const exitSelectionMode = () => {
+		setSelectionMode(false);
+		setSelectedSessionIds([]);
+	};
+
+	const toggleSessionSelection = (id: string) => {
+		setSelectedSessionIds((prev) =>
+			prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+		);
+	};
+
+	const allShownSelected =
+		recentSessions.length > 0 &&
+		recentSessions.every((s) => selectedSessionIds.includes(s.id));
+
+	const toggleSelectAllSessions = () => {
+		setSelectedSessionIds(
+			allShownSelected ? [] : recentSessions.map((s) => s.id)
+		);
+	};
+
+	const handleDeleteSelectedSessions = () => {
+		if (selectedSessionIds.length === 0) return;
+		const count = selectedSessionIds.length;
+		Alert.alert(
+			"Delete Sessions",
+			`Delete ${count} study session${count > 1 ? "s" : ""}? ` +
+				"This removes them from your history and stats.",
+			[
+				{ text: "Cancel", style: "cancel" },
+				{
+					text: "Delete",
+					style: "destructive",
+					onPress: async () => {
+						await deleteSessions(selectedSessionIds);
+						exitSelectionMode();
+					},
+				},
+			]
+		);
+	};
 
 	return (
 		<View style={styles.container}>
@@ -456,14 +507,90 @@ export default function StudySession({
 					{/* Recent Sessions */}
 					{recentSessions.length > 0 && (
 						<View style={styles.recentSection}>
-							<Text style={styles.sectionTitle}>Recent Sessions</Text>
+							<View style={styles.recentHeader}>
+								<Text style={styles.sectionTitle}>
+									{selectionMode
+										? `${selectedSessionIds.length} selected`
+										: "Recent Sessions"}
+								</Text>
+								{selectionMode ? (
+									<View style={styles.recentHeaderActions}>
+										<TouchableOpacity
+											onPress={toggleSelectAllSessions}
+											style={styles.recentHeaderButton}
+										>
+											<Ionicons
+												name={allShownSelected ? "checkbox" : "checkbox-outline"}
+												size={22}
+												color={theme.text}
+											/>
+										</TouchableOpacity>
+										<TouchableOpacity
+											onPress={handleDeleteSelectedSessions}
+											disabled={selectedSessionIds.length === 0}
+											style={styles.recentHeaderButton}
+										>
+											<Ionicons
+												name="trash"
+												size={22}
+												color={
+													selectedSessionIds.length === 0
+														? theme.textMuted
+														: theme.error
+												}
+											/>
+										</TouchableOpacity>
+										<TouchableOpacity
+											onPress={exitSelectionMode}
+											style={styles.recentHeaderButton}
+										>
+											<Ionicons name="close" size={22} color={theme.text} />
+										</TouchableOpacity>
+									</View>
+								) : (
+									<TouchableOpacity
+										onPress={() => setSelectionMode(true)}
+										style={styles.recentHeaderButton}
+									>
+										<Ionicons
+											name="ellipsis-horizontal-circle-outline"
+											size={22}
+											color={theme.textMuted}
+										/>
+									</TouchableOpacity>
+								)}
+							</View>
 							{recentSessions.map((session) => {
 								const goal = studyGoals.find((g) => g.id === session.goalId);
 								const subject = subjects.find(
 									(s) => s.id === session.subjectId
 								);
+								const isSelected = selectedSessionIds.includes(session.id);
 								return (
-									<View key={session.id} style={styles.recentItem}>
+									<TouchableOpacity
+										key={session.id}
+										style={[
+											styles.recentItem,
+											isSelected && styles.recentItemSelected,
+										]}
+										activeOpacity={selectionMode ? 0.7 : 1}
+										onPress={() =>
+											selectionMode && toggleSessionSelection(session.id)
+										}
+										onLongPress={() => {
+											setSelectionMode(true);
+											toggleSessionSelection(session.id);
+										}}
+										delayLongPress={300}
+									>
+										{selectionMode && (
+											<Ionicons
+												name={isSelected ? "checkbox" : "square-outline"}
+												size={22}
+												color={isSelected ? theme.primary : theme.textMuted}
+												style={styles.recentCheckbox}
+											/>
+										)}
 										<View style={styles.recentLeft}>
 											<Text style={styles.recentDate}>
 												{new Date(session.startTime).toLocaleDateString()}
@@ -482,9 +609,25 @@ export default function StudySession({
 												</Text>
 											)}
 										</View>
-									</View>
+									</TouchableOpacity>
 								);
 							})}
+							{finishedSessions.length > 5 && (
+								<TouchableOpacity
+									style={styles.showAllButton}
+									onPress={() => {
+										// Collapsing would hide selected rows; clear the selection.
+										if (showAllSessions) exitSelectionMode();
+										setShowAllSessions(!showAllSessions);
+									}}
+								>
+									<Text style={styles.showAllText}>
+										{showAllSessions
+											? "Show less"
+											: `Show all ${finishedSessions.length}`}
+									</Text>
+								</TouchableOpacity>
+							)}
 						</View>
 					)}
 
@@ -856,17 +999,50 @@ const createStyles = (theme: Theme) =>
 			fontSize: 18,
 			fontWeight: "700",
 			color: theme.text,
+		},
+		recentHeader: {
+			flexDirection: "row",
+			alignItems: "center",
+			justifyContent: "space-between",
 			marginBottom: 16,
+		},
+		recentHeaderActions: {
+			flexDirection: "row",
+			alignItems: "center",
+			gap: 8,
+		},
+		recentHeaderButton: {
+			padding: 4,
+		},
+		recentItemSelected: {
+			borderWidth: 1,
+			borderColor: theme.primary,
+			backgroundColor: theme.primary + "15",
+		},
+		recentCheckbox: {
+			marginRight: 12,
+		},
+		showAllButton: {
+			alignItems: "center",
+			paddingVertical: 10,
+		},
+		showAllText: {
+			fontSize: 14,
+			fontWeight: "600",
+			color: theme.primary,
 		},
 		recentItem: {
 			flexDirection: "row",
+			alignItems: "center",
 			justifyContent: "space-between",
 			backgroundColor: theme.surface,
 			padding: 16,
 			borderRadius: 12,
 			marginBottom: 10,
 		},
-		recentLeft: {},
+		recentLeft: {
+			flex: 1,
+		},
 		recentDate: {
 			fontSize: 12,
 			color: theme.textMuted,

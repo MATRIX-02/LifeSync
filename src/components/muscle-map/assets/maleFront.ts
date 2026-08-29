@@ -224,4 +224,37 @@ export const MALE_FRONT_BODY: ReadonlyArray<BodyPart> = [
 			],
 		},
 	},
+
+	// Ankles
+	// Fills the gap between the calves (which stop at y~1232) and the feet
+	// (which start at y~1296) - male front had nothing covering that band.
+	// Mirrored about the body axis at x = 365 (right = 730 - x).
+	{
+		slug: "ankles",
+		path: {
+			left: [
+				"M 268,1248 C 266,1262 265,1276 266,1288 C 267,1294 273,1298 281,1299 C 290,1300 299,1299 305,1295 C 310,1292 312,1286 312,1278 C 312,1266 311,1255 310,1246 C 296,1250 282,1250 268,1248 Z",
+			],
+			right: [
+				"M 462,1248 C 464,1262 465,1276 464,1288 C 463,1294 457,1298 449,1299 C 440,1300 431,1299 425,1295 C 420,1292 418,1286 418,1278 C 418,1266 419,1255 420,1246 C 434,1250 448,1250 462,1248 Z",
+			],
+		},
+	},
+
+	// Feet
+	// Male front was the only one of the four body assets without feet - male
+	// back and both female views already have them. Drawn as the dorsum of each
+	// foot, inset inside the outline in SvgMaleWrapper, and mirrored about the
+	// body axis at x = 365 (right = 730 - x).
+	{
+		slug: "feet",
+		path: {
+			left: [
+				"M 265,1300 C 258,1308 249,1317 246,1324 C 243,1331 244,1337 250,1339 C 257,1342 266,1345 275,1346 C 285,1347 295,1347 301,1342 C 306,1337 306,1329 305,1321 C 304,1313 305,1305 307,1299 C 293,1296 278,1296 265,1300 Z",
+			],
+			right: [
+				"M 465,1300 C 472,1308 481,1317 484,1324 C 487,1331 486,1337 480,1339 C 473,1342 464,1345 455,1346 C 445,1347 435,1347 429,1342 C 424,1337 424,1329 425,1321 C 426,1313 425,1305 423,1299 C 437,1296 452,1296 465,1300 Z",
+			],
+		},
+	},
 ];

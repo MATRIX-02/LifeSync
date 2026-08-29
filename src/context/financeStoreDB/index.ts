@@ -24,6 +24,79 @@ const supabase = supabaseClient as any;
 export type { FinanceStore } from "./storeInterface";
 export * from "./types";
 
+// Guards against the Money Hub rendering empty on a bad load.
+// `loadGeneration` lets a slow in-flight initialize() detect that a newer one
+// (or a sign-out) started and drop its now-stale result instead of clobbering
+// fresher state. `inFlightLoad` de-dupes overlapping calls - initialize() runs
+// on login AND on every app resume, which routinely overlap.
+let loadGeneration = 0;
+let inFlightLoad: Promise<void> | null = null;
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+// Recurring transactions post on launch and on resume; this stops the two
+// overlapping and double-posting.
+let processingRecurring = false;
+
+// Ceiling on how many occurrences one rule can post in a single pass, so a
+// bad start date can't generate thousands of rows in one go.
+const MAX_RECURRING_CATCHUP = 60;
+
+/**
+ * Today in the user's own timezone. `toISOString()` is UTC, so for anywhere
+ * east of Greenwich it reports yesterday for part of every day - which would
+ * hold a due transaction back until the clock caught up.
+ */
+const localToday = (): string => {
+	const now = new Date();
+	return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(
+		2,
+		"0"
+	)}-${String(now.getDate()).padStart(2, "0")}`;
+};
+
+const daysInMonth = (year: number, monthIndex: number) =>
+	new Date(Date.UTC(year, monthIndex + 1, 0)).getUTCDate();
+
+const toIso = (year: number, monthIndex: number, day: number) =>
+	`${year}-${String(monthIndex + 1).padStart(2, "0")}-${String(day).padStart(
+		2,
+		"0"
+	)}`;
+
+/**
+ * Advance a YYYY-MM-DD due date by one period.
+ *
+ * Uses plain calendar arithmetic rather than Date.setMonth, which overflows:
+ * 31 Jan + 1 month lands on 3 March. Month and year steps clamp to the last
+ * valid day instead, so a rule set for the 31st stays at end of month and a
+ * 29 Feb rule survives a non-leap year.
+ */
+export const advanceDueDate = (
+	date: string,
+	frequency: RecurringTransaction["frequency"]
+): string => {
+	const [year, month, day] = date.split("-").map(Number);
+	const monthIndex = month - 1;
+
+	if (frequency === "monthly" || frequency === "yearly") {
+		const nextMonthIndex = frequency === "monthly" ? monthIndex + 1 : monthIndex;
+		const targetYear = year + (frequency === "yearly" ? 1 : 0) + Math.floor(nextMonthIndex / 12);
+		const targetMonth = ((nextMonthIndex % 12) + 12) % 12;
+		return toIso(
+			targetYear,
+			targetMonth,
+			Math.min(day, daysInMonth(targetYear, targetMonth))
+		);
+	}
+
+	const step = frequency === "weekly" ? 7 : frequency === "biweekly" ? 14 : 1;
+	const next = new Date(Date.UTC(year, monthIndex, day));
+	next.setUTCDate(next.getUTCDate() + step);
+	return next.toISOString().split("T")[0];
+};
+
+
 export const useFinanceStore = create<FinanceStore>()((set, get) => ({
 	// Initial State
 	accounts: [],
@@ -36,147 +109,222 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
 	splitGroups: [],
 	currency: "₹",
 	isLoading: false,
+	loadError: null,
+	lastLoadedAt: null,
 	userId: null,
+
+	// Bind the signed-in user before any fetching. Mutators refuse to write
+	// without this, and initialize() sets it far too late in app startup.
+	setUserId: (userId: string | null) => {
+		set({ userId });
+	},
 
 	// Initialize from database
 	initialize: async (userId: string) => {
-		console.log("📥 Loading finance data from database for user:", userId);
-		set({ isLoading: true, userId });
+		// De-dupe overlapping loads (login + app-resume routinely collide).
+		if (inFlightLoad) return inFlightLoad;
 
-		try {
-			const [
-				accountsRes,
-				transactionsRes,
-				recurringRes,
-				budgetsRes,
-				goalsRes,
-				billsRes,
-				debtsRes,
-				groupsRes,
-				syncStatusRes,
-			] = await Promise.all([
-				supabase.from("finance_accounts").select("*").eq("user_id", userId),
-				supabase
-					.from("finance_transactions")
-					.select("*")
-					.eq("user_id", userId)
-					.order("date", { ascending: false }),
-				supabase
-					.from("recurring_transactions")
-					.select("*")
-					.eq("user_id", userId),
-				supabase.from("finance_budgets").select("*").eq("user_id", userId),
-				supabase.from("savings_goals").select("*").eq("user_id", userId),
-				supabase.from("bill_reminders").select("*").eq("user_id", userId),
-				supabase.from("finance_debts").select("*").eq("user_id", userId),
-				supabase.from("split_groups").select("*").eq("user_id", userId),
-				supabase
-					.from("user_sync_status")
-					.select("finance_currency")
-					.eq("user_id", userId)
-					.maybeSingle(),
-			]);
+		const generation = ++loadGeneration;
+		const isStale = () => generation !== loadGeneration || get().userId !== userId;
 
-			// supabase-js resolves instead of throwing, so without this check an
-			// RLS denial or schema error is indistinguishable from "no data" and
-			// the Money Hub silently renders empty. initialize() also runs on every
-			// app resume, so a transient failure would blank a populated screen.
-			const failures = [
-				["finance_accounts", accountsRes.error],
-				["finance_transactions", transactionsRes.error],
-				["recurring_transactions", recurringRes.error],
-				["finance_budgets", budgetsRes.error],
-				["savings_goals", goalsRes.error],
-				["bill_reminders", billsRes.error],
-				["finance_debts", debtsRes.error],
-				["split_groups", groupsRes.error],
-			].filter(([, err]) => err) as [string, any][];
+		const run = async () => {
+			console.log("📥 Loading finance data from database for user:", userId);
+			set({ isLoading: true, userId, loadError: null });
 
-			if (failures.length > 0) {
-				console.error(
-					"❌ Finance load failed, keeping existing state:",
-					failures.map(([t, e]) => `${t}: ${e.message}`).join("; ")
-				);
-				set({ isLoading: false });
+			// A restored-but-unrefreshed session makes PostgREST fall back to the
+			// anon role, where RLS returns ZERO rows with NO error - indistinguishable
+			// from "this user has no data". Confirm we're actually authenticated as
+			// this user before trusting an empty result set.
+			try {
+				const { data: sessionData } = await supabaseClient.auth.getSession();
+				const sessionUserId = sessionData?.session?.user?.id;
+				if (!sessionUserId || sessionUserId !== userId) {
+					console.warn(
+						"⚠️ Finance load skipped: no active session for",
+						userId,
+						"(session user:",
+						sessionUserId,
+						")"
+					);
+					set({
+						isLoading: false,
+						loadError: "Not signed in yet - pull to refresh.",
+					});
+					return;
+				}
+			} catch (err) {
+				console.error("❌ Finance load: session check failed:", err);
+				set({ isLoading: false, loadError: "Could not verify session." });
 				return;
 			}
 
-			const accounts = (accountsRes.data || []).map((a: any) =>
-				objectToCamelCase(a)
-			);
-			const transactions = (transactionsRes.data || []).map((t: any) =>
-				objectToCamelCase(t)
-			);
-			const recurringTransactions = (recurringRes.data || []).map((r: any) =>
-				objectToCamelCase(r)
-			);
-			const budgets = (budgetsRes.data || []).map((b: any) =>
-				objectToCamelCase(b)
-			);
-			const savingsGoals = (goalsRes.data || []).map((g: any) => {
-				const goal = objectToCamelCase(g);
-				return {
-					...goal,
-					contributions:
-						typeof goal.contributions === "string"
-							? JSON.parse(goal.contributions)
-							: goal.contributions || [],
-				};
-			});
-			const billReminders = (billsRes.data || []).map((b: any) =>
-				objectToCamelCase(b)
-			);
-			const debts = (debtsRes.data || []).map((d: any) => {
-				const debt = objectToCamelCase(d);
-				return {
-					...debt,
-					payments:
-						typeof debt.payments === "string"
-							? JSON.parse(debt.payments)
-							: debt.payments || [],
-				};
-			});
-			const splitGroups = (groupsRes.data || []).map((g: any) => {
-				const group = objectToCamelCase(g);
-				return {
-					...group,
-					members:
-						typeof group.members === "string"
-							? JSON.parse(group.members)
-							: group.members || [],
-					expenses:
-						typeof group.expenses === "string"
-							? JSON.parse(group.expenses)
-							: group.expenses || [],
-					settlements:
-						typeof group.settlements === "string"
-							? JSON.parse(group.settlements)
-							: group.settlements || [],
-				};
-			});
+			const MAX_ATTEMPTS = 3;
+			let lastError = "";
 
-			console.log(
-				`✅ Loaded ${accounts.length} accounts, ${transactions.length} transactions`
-			);
-			set({
-				accounts,
-				transactions,
-				recurringTransactions,
-				budgets,
-				savingsGoals,
-				billReminders,
-				debts,
-				splitGroups,
-				// Currency preference lives on user_sync_status; keep the current
-				// value if the row doesn't exist yet rather than resetting it.
-				currency:
-					(syncStatusRes?.data as any)?.finance_currency || get().currency,
-				isLoading: false,
-			});
-		} catch (error) {
-			console.error("❌ Error loading finance data:", error);
-			set({ isLoading: false });
-		}
+			for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+				if (isStale()) {
+					console.log("↩️ Finance load superseded, dropping result");
+					return;
+				}
+
+				try {
+					const [
+						accountsRes,
+						transactionsRes,
+						recurringRes,
+						budgetsRes,
+						goalsRes,
+						billsRes,
+						debtsRes,
+						groupsRes,
+						syncStatusRes,
+					] = await Promise.all([
+						supabase.from("finance_accounts").select("*").eq("user_id", userId),
+						supabase
+							.from("finance_transactions")
+							.select("*")
+							.eq("user_id", userId)
+							.order("date", { ascending: false }),
+						supabase
+							.from("recurring_transactions")
+							.select("*")
+							.eq("user_id", userId),
+						supabase.from("finance_budgets").select("*").eq("user_id", userId),
+						supabase.from("savings_goals").select("*").eq("user_id", userId),
+						supabase.from("bill_reminders").select("*").eq("user_id", userId),
+						supabase.from("finance_debts").select("*").eq("user_id", userId),
+						supabase.from("split_groups").select("*").eq("user_id", userId),
+						supabase
+							.from("user_sync_status")
+							.select("finance_currency")
+							.eq("user_id", userId)
+							.maybeSingle(),
+					]);
+
+					// supabase-js resolves instead of throwing, so without this check an
+					// RLS denial or schema error is indistinguishable from "no data" and
+					// the Money Hub silently renders empty.
+					const failures = [
+						["finance_accounts", accountsRes.error],
+						["finance_transactions", transactionsRes.error],
+						["recurring_transactions", recurringRes.error],
+						["finance_budgets", budgetsRes.error],
+						["savings_goals", goalsRes.error],
+						["bill_reminders", billsRes.error],
+						["finance_debts", debtsRes.error],
+						["split_groups", groupsRes.error],
+					].filter(([, err]) => err) as [string, any][];
+
+					if (failures.length > 0) {
+						lastError = failures
+							.map(([t, e]) => `${t}: ${e.message}`)
+							.join("; ");
+						throw new Error(lastError);
+					}
+
+					if (isStale()) {
+						console.log("↩️ Finance load superseded, dropping result");
+						return;
+					}
+
+					const accounts = (accountsRes.data || []).map((a: any) =>
+						objectToCamelCase(a)
+					);
+					const transactions = (transactionsRes.data || []).map((t: any) =>
+						objectToCamelCase(t)
+					);
+					const recurringTransactions = (recurringRes.data || []).map((r: any) =>
+						objectToCamelCase(r)
+					);
+					const budgets = (budgetsRes.data || []).map((b: any) =>
+						objectToCamelCase(b)
+					);
+					const savingsGoals = (goalsRes.data || []).map((g: any) => {
+						const goal = objectToCamelCase(g);
+						return {
+							...goal,
+							contributions:
+								typeof goal.contributions === "string"
+									? JSON.parse(goal.contributions)
+									: goal.contributions || [],
+						};
+					});
+					const billReminders = (billsRes.data || []).map((b: any) =>
+						objectToCamelCase(b)
+					);
+					const debts = (debtsRes.data || []).map((d: any) => {
+						const debt = objectToCamelCase(d);
+						return {
+							...debt,
+							payments:
+								typeof debt.payments === "string"
+									? JSON.parse(debt.payments)
+									: debt.payments || [],
+						};
+					});
+					const splitGroups = (groupsRes.data || []).map((g: any) => {
+						const group = objectToCamelCase(g);
+						return {
+							...group,
+							members:
+								typeof group.members === "string"
+									? JSON.parse(group.members)
+									: group.members || [],
+							expenses:
+								typeof group.expenses === "string"
+									? JSON.parse(group.expenses)
+									: group.expenses || [],
+							settlements:
+								typeof group.settlements === "string"
+									? JSON.parse(group.settlements)
+									: group.settlements || [],
+						};
+					});
+
+					console.log(
+						`✅ Loaded ${accounts.length} accounts, ${transactions.length} transactions`
+					);
+					set({
+						accounts,
+						transactions,
+						recurringTransactions,
+						budgets,
+						savingsGoals,
+						billReminders,
+						debts,
+						splitGroups,
+						// Currency preference lives on user_sync_status; keep the current
+						// value if the row doesn't exist yet rather than resetting it.
+						currency:
+							(syncStatusRes?.data as any)?.finance_currency || get().currency,
+						isLoading: false,
+						loadError: null,
+						lastLoadedAt: Date.now(),
+					});
+					return;
+				} catch (error: any) {
+					lastError = error?.message || String(error);
+					console.error(
+						`❌ Finance load attempt ${attempt}/${MAX_ATTEMPTS} failed:`,
+						lastError
+					);
+					if (attempt < MAX_ATTEMPTS && !isStale()) {
+						await sleep(500 * 2 ** (attempt - 1)); // 500ms, 1s
+					}
+				}
+			}
+
+			if (isStale()) return;
+			// Every attempt failed. Keep whatever is already in the store rather
+			// than blanking a populated screen, and record why for the UI.
+			console.error("❌ Finance load failed, keeping existing state:", lastError);
+			set({ isLoading: false, loadError: lastError });
+		};
+
+		inFlightLoad = run().finally(() => {
+			inFlightLoad = null;
+		});
+		return inFlightLoad;
 	},
 
 	// Account Methods
@@ -312,8 +460,35 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
 	},
 
 	updateTransaction: async (id, updates) => {
-		const { userId, transactions } = get();
+		const { userId, transactions, accounts } = get();
 		if (!userId) return;
+
+		const existing = transactions.find((t) => t.id === id);
+		if (!existing) return;
+		const next = { ...existing, ...updates };
+
+		// Editing amount / type / accounts changes what the transaction did to
+		// account balances, so reverse the old effect and apply the new one.
+		// (Transfers touch two accounts, which is why this can't just be a delta
+		// on a single account.)
+		const balanceDeltas: Record<string, number> = {};
+		const applyEffect = (t: Transaction, sign: number) => {
+			const change = t.type === "income" ? t.amount : -t.amount;
+			balanceDeltas[t.accountId] =
+				(balanceDeltas[t.accountId] || 0) + sign * change;
+			if (t.toAccountId) {
+				balanceDeltas[t.toAccountId] =
+					(balanceDeltas[t.toAccountId] || 0) + sign * t.amount;
+			}
+		};
+		applyEffect(existing, -1);
+		applyEffect(next, 1);
+
+		const updatedAccounts = accounts.map((acc) =>
+			balanceDeltas[acc.id]
+				? { ...acc, balance: acc.balance + balanceDeltas[acc.id] }
+				: acc
+		);
 
 		const dbData = objectToSnakeCase({
 			...updates,
@@ -328,12 +503,23 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
 			console.error("Error updating transaction:", error);
 			return;
 		}
+
+		for (const acc of updatedAccounts) {
+			if (!balanceDeltas[acc.id]) continue;
+			await supabase
+				.from("finance_accounts")
+				.update(objectToSnakeCase({ balance: acc.balance }))
+				.eq("id", acc.id)
+				.eq("user_id", userId);
+		}
+
 		set({
 			transactions: transactions.map((t) =>
 				t.id === id
 					? { ...t, ...updates, updatedAt: new Date().toISOString() }
 					: t
 			),
+			accounts: updatedAccounts,
 		});
 	},
 
@@ -385,6 +571,59 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
 
 		set({
 			transactions: transactions.filter((t) => t.id !== id),
+			accounts: updatedAccounts,
+		});
+	},
+
+	deleteTransactions: async (ids) => {
+		const { userId, transactions, accounts } = get();
+		if (!userId || ids.length === 0) return;
+
+		const idSet = new Set(ids);
+		const toDelete = transactions.filter((t) => idSet.has(t.id));
+		if (toDelete.length === 0) return;
+
+		// Reverse the balance change of every deleted transaction
+		const balanceDeltas: Record<string, number> = {};
+		for (const transaction of toDelete) {
+			const change =
+				transaction.type === "income" ? -transaction.amount : transaction.amount;
+			balanceDeltas[transaction.accountId] =
+				(balanceDeltas[transaction.accountId] || 0) + change;
+			if (transaction.toAccountId) {
+				balanceDeltas[transaction.toAccountId] =
+					(balanceDeltas[transaction.toAccountId] || 0) - transaction.amount;
+			}
+		}
+
+		const updatedAccounts = accounts.map((acc) =>
+			balanceDeltas[acc.id]
+				? { ...acc, balance: acc.balance + balanceDeltas[acc.id] }
+				: acc
+		);
+
+		const { error } = await supabase
+			.from("finance_transactions")
+			.delete()
+			.in("id", toDelete.map((t) => t.id))
+			.eq("user_id", userId);
+		if (error) {
+			console.error("Error deleting transactions:", error);
+			return;
+		}
+
+		// Update affected accounts in DB
+		for (const acc of updatedAccounts) {
+			if (!balanceDeltas[acc.id]) continue;
+			await supabase
+				.from("finance_accounts")
+				.update(objectToSnakeCase({ balance: acc.balance }))
+				.eq("id", acc.id)
+				.eq("user_id", userId);
+		}
+
+		set({
+			transactions: transactions.filter((t) => !idSet.has(t.id)),
 			accounts: updatedAccounts,
 		});
 	},
@@ -457,50 +696,79 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
 	},
 
 	processRecurringTransactions: async () => {
-		const { recurringTransactions, addTransaction } = get();
-		const today = new Date().toISOString().split("T")[0];
+		// This runs on launch AND on app resume, which overlap. Posting the same
+		// rent twice is worse than posting it a few seconds late.
+		if (processingRecurring) return;
 
-		for (const recurring of recurringTransactions) {
-			if (!recurring.isActive || recurring.nextDueDate > today) continue;
-			if (recurring.endDate && recurring.endDate < today) continue;
+		const { userId } = get();
+		if (!userId) return;
 
-			await addTransaction({
-				type: recurring.type,
-				amount: recurring.amount,
-				category: recurring.category,
-				description: recurring.description,
-				date: today,
-				time: new Date().toTimeString().split(" ")[0],
-				accountId: recurring.accountId,
-				paymentMethod: recurring.paymentMethod,
-				isRecurring: true,
-				recurringId: recurring.id,
-			});
+		processingRecurring = true;
+		try {
+			const today = localToday();
 
-			// Calculate next due date
-			const nextDate = new Date(recurring.nextDueDate);
-			switch (recurring.frequency) {
-				case "daily":
-					nextDate.setDate(nextDate.getDate() + 1);
-					break;
-				case "weekly":
-					nextDate.setDate(nextDate.getDate() + 7);
-					break;
-				case "biweekly":
-					nextDate.setDate(nextDate.getDate() + 14);
-					break;
-				case "monthly":
-					nextDate.setMonth(nextDate.getMonth() + 1);
-					break;
-				case "yearly":
-					nextDate.setFullYear(nextDate.getFullYear() + 1);
-					break;
+			for (const recurring of [...get().recurringTransactions]) {
+				if (!recurring.isActive) continue;
+
+				// RecurringTransaction has no toAccountId, so a recurring transfer
+				// has nowhere to send the money - posting it would debit the source
+				// and the amount would vanish. Skip rather than lose funds.
+				if (recurring.type === "transfer") {
+					console.warn(
+						`Skipping recurring transfer "${recurring.description}": transfers need a destination account, which recurring rules don't store.`
+					);
+					continue;
+				}
+
+				let due = recurring.nextDueDate;
+				let posted = 0;
+				let ended = false;
+
+				// Catch up on every occurrence that has come due, not just one.
+				// Anything set up before this ran may be many periods behind.
+				while (due <= today && posted < MAX_RECURRING_CATCHUP) {
+					if (recurring.endDate && due > recurring.endDate) {
+						ended = true;
+						break;
+					}
+
+					await get().addTransaction({
+						type: recurring.type,
+						amount: recurring.amount,
+						category: recurring.category,
+						description: recurring.description,
+						// Date it when it was DUE, not when the app happened to open,
+						// or a catch-up would stack months of rent onto today.
+						date: due,
+						time: "00:00:00",
+						accountId: recurring.accountId,
+						paymentMethod: recurring.paymentMethod,
+						isRecurring: true,
+						recurringId: recurring.id,
+					});
+
+					posted += 1;
+					due = advanceDueDate(due, recurring.frequency);
+				}
+
+				if (posted >= MAX_RECURRING_CATCHUP) {
+					console.warn(
+						`Recurring "${recurring.description}" hit the ${MAX_RECURRING_CATCHUP}-occurrence catch-up cap; the rest will post on the next run.`
+					);
+				}
+
+				if (posted > 0 || ended) {
+					await get().updateRecurringTransaction(recurring.id, {
+						nextDueDate: due,
+						lastProcessed: today,
+						...(ended ? { isActive: false } : {}),
+					});
+				}
 			}
-
-			await get().updateRecurringTransaction(recurring.id, {
-				nextDueDate: nextDate.toISOString().split("T")[0],
-				lastProcessed: today,
-			});
+		} catch (error) {
+			console.error("Error processing recurring transactions:", error);
+		} finally {
+			processingRecurring = false;
 		}
 	},
 

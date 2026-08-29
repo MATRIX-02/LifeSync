@@ -16,7 +16,7 @@ import {
 	WorkoutPlan,
 } from "@/src/types/workout";
 import Ionicons from "@expo/vector-icons/Ionicons";
-import React, { useState } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import {
 	FlatList,
 	Modal,
@@ -49,6 +49,7 @@ export default function WorkoutPlans({
 		setActivePlan,
 		activePlanId,
 		startWorkout,
+		fitnessProfile,
 	} = useWorkoutStore();
 
 	const [isEditing, setIsEditing] = useState(false);
@@ -126,7 +127,8 @@ export default function WorkoutPlans({
 				...planData,
 				id: Date.now().toString(),
 				category: "strength",
-				difficulty: "intermediate",
+				// Default to the user's own level instead of always "intermediate".
+				difficulty: fitnessProfile?.fitnessLevel || "intermediate",
 				targetMuscleGroups: planData.targetMuscles,
 				isCustom: true,
 				color: "#6366F1",
@@ -252,6 +254,55 @@ export default function WorkoutPlans({
 		);
 	};
 
+	// (4) Injuries are free text; match them loosely against an exercise's
+	// muscle groups and name so a typo or a phrase like "left shoulder" still
+	// flags shoulder work. This warns - it never blocks.
+	const injuryTerms = useMemo(
+		() =>
+			(fitnessProfile?.injuries || [])
+				.map((i) => i.trim().toLowerCase())
+				.filter(Boolean),
+		[fitnessProfile?.injuries]
+	);
+
+	const injuryWarningFor = useCallback(
+		(exercise: { name: string; targetMuscles: MuscleGroup[] }): string | null => {
+			if (injuryTerms.length === 0) return null;
+			const haystack = [
+				exercise.name.toLowerCase(),
+				...exercise.targetMuscles.map((m) => m.toLowerCase().replace(/_/g, " ")),
+			];
+			const hit = injuryTerms.find((term: string) =>
+				haystack.some((h) => h.includes(term) || term.includes(h))
+			);
+			return hit || null;
+		},
+		[injuryTerms]
+	);
+
+	// (5) Which exercises suit the user's stated goals. Strength/muscle goals
+	// favour strength work, endurance favours cardio, flexibility favours
+	// mobility work.
+	const goalCategories = useMemo(() => {
+		const goals = fitnessProfile?.goals || [];
+		const cats = new Set<string>();
+		goals.forEach((g) => {
+			if (g === "build_muscle" || g === "increase_strength") cats.add("strength");
+			if (g === "lose_weight" || g === "improve_endurance") {
+				cats.add("cardio");
+				cats.add("hiit");
+			}
+			if (g === "flexibility") cats.add("flexibility");
+			if (g === "general_fitness" || g === "maintain") {
+				cats.add("strength");
+				cats.add("cardio");
+			}
+		});
+		return cats;
+	}, [fitnessProfile?.goals]);
+
+	const [suggestedOnly, setSuggestedOnly] = useState(false);
+
 	const filteredExercises =
 		selectedMuscleFilter === "all"
 			? EXERCISE_DATABASE
@@ -266,6 +317,26 @@ export default function WorkoutPlans({
 					)
 		  )
 		: filteredExercises;
+
+	// (5) Narrow to exercises that match the user's goals and level.
+	const visibleExercises =
+		suggestedOnly && (goalCategories.size > 0 || fitnessProfile?.fitnessLevel)
+			? searchedExercises.filter((e) => {
+					const categoryOk =
+						goalCategories.size === 0 || goalCategories.has(e.category);
+					const levelOrder = [
+						"beginner",
+						"intermediate",
+						"advanced",
+						"athlete",
+					];
+					const userLevel = fitnessProfile?.fitnessLevel;
+					const levelOk =
+						!userLevel ||
+						levelOrder.indexOf(e.difficulty) <= levelOrder.indexOf(userLevel);
+					return categoryOk && levelOk;
+			  })
+			: searchedExercises;
 
 	// Template exercise mappings
 	const TEMPLATE_EXERCISES: Record<string, string[]> = {
@@ -949,13 +1020,39 @@ export default function WorkoutPlans({
 									</ScrollView>
 
 									{/* Exercise List */}
+									{(goalCategories.size > 0 ||
+										!!fitnessProfile?.fitnessLevel) && (
+										<TouchableOpacity
+											style={[
+												styles.suggestToggle,
+												suggestedOnly && styles.suggestToggleActive,
+											]}
+											onPress={() => setSuggestedOnly(!suggestedOnly)}
+										>
+											<Ionicons
+												name={suggestedOnly ? "sparkles" : "sparkles-outline"}
+												size={16}
+												color={suggestedOnly ? "#FFF" : theme.primary}
+											/>
+											<Text
+												style={[
+													styles.suggestToggleText,
+													suggestedOnly && styles.suggestToggleTextActive,
+												]}
+											>
+												Suggested for my goals
+											</Text>
+										</TouchableOpacity>
+									)}
+
 									<FlatList
-										data={searchedExercises}
+										data={visibleExercises}
 										keyExtractor={(item) => item.id}
 										renderItem={({ item }) => {
 											const isSelected = selectedExercises.some(
 												(e) => e.exerciseId === item.id
 											);
+											const injury = injuryWarningFor(item);
 											return (
 												<TouchableOpacity
 													style={[
@@ -975,6 +1072,18 @@ export default function WorkoutPlans({
 																	</Text>
 																))}
 														</View>
+														{injury && (
+															<View style={styles.injuryFlag}>
+																<Ionicons
+																	name="warning-outline"
+																	size={13}
+																	color={theme.warning}
+																/>
+																<Text style={styles.injuryFlagText}>
+																	Loads an area you flagged: {injury}
+																</Text>
+															</View>
+														)}
 													</View>
 													<Ionicons
 														name={
@@ -1590,6 +1699,40 @@ const createStyles = (theme: Theme) =>
 		},
 		filterChipTextActive: {
 			color: "#FFFFFF",
+		},
+		suggestToggle: {
+			flexDirection: "row",
+			alignItems: "center",
+			alignSelf: "flex-start",
+			gap: 6,
+			paddingHorizontal: 12,
+			paddingVertical: 8,
+			borderRadius: 20,
+			borderWidth: 1,
+			borderColor: theme.primary,
+			marginBottom: 10,
+		},
+		suggestToggleActive: {
+			backgroundColor: theme.primary,
+		},
+		suggestToggleText: {
+			fontSize: 13,
+			fontWeight: "600",
+			color: theme.primary,
+		},
+		suggestToggleTextActive: {
+			color: "#FFF",
+		},
+		injuryFlag: {
+			flexDirection: "row",
+			alignItems: "center",
+			gap: 4,
+			marginTop: 4,
+		},
+		injuryFlagText: {
+			fontSize: 11,
+			color: theme.warning,
+			flexShrink: 1,
 		},
 		exerciseList: {
 			flex: 1,
