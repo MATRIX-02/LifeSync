@@ -68,7 +68,8 @@
 			"expo-web-browser",
 			"expo-secure-store",
 			"./plugins/withSmsPermission",
-			"./plugins/withNotificationListener"
+			"./plugins/withNotificationListener",
+			"./plugins/withReleaseSigning"
 		],
 		"experiments": {
 			"typedRoutes": true

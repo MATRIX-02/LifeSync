@@ -37,6 +37,9 @@ yarn-error.*
 # typescript
 *.tsbuildinfo
 
+# release APKs (see docs/BUILD_APK.md)
+builds/
+
 # generated native folders
 /ios
 /android
