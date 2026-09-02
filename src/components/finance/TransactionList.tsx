@@ -8,6 +8,7 @@ import {
 	IncomeCategory,
 } from "@/src/context/financeStoreDB/types";
 import { Theme } from "@/src/context/themeContext";
+import { useModuleRefresh } from "@/src/hooks/useModuleRefresh";
 import {
 	EXPENSE_CATEGORIES,
 	INCOME_CATEGORIES,
@@ -18,6 +19,7 @@ import React, { useMemo, useState } from "react";
 import {
 	FlatList,
 	Modal,
+	RefreshControl,
 	ScrollView,
 	StyleSheet,
 	Text,
@@ -62,6 +64,7 @@ export default function TransactionList({
 	} = useFinanceStore();
 
 	const styles = createStyles(theme);
+	const { refreshing, onRefresh } = useModuleRefresh("finance");
 
 	const [filterType, setFilterType] = useState<FilterType>("all");
 	const [dateFilter, setDateFilter] = useState<DateFilter>("month");
@@ -715,6 +718,14 @@ export default function TransactionList({
 
 			{/* Transaction List */}
 			<FlatList
+				refreshControl={
+					<RefreshControl
+						refreshing={refreshing}
+						onRefresh={onRefresh}
+						tintColor={theme.primary}
+						colors={[theme.primary]}
+					/>
+				}
 				data={groupedTransactions}
 				keyExtractor={(item) => item.date}
 				renderItem={renderDateGroup}

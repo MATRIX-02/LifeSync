@@ -1,6 +1,8 @@
 // Study Dashboard - Main overview with quick actions and progress
 
 import { Alert } from "@/src/components/CustomAlert";
+import { LoadingState } from "@/src/components/LoadingState";
+import { useModuleRefresh } from "@/src/hooks/useModuleRefresh";
 import { SubscriptionCheckResult } from "@/src/components/PremiumFeatureGate";
 import { useStudyStore } from "@/src/context/studyStoreDB/index";
 import { Theme } from "@/src/context/themeContext";
@@ -9,6 +11,7 @@ import React, { useMemo, useState } from "react";
 import {
 	Dimensions,
 	Modal,
+	RefreshControl,
 	ScrollView,
 	StyleSheet,
 	Text,
@@ -135,9 +138,11 @@ export default function StudyDashboard({
 		getStudyAnalytics,
 		deleteStudyGoal,
 		endSession,
+		isLoading,
 	} = useStudyStore();
 
 	const styles = createStyles(theme);
+	const { refreshing, onRefresh } = useModuleRefresh("study");
 
 	const [showAddGoal, setShowAddGoal] = useState(false);
 	const [showQuickSession, setShowQuickSession] = useState(false);
@@ -346,8 +351,24 @@ export default function StudyDashboard({
 		setShowQuickSession(false);
 	};
 
+	// First load only: a refresh keeps the existing content on screen.
+	if (isLoading && studyGoals.length === 0 && subjects.length === 0) {
+		return <LoadingState label="Loading your study data…" />;
+	}
+
 	return (
-		<ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
+		<ScrollView
+			style={styles.container}
+			showsVerticalScrollIndicator={false}
+			refreshControl={
+				<RefreshControl
+					refreshing={refreshing}
+					onRefresh={onRefresh}
+					tintColor={theme.primary}
+					colors={[theme.primary]}
+				/>
+			}
+		>
 			{/* Header Stats */}
 			<View style={styles.statsRow}>
 				<View

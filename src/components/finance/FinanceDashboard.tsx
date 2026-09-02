@@ -1,5 +1,7 @@
 // Finance Dashboard - Main overview with quick actions
 import { Alert } from "@/src/components/CustomAlert";
+import { LoadingState } from "@/src/components/LoadingState";
+import { useModuleRefresh } from "@/src/hooks/useModuleRefresh";
 import { SubscriptionCheckResult } from "@/src/components/PremiumFeatureGate";
 import { useFinanceStore } from "@/src/context/financeStoreDB";
 import { Theme } from "@/src/context/themeContext";
@@ -19,6 +21,7 @@ import {
 	Dimensions,
 	Modal,
 	Platform,
+	RefreshControl,
 	ScrollView,
 	StyleSheet,
 	Text,
@@ -62,6 +65,7 @@ export default function FinanceDashboard({
 	} = useFinanceStore();
 
 	const styles = createStyles(theme);
+	const { refreshing, onRefresh } = useModuleRefresh("finance");
 
 	const [showAddAccount, setShowAddAccount] = useState(false);
 	const [showAddTransaction, setShowAddTransaction] = useState(false);
@@ -286,8 +290,24 @@ export default function FinanceDashboard({
 		setEditingAccount(null);
 	};
 
+	// First load only: a refresh keeps the existing content on screen.
+	if (isLoading && accounts.length === 0 && transactions.length === 0) {
+		return <LoadingState label="Loading your finances…" />;
+	}
+
 	return (
-		<ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
+		<ScrollView
+			style={styles.container}
+			showsVerticalScrollIndicator={false}
+			refreshControl={
+				<RefreshControl
+					refreshing={refreshing}
+					onRefresh={onRefresh}
+					tintColor={theme.primary}
+					colors={[theme.primary]}
+				/>
+			}
+		>
 			{/* Load failure banner - the data on screen may be stale or empty */}
 			{loadError && (
 				<View style={styles.loadErrorBanner}>

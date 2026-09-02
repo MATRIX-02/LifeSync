@@ -28,7 +28,6 @@ import {
 	TouchableOpacity,
 	View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
 
 const { width, height } = Dimensions.get("window");
 
@@ -1703,7 +1702,7 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
 	isEditing,
 	onSave,
 }) => (
-	<SafeAreaView>
+	<View>
 		<Modal
 			visible={visible}
 			animationType="slide"
@@ -1818,7 +1817,7 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
 				</ScrollView>
 			</View>
 		</Modal>
-	</SafeAreaView>
+	</View>
 );
 
 // Add Non-User Member Modal

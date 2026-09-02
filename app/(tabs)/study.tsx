@@ -28,7 +28,6 @@ import {
 	TouchableOpacity,
 	View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
 
 // Import Study Components
 
@@ -191,7 +190,7 @@ export default function StudyScreen() {
 	};
 
 	return (
-		<SafeAreaView style={styles.container}>
+		<View style={styles.container}>
 			<StatusBar
 				barStyle={isDark ? "light-content" : "dark-content"}
 				backgroundColor={theme.background}
@@ -287,7 +286,7 @@ export default function StudyScreen() {
 
 			{/* Tab Content */}
 			<View style={styles.content}>{renderContent()}</View>
-		</SafeAreaView>
+		</View>
 	);
 }
 

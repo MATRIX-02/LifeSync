@@ -11,6 +11,42 @@ import {
 } from "../types";
 import { generateUUID } from "../utils/uuid";
 
+/**
+ * Day index for habit logs: "habitId|YYYY-M-D" -> the logs on that day.
+ *
+ * The calendar grid asks for one day at a time, once per cell. Scanning the
+ * whole `logs` array per cell - and allocating a Date for every log while doing
+ * it - is O(cells x habits x logs) on every render, which is what made swiping
+ * the grid lag. Building this once per logs change makes each lookup O(1).
+ *
+ * Keyed on the array reference: zustand replaces `logs` on every mutation, so
+ * an unchanged reference means an unchanged index.
+ */
+let logIndexCache: { source: HabitLog[]; index: Map<string, HabitLog[]> } | null =
+	null;
+
+const dayKey = (habitId: string, date: Date): string =>
+	`${habitId}|${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+
+const getLogIndex = (logs: HabitLog[]): Map<string, HabitLog[]> => {
+	if (logIndexCache && logIndexCache.source === logs) return logIndexCache.index;
+
+	const index = new Map<string, HabitLog[]>();
+	for (const log of logs) {
+		const completed =
+			log.completedAt instanceof Date
+				? log.completedAt
+				: new Date(log.completedAt);
+		const key = dayKey(log.habitId, completed);
+		const bucket = index.get(key);
+		if (bucket) bucket.push(log);
+		else index.set(key, [log]);
+	}
+
+	logIndexCache = { source: logs, index };
+	return index;
+};
+
 // Helper: Convert camelCase to snake_case
 const toSnakeCase = (str: string): string => {
 	return str.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`);
@@ -583,24 +619,18 @@ export const useHabitStore = create<HabitStoreDB>()((set, get) => ({
 	},
 
 	getLogsForDate: (habitId: string, date: Date) => {
-		const startOfDay = new Date(date);
-		startOfDay.setHours(0, 0, 0, 0);
-		const endOfDay = new Date(date);
-		endOfDay.setHours(23, 59, 59, 999);
-
-		return get().logs.filter(
-			(l) =>
-				l.habitId === habitId &&
-				new Date(l.completedAt) >= startOfDay &&
-				new Date(l.completedAt) <= endOfDay
-		);
+		const bucket = getLogIndex(get().logs).get(dayKey(habitId, date));
+		// Copied: removeOneLogForDate sorts the result, and sort() mutates.
+		return bucket ? [...bucket] : [];
 	},
 
 	// A "times_per_day" habit is only done when it has been done that many
 	// times. Every other frequency needs exactly one completion for the day.
 	getProgressForDate: (habitId: string, date: Date) => {
 		const habit = get().getHabit(habitId);
-		const done = get().getLogsForDate(habitId, date).length;
+		// Straight to the index: this runs once per calendar cell.
+		const done =
+			getLogIndex(get().logs).get(dayKey(habitId, date))?.length ?? 0;
 		const target =
 			habit?.frequency?.type === "times_per_day"
 				? Math.max(1, Number(habit.frequency.value) || 1)

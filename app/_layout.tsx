@@ -24,6 +24,7 @@ import "react-native-reanimated";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { AlertProvider } from "@/src/components/CustomAlert";
+import { SafeAreaFrame } from "@/src/components/SafeAreaFrame";
 import { SyncStatusBanner } from "@/src/components/SyncStatusBanner";
 import { isSupabaseConfigured } from "@/src/config/supabase";
 import { useAuthStore } from "@/src/context/authStore";
@@ -126,11 +127,16 @@ export default function RootLayout() {
 		<SafeAreaProvider>
 			<ThemeProvider>
 				<AlertProvider>
-					<StatusBar translucent={false} />
-					{/* Sits above every screen: the user must be able to see that a
-					    change is saved locally but not yet on the server. */}
-					<SyncStatusBanner />
-					<RootLayoutNav />
+					{/* Android 15+ forces edge-to-edge, so `translucent` is no longer
+					    meaningful; the bar is always drawn over the app. */}
+					<StatusBar translucent />
+					{/* One place applies the system-bar insets for every screen. */}
+					<SafeAreaFrame>
+						{/* Sits above every screen: the user must be able to see that a
+						    change is saved locally but not yet on the server. */}
+						<SyncStatusBanner />
+						<RootLayoutNav />
+					</SafeAreaFrame>
 				</AlertProvider>
 			</ThemeProvider>
 		</SafeAreaProvider>

@@ -22,7 +22,6 @@ import {
 	TouchableOpacity,
 	View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
 
 // Import Finance Components
 
@@ -215,7 +214,7 @@ export default function FinanceScreen() {
 	};
 
 	return (
-		<SafeAreaView style={styles.container}>
+		<View style={styles.container}>
 			<StatusBar
 				barStyle={isDark ? "light-content" : "dark-content"}
 				backgroundColor={theme.background}
@@ -311,7 +310,7 @@ export default function FinanceScreen() {
 
 			{/* Tab Content */}
 			<View style={styles.content}>{renderContent()}</View>
-		</SafeAreaView>
+		</View>
 	);
 }
 

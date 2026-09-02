@@ -1,6 +1,7 @@
 // Workout Tracker Main Screen - Tab-based navigation
 
 import { useSubscriptionCheck } from "@/src/components/PremiumFeatureGate";
+import { SafeAreaView } from "react-native-safe-area-context";
 import {
 	DrawerEdgeSwipe,
 	SharedDrawer,
@@ -32,7 +33,6 @@ import {
 	TouchableOpacity,
 	View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
 
 const { width } = Dimensions.get("window");
 
@@ -208,7 +208,7 @@ export default function WorkoutTrackerScreen() {
 	});
 
 	return (
-		<SafeAreaView style={styles.container}>
+		<View style={styles.container}>
 			<StatusBar
 				barStyle={isDark ? "light-content" : "dark-content"}
 				backgroundColor={theme.background}
@@ -321,7 +321,7 @@ export default function WorkoutTrackerScreen() {
 					/>
 				</SafeAreaView>
 			</Modal>
-		</SafeAreaView>
+		</View>
 	);
 }
 

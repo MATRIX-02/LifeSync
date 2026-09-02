@@ -43,6 +43,27 @@ let processingRecurring = false;
 const MAX_RECURRING_CATCHUP = 60;
 
 /**
+ * Apply a signed change to an account's balance.
+ *
+ * For a credit card the dashboard shows `creditLimit - creditUsed`, so the
+ * outstanding amount has to be tracked in `creditUsed` - and nothing used to
+ * write that field at all, which is why card spending never showed up. Spending
+ * lowers `balance` and must raise `creditUsed` by the same amount; a payment
+ * towards the card does the reverse. `balance` stays the signed ledger value,
+ * so a card still contributes its debt as a negative to net worth.
+ */
+const applyAccountDelta = (acc: Account, delta: number): Account => {
+	if (!delta) return acc;
+	const next: Account = { ...acc, balance: acc.balance + delta };
+	if (acc.type === "credit_card") {
+		// Clamped: usage below zero is meaningless. An overpayment still shows
+		// as a positive `balance`.
+		next.creditUsed = Math.max(0, (acc.creditUsed || 0) - delta);
+	}
+	return next;
+};
+
+/**
  * Today in the user's own timezone. `toISOString()` is UTC, so for anywhere
  * east of Greenwich it reports yesterday for part of every day - which would
  * hold a due transaction back until the clock caught up.
@@ -418,10 +439,10 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
 					transaction.type === "income"
 						? transaction.amount
 						: -transaction.amount;
-				return { ...acc, balance: acc.balance + change };
+				return applyAccountDelta(acc, change);
 			}
 			if (transaction.toAccountId && acc.id === transaction.toAccountId) {
-				return { ...acc, balance: acc.balance + transaction.amount };
+				return applyAccountDelta(acc, transaction.amount);
 			}
 			return acc;
 		});
@@ -445,6 +466,9 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
 					.update(
 						objectToSnakeCase({
 							balance: acc.balance,
+							// Persist alongside balance, or the card's outstanding
+							// amount is lost on the next load.
+							creditUsed: acc.creditUsed ?? null,
 							updated_at: new Date().toISOString(),
 						})
 					)
@@ -485,9 +509,7 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
 		applyEffect(next, 1);
 
 		const updatedAccounts = accounts.map((acc) =>
-			balanceDeltas[acc.id]
-				? { ...acc, balance: acc.balance + balanceDeltas[acc.id] }
-				: acc
+			applyAccountDelta(acc, balanceDeltas[acc.id] || 0)
 		);
 
 		const dbData = objectToSnakeCase({
@@ -508,7 +530,12 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
 			if (!balanceDeltas[acc.id]) continue;
 			await supabase
 				.from("finance_accounts")
-				.update(objectToSnakeCase({ balance: acc.balance }))
+				.update(
+					objectToSnakeCase({
+						balance: acc.balance,
+						creditUsed: acc.creditUsed ?? null,
+					})
+				)
 				.eq("id", acc.id)
 				.eq("user_id", userId);
 		}
@@ -537,10 +564,10 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
 					transaction.type === "income"
 						? -transaction.amount
 						: transaction.amount;
-				return { ...acc, balance: acc.balance + change };
+				return applyAccountDelta(acc, change);
 			}
 			if (transaction.toAccountId && acc.id === transaction.toAccountId) {
-				return { ...acc, balance: acc.balance - transaction.amount };
+				return applyAccountDelta(acc, -transaction.amount);
 			}
 			return acc;
 		});
@@ -563,7 +590,12 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
 			) {
 				await supabase
 					.from("finance_accounts")
-					.update(objectToSnakeCase({ balance: acc.balance }))
+					.update(
+					objectToSnakeCase({
+						balance: acc.balance,
+						creditUsed: acc.creditUsed ?? null,
+					})
+				)
 					.eq("id", acc.id)
 					.eq("user_id", userId);
 			}
@@ -597,9 +629,7 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
 		}
 
 		const updatedAccounts = accounts.map((acc) =>
-			balanceDeltas[acc.id]
-				? { ...acc, balance: acc.balance + balanceDeltas[acc.id] }
-				: acc
+			applyAccountDelta(acc, balanceDeltas[acc.id] || 0)
 		);
 
 		const { error } = await supabase
@@ -617,7 +647,12 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
 			if (!balanceDeltas[acc.id]) continue;
 			await supabase
 				.from("finance_accounts")
-				.update(objectToSnakeCase({ balance: acc.balance }))
+				.update(
+					objectToSnakeCase({
+						balance: acc.balance,
+						creditUsed: acc.creditUsed ?? null,
+					})
+				)
 				.eq("id", acc.id)
 				.eq("user_id", userId);
 		}

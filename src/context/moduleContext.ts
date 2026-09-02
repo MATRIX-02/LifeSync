@@ -36,33 +36,30 @@ const useModuleStoreBase = create<ModuleStore>()(
 			toggleModule: async (module: ModuleType, enabled: boolean) => {
 				// Handle notification state when toggling habits module
 				if (module === "habits") {
+					// habitStoreDB is the store the app actually uses. This used to
+					// read the legacy AsyncStorage `habitStore`, which holds different
+					// data, and to schedule via the single-reminder helper - so it
+					// ignored frequency, the habit's question, and the alarm/sound
+					// flags. scheduleHabitReminders() honours all of them.
+					const { useHabitStore } = await import("./habitStoreDB");
+
 					if (enabled) {
-						// Re-enable habits: reschedule all habit notifications
 						console.log(
 							"📅 Re-enabling habits module - rescheduling notifications"
 						);
 						try {
-							// Dynamically import to avoid circular dependencies
-							const { useHabitStore } = await import("./habitStore");
-							const { habits } = useHabitStore.getState();
-							const activeHabits = habits.filter(
-								(h) =>
-									!h.isArchived && h.notificationEnabled && h.notificationTime
-							);
+							const activeHabits = useHabitStore
+								.getState()
+								.habits.filter(
+									(h) =>
+										!h.isArchived && h.notificationEnabled && h.notificationTime
+								);
 
 							for (const habit of activeHabits) {
 								try {
-									const notificationId =
-										await NotificationService.scheduleHabitReminder(
-											habit.id,
-											habit.name,
-											habit.notificationTime!
-										);
-									useHabitStore.getState().updateHabit(habit.id, {
-										notificationId,
-									});
+									await NotificationService.scheduleHabitReminders(habit);
 									console.log(
-										`✅ Rescheduled notification for habit: ${habit.name}`
+										`✅ Rescheduled reminders for habit: ${habit.name}`
 									);
 								} catch (error) {
 									console.error(
@@ -75,34 +72,15 @@ const useModuleStoreBase = create<ModuleStore>()(
 							console.error("Failed to reschedule habit notifications:", error);
 						}
 					} else {
-						// Disable habits: cancel all habit notifications
 						console.log(
 							"🗑️  Disabling habits module - canceling all notifications"
 						);
 						try {
-							const { useHabitStore } = await import("./habitStore");
-							const { habits } = useHabitStore.getState();
-
-							for (const habit of habits) {
-								if (habit.notificationId) {
-									try {
-										await NotificationService.cancelNotification(
-											habit.notificationId
-										);
-										useHabitStore.getState().updateHabit(habit.id, {
-											notificationId: undefined,
-										});
-										console.log(
-											`✅ Canceled notification for habit: ${habit.name}`
-										);
-									} catch (error) {
-										console.error(
-											`Failed to cancel notification for ${habit.name}:`,
-											error
-										);
-									}
-								}
-							}
+							// Cancels by matching data.habitId, so it catches every
+							// reminder a habit owns - not just one stored id. It also
+							// leaves bill, water, study and timer reminders alone.
+							await NotificationService.cancelAllHabitNotifications();
+							console.log("✅ Canceled all habit reminders");
 						} catch (error) {
 							console.error("Failed to cancel habit notifications:", error);
 						}

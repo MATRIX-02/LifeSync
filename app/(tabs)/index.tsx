@@ -16,6 +16,7 @@ import {
 	Modal,
 	PanResponder,
 	Platform,
+	RefreshControl,
 	ScrollView,
 	StatusBar,
 	StyleSheet,
@@ -25,7 +26,6 @@ import {
 	TouchableWithoutFeedback,
 	View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
 import Svg, { Circle } from "react-native-svg";
 
 import { useSubscriptionCheck } from "@/src/components/PremiumFeatureGate";
@@ -39,6 +39,8 @@ import { useModuleStore } from "@/src/context/moduleContext";
 import { Theme, useColors, useTheme } from "@/src/context/themeContext";
 import { useWorkoutStore } from "@/src/context/workoutStoreDB";
 import { NotificationService } from "@/src/services/notificationService";
+import { LoadingState } from "@/src/components/LoadingState";
+import { useModuleRefresh } from "@/src/hooks/useModuleRefresh";
 import { generateUUID } from "@/src/utils/uuid";
 import {
 	FrequencyType,
@@ -138,6 +140,7 @@ export default function DashboardScreen() {
 		searchHabits,
 		isHabitCompletedOnDate,
 		getProgressForDate,
+		isLoading,
 	} = useHabitStore();
 	const { profile: authProfile, user } = useAuthStore();
 	const [drawerOpen, setDrawerOpen] = useState(false);
@@ -178,6 +181,7 @@ export default function DashboardScreen() {
 		AsyncStorage.setItem("habit_view_mode", newMode);
 	}, [viewMode]);
 
+	const { refreshing, onRefresh } = useModuleRefresh("habits");
 	const activeHabits = getActiveHabits();
 	const archivedHabits = getArchivedHabits();
 
@@ -241,13 +245,15 @@ export default function DashboardScreen() {
 					const bLogs = logs.filter((l: HabitLog) => l.habitId === b.id).length;
 					return bLogs - aLogs;
 				});
-			case "status":
-				// Completed today first, then incomplete
+			case "status": {
+				// Completed today first, then incomplete.
+				const now = new Date();
 				return habitsToSort.sort((a, b) => {
-					const aCompleted = isHabitCompletedToday(a.id) ? 1 : 0;
-					const bCompleted = isHabitCompletedToday(b.id) ? 1 : 0;
+					const aCompleted = isHabitCompletedOnDate(a.id, now) ? 1 : 0;
+					const bCompleted = isHabitCompletedOnDate(b.id, now) ? 1 : 0;
 					return bCompleted - aCompleted;
 				});
+			}
 			case "created":
 				// Newest first
 				return habitsToSort.sort(
@@ -258,7 +264,7 @@ export default function DashboardScreen() {
 			default:
 				return habitsToSort;
 		}
-	}, [activeHabits, sortBy, logs]);
+	}, [activeHabits, sortBy, logs, isHabitCompletedOnDate]);
 
 	const displayedHabits = sortedHabits;
 	const today = new Date();
@@ -356,19 +362,6 @@ export default function DashboardScreen() {
 		date.toDateString() === selectedDate.toDateString();
 	const isToday = (date: Date) => date.toDateString() === today.toDateString();
 
-	const isHabitCompletedToday = (habitId: string) => {
-		const todayStart = new Date();
-		todayStart.setHours(0, 0, 0, 0);
-		const todayEnd = new Date();
-		todayEnd.setHours(23, 59, 59, 999);
-		return logs.some(
-			(log: HabitLog) =>
-				log.habitId === habitId &&
-				new Date(log.completedAt) >= todayStart &&
-				new Date(log.completedAt) <= todayEnd
-		);
-	};
-
 	const handleHabitLongPress = (habit: Habit) => {
 		Alert.alert(habit.name, "What would you like to do?", [
 			{ text: "Cancel", style: "cancel" },
@@ -424,15 +417,20 @@ export default function DashboardScreen() {
 	const getCompletionRate = () => {
 		if (activeHabits.length === 0) return 0;
 		const completed = activeHabits.filter((h: Habit) =>
-			isHabitCompletedToday(h.id)
+			isHabitCompletedOnDate(h.id, today)
 		).length;
 		return Math.round((completed / activeHabits.length) * 100);
 	};
 
 	const styles = createStyles(theme);
 
+	// First load only: a refresh keeps the existing content on screen.
+	if (isLoading && habits.length === 0) {
+		return <LoadingState label="Loading your habits…" />;
+	}
+
 	return (
-		<SafeAreaView style={styles.container}>
+		<View style={styles.container}>
 			<StatusBar
 				barStyle={isDark ? "light-content" : "dark-content"}
 				backgroundColor={theme.background}
@@ -467,6 +465,14 @@ export default function DashboardScreen() {
 			<ScrollView
 				style={styles.scrollView}
 				showsVerticalScrollIndicator={false}
+				refreshControl={
+					<RefreshControl
+						refreshing={refreshing}
+						onRefresh={onRefresh}
+						tintColor={theme.primary}
+						colors={[theme.primary]}
+					/>
+				}
 			>
 				{/* Habits Section with Day Headers */}
 				<View style={styles.habitsSection}>
@@ -917,7 +923,7 @@ export default function DashboardScreen() {
 					</TouchableOpacity>
 				</View>
 			)}
-		</SafeAreaView>
+		</View>
 	);
 }
 

@@ -1,4 +1,5 @@
 import { Alert } from "@/src/components/CustomAlert";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { useAuthStore } from "@/src/context/authStore";
 import { useFinanceStore } from "@/src/context/financeStoreDB";
 import { useHabitStore } from "@/src/context/habitStoreDB";
@@ -42,7 +43,6 @@ import {
 	TouchableOpacity,
 	View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
 
 export default function SettingsScreen() {
 	const router = useRouter();
@@ -829,7 +829,7 @@ export default function SettingsScreen() {
 	};
 
 	return (
-		<SafeAreaView style={styles.container}>
+		<View style={styles.container}>
 			<StatusBar
 				barStyle={isDark ? "light-content" : "dark-content"}
 				backgroundColor={theme.background}
@@ -2244,7 +2244,7 @@ export default function SettingsScreen() {
 					</ScrollView>
 				</SafeAreaView>
 			</Modal>
-		</SafeAreaView>
+		</View>
 	);
 }
 

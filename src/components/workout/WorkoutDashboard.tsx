@@ -1,6 +1,8 @@
 // Workout Dashboard - Quick overview and start workout
 
 import { Alert } from "@/src/components/CustomAlert";
+import { LoadingState } from "@/src/components/LoadingState";
+import { useModuleRefresh } from "@/src/hooks/useModuleRefresh";
 import { SubscriptionCheckResult } from "@/src/components/PremiumFeatureGate";
 import { useAuthStore } from "@/src/context/authStore";
 import { Theme } from "@/src/context/themeContext";
@@ -17,6 +19,7 @@ import {
 	Dimensions,
 	FlatList,
 	Modal,
+	RefreshControl,
 	ScrollView,
 	StyleSheet,
 	Text,
@@ -57,6 +60,7 @@ export default function WorkoutDashboard({
 		customExercises,
 		addCustomExercise,
 		fitnessProfile,
+		isLoading,
 	} = useWorkoutStore();
 
 	// Modal states
@@ -113,6 +117,7 @@ export default function WorkoutDashboard({
 	const recentWorkouts = getRecentWorkouts(3);
 	const activePlan = getActivePlan();
 	const styles = createStyles(theme);
+	const { refreshing, onRefresh } = useModuleRefresh("workout");
 
 	// (2) Show this week against the user's own weekly target when they have one.
 	const weeklyGoal = fitnessProfile?.weeklyWorkoutGoal || 0;
@@ -321,8 +326,24 @@ export default function WorkoutDashboard({
 	// Get recent body weights
 	const recentWeights = bodyWeights?.slice(-7).reverse() || [];
 
+	// First load only: a refresh keeps the existing content on screen.
+	if (isLoading && workoutPlans.length === 0 && recentWorkouts.length === 0) {
+		return <LoadingState label="Loading your workouts…" />;
+	}
+
 	return (
-		<ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
+		<ScrollView
+			style={styles.container}
+			showsVerticalScrollIndicator={false}
+			refreshControl={
+				<RefreshControl
+					refreshing={refreshing}
+					onRefresh={onRefresh}
+					tintColor={theme.primary}
+					colors={[theme.primary]}
+				/>
+			}
+		>
 			{/* Greeting */}
 			<View style={styles.greetingSection}>
 				<Text style={styles.greeting}>

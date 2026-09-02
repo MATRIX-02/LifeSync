@@ -23,9 +23,23 @@ const { width } = Dimensions.get("window");
 // its Animated.Value with (-width * 0.8).
 const DRAWER_WIDTH = width * 0.8;
 
-// How wide the invisible grab strip along the left edge is. Taps inside it are
-// swallowed, so keep it narrow enough to sit clear of interactive content.
-const EDGE_WIDTH = 24;
+// How wide the invisible grab strip along the left edge is.
+//
+// This MUST be wider than Android's system back-gesture zone. On a device using
+// gesture navigation the OS claims roughly the outer 20dp of each edge before
+// the app sees the touch, so the old 24dp strip sat almost entirely inside it
+// and the drawer swipe never fired. Only a JS-unreachable native call
+// (View.setSystemGestureExclusionRects) can reclaim that outer band, so instead
+// the strip is widened to leave a usable region just inside it.
+//
+// The cost: a vertical scroll that STARTS inside this band drags the drawer
+// instead of scrolling, because the strip claims the touch on touch-down (it
+// has to - see the PanResponder below). Keep it as narrow as still works.
+const EDGE_WIDTH = 48;
+
+// Roughly what Android reserves for its own back gesture. Documented here only
+// to explain why EDGE_WIDTH is not smaller.
+const SYSTEM_BACK_GESTURE_WIDTH = 20;
 
 // Fraction of the drawer you must drag past for the release to open it.
 const OPEN_THRESHOLD = 0.33;
@@ -70,8 +84,16 @@ export const DrawerEdgeSwipe: React.FC<DrawerEdgeSwipeProps> = ({
 				//
 				// The cost is that a vertical scroll begun inside these 24dp does not
 				// scroll. That is the trade-off this strip was always meant to make.
-				onStartShouldSetPanResponder: () => !isOpenRef.current,
-				onStartShouldSetPanResponderCapture: () => !isOpenRef.current,
+				// Ignore touches landing in the band the OS owns. On gesture-nav
+				// devices they never reach us; on button-nav devices skipping them
+				// keeps the usable grab area identical either way, so the gesture
+				// feels the same on both.
+				onStartShouldSetPanResponder: (evt) =>
+					!isOpenRef.current &&
+					evt.nativeEvent.locationX >= SYSTEM_BACK_GESTURE_WIDTH,
+				onStartShouldSetPanResponderCapture: (evt) =>
+					!isOpenRef.current &&
+					evt.nativeEvent.locationX >= SYSTEM_BACK_GESTURE_WIDTH,
 				onMoveShouldSetPanResponder: () => !isOpenRef.current,
 				onMoveShouldSetPanResponderCapture: () => !isOpenRef.current,
 				// Once we have the gesture, don't let a parent reclaim it mid-drag.

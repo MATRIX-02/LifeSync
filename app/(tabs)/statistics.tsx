@@ -23,7 +23,6 @@ import {
 	TouchableWithoutFeedback,
 	View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
 import Svg, { Circle } from "react-native-svg";
 
 const { width } = Dimensions.get("window");
@@ -682,6 +681,7 @@ export default function StatisticsScreen() {
 					name: editName.trim(),
 					notificationTime,
 					frequency: updatedFrequency,
+					question: editQuestion.trim() || undefined,
 					alarmEnabled: editAlarmEnabled,
 					ringtoneEnabled: editRingtoneEnabled,
 				});
@@ -724,7 +724,7 @@ export default function StatisticsScreen() {
 
 	if (!selectedHabit) {
 		return (
-			<SafeAreaView style={styles.container}>
+			<View style={styles.container}>
 				<StatusBar barStyle={isDark ? "light-content" : "dark-content"} />
 				<View style={styles.header}>
 					<TouchableOpacity
@@ -747,12 +747,12 @@ export default function StatisticsScreen() {
 						Select a habit from the home screen
 					</Text>
 				</View>
-			</SafeAreaView>
+			</View>
 		);
 	}
 
 	return (
-		<SafeAreaView style={styles.container}>
+		<View style={styles.container}>
 			<StatusBar
 				barStyle={isDark ? "light-content" : "dark-content"}
 				backgroundColor={theme.background}
@@ -2347,7 +2347,7 @@ export default function StatisticsScreen() {
 					</Animated.View>
 				</View>
 			</Modal>
-		</SafeAreaView>
+		</View>
 	);
 }
 

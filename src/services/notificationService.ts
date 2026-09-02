@@ -292,6 +292,8 @@ export class NotificationService {
 		name: string;
 		notificationTime?: string;
 		frequency?: FrequencyConfig;
+		/** Shown as the reminder body when set, e.g. "Did you read today?". */
+		question?: string;
 		/** Route through the louder "alarms" channel (MAX importance, bypasses DND). */
 		alarmEnabled?: boolean;
 		/** false = deliver silently (vibration only). */
@@ -313,13 +315,17 @@ export class NotificationService {
 			habit.ringtoneEnabled === false ? false : "default";
 		const title = habit.alarmEnabled ? "⏰ Habit Alarm" : "🎯 Habit Reminder";
 
+		// A habit's own question is the whole point of the field - asking "Did you
+		// read today?" lands better than a generic "Time to complete: Reading".
+		// Fall back to the generic body only when no question is set.
+		const question = habit.question?.trim();
+		const body = question || `Time to complete: ${habit.name}`;
+
 		const scheduleDaily = async (timeString: string, label?: string) => {
 			const [hour, minute] = timeString.split(":").map(Number);
 			const id = await this.scheduleNotification(
 				title,
-				label
-					? `Time to complete: ${habit.name} ${label}`
-					: `Time to complete: ${habit.name}`,
+				label ? `${body} ${label}` : body,
 				{
 					type: Notifications.SchedulableTriggerInputTypes.DAILY,
 					hour,
@@ -347,7 +353,7 @@ export class NotificationService {
 			for (const day of frequency.days) {
 				const id = await this.scheduleNotification(
 					title,
-					`Time to complete: ${habit.name}`,
+					body,
 					{
 						type: Notifications.SchedulableTriggerInputTypes.WEEKLY,
 						// expo-notifications weekday is 1-7 with 1 = Sunday
