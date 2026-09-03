@@ -499,7 +499,8 @@ export const syncWorkoutsToCloud = async (
 						user_id: userId,
 						name: plan.name,
 						description: plan.description || null,
-						exercises: JSON.stringify(plan.exercises || []),
+						// jsonb column - pass the array, not a stringified one.
+						exercises: plan.exercises || [],
 						is_active: plan.isActive || false,
 						created_at: plan.createdAt || new Date().toISOString(),
 						updated_at: plan.updatedAt || new Date().toISOString(),
@@ -531,7 +532,7 @@ export const syncWorkoutsToCloud = async (
 				start_time: session.startTime,
 				end_time: session.endTime || session.endedAt || null,
 				duration: session.duration || 0,
-				exercises: JSON.stringify(session.exercises || []),
+				exercises: session.exercises || [],
 				total_volume: session.totalVolume || 0,
 				mood: session.mood || null,
 				energy_level: session.energyLevel || null,

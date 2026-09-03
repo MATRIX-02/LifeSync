@@ -1,6 +1,7 @@
 // Workout History - View past workout sessions
 
 import { Alert } from "@/src/components/CustomAlert";
+import { estimateSessionCalories } from "@/src/utils/calories";
 import { SubscriptionCheckResult } from "@/src/components/PremiumFeatureGate";
 import { Theme } from "@/src/context/themeContext";
 import { useWorkoutStore } from "@/src/context/workoutStoreDB";
@@ -34,6 +35,17 @@ export default function WorkoutHistory({
 	const { workoutSessions, deleteWorkoutSession, fitnessProfile } =
 		useWorkoutStore();
 	const weightUnit = fitnessProfile?.weightUnit || "kg";
+
+	// Stored value wins - it was computed at the weight the user was on the day.
+	// Older sessions predate the field, so those are estimated on the fly from
+	// the current profile rather than being shown as a flat zero.
+	const sessionCalories = (session: WorkoutSession): number | undefined =>
+		session.caloriesBurned ??
+		estimateSessionCalories(
+			session,
+			fitnessProfile?.weight,
+			fitnessProfile?.fitnessLevel
+		);
 	const [expandedSession, setExpandedSession] = useState<string | null>(null);
 	const [filter, setFilter] = useState<"all" | "week" | "month">("all");
 
@@ -299,7 +311,10 @@ export default function WorkoutHistory({
 									color={theme.textMuted}
 								/>
 								<Text style={styles.footerStatText}>
-									{session.caloriesBurned || 0} cal
+									{/* Sessions logged before calories existed, and any logged
+									    without a body weight on file, have nothing to show. A
+									    "0 cal" there would be a claim, not a blank. */}
+									{sessionCalories(session) ?? "—"} cal
 								</Text>
 							</View>
 							<TouchableOpacity

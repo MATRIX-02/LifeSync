@@ -1018,6 +1018,466 @@ const RAW_EXERCISE_DATABASE: Omit<Exercise, "targetMuscles">[] = [
 		],
 		isCustom: false,
 	},
+
+	// ==========================================================================
+	// LOWER BACK / LUMBAR & SCIATICA
+	//
+	// Grouped by DIRECTIONAL PREFERENCE, because the two groups are not
+	// interchangeable and one can aggravate what the other relieves:
+	//
+	//   EXTENSION-BIAS  - usually better tolerated with disc-related sciatica,
+	//                     where bending forward reproduces the leg pain.
+	//   FLEXION-BIAS    - usually better tolerated with spinal stenosis, where
+	//                     standing and extending reproduce it.
+	//   STABILITY       - the McGill "Big 3". Spine-neutral, so generally
+	//                     tolerated by both groups.
+	//   NERVE GLIDES    - for nerve mobility rather than muscle length.
+	//   HIP / GLUTE     - the referred-pain contributors that sit alongside.
+	//
+	// The rule inside every set of instructions is CENTRALISATION: symptoms
+	// moving out of the leg and toward the back is good, symptoms travelling
+	// further down the leg means stop. That is the signal that tells you which
+	// group you belong to.
+	// ==========================================================================
+
+	// --- EXTENSION-BIAS (McKenzie) --------------------------------------------
+	{
+		id: "ex_prone_lying",
+		name: "Prone Lying",
+		category: "flexibility",
+		primaryMuscles: ["lower_back"],
+		secondaryMuscles: [],
+		equipment: [],
+		difficulty: "beginner",
+		description:
+			"The gentlest extension position and the usual starting point for disc-related sciatica",
+		instructions: [
+			"Lie face down on a firm surface, arms by your sides",
+			"Turn your head to one side and let it rest",
+			"Let your whole body go slack - do not hold yourself up",
+			"Breathe normally and stay for 2-5 minutes",
+			"If lying flat is too much at first, put a pillow under your stomach and remove it over several days",
+		],
+		tips: [
+			"Leg symptoms easing or moving up toward the back is the response you want",
+			"Stop if pain travels further DOWN the leg",
+		],
+		isCustom: false,
+	},
+	{
+		id: "ex_prone_on_elbows",
+		name: "Prone on Elbows",
+		category: "flexibility",
+		primaryMuscles: ["lower_back"],
+		secondaryMuscles: ["abs"],
+		equipment: [],
+		difficulty: "beginner",
+		description: "Sustained low-grade lumbar extension, one step past prone lying",
+		instructions: [
+			"From lying face down, prop yourself up on your forearms",
+			"Keep elbows under your shoulders",
+			"Let your hips and lower back sag completely - do not brace",
+			"Hold 2-5 minutes, breathing normally",
+			"Lower back down slowly",
+		],
+		tips: [
+			"The lower back should feel loose, not clenched",
+			"Build up the hold over a week rather than forcing it on day one",
+		],
+		isCustom: false,
+	},
+	{
+		id: "ex_prone_press_up",
+		name: "Prone Press-Up (McKenzie Extension)",
+		category: "flexibility",
+		primaryMuscles: ["lower_back"],
+		secondaryMuscles: ["abs"],
+		equipment: [],
+		difficulty: "beginner",
+		description:
+			"The core repeated-extension movement for centralising disc-related leg pain",
+		instructions: [
+			"Lie face down with hands flat under your shoulders",
+			"Press your upper body up, straightening your arms as far as comfortable",
+			"Keep hips, pelvis and legs RELAXED and in contact with the floor",
+			"Hold 1-2 seconds at the top, then lower fully",
+			"Repeat 10 times, several sessions through the day",
+		],
+		tips: [
+			"Do not push through sharp leg pain",
+			"Range improves over sessions - the last few reps should go further than the first",
+			"Most effective done little and often, not once a day",
+		],
+		isCustom: false,
+	},
+	{
+		id: "ex_standing_extension",
+		name: "Standing Back Extension",
+		category: "flexibility",
+		primaryMuscles: ["lower_back"],
+		secondaryMuscles: [],
+		equipment: [],
+		difficulty: "beginner",
+		description:
+			"The press-up done standing - for breaking up long periods of sitting",
+		instructions: [
+			"Stand with feet shoulder-width apart",
+			"Place both palms on your lower back, fingers pointing down",
+			"Lean backwards over your hands as far as comfortable",
+			"Keep your knees straight",
+			"Hold 1-2 seconds, return upright. Repeat 10 times",
+		],
+		tips: ["Use every hour or two if you sit for work"],
+		isCustom: false,
+	},
+
+	// --- FLEXION-BIAS ---------------------------------------------------------
+	{
+		id: "ex_single_knee_to_chest",
+		name: "Single Knee to Chest",
+		category: "flexibility",
+		primaryMuscles: ["lower_back"],
+		secondaryMuscles: ["glutes"],
+		equipment: [],
+		difficulty: "beginner",
+		description: "Gentle one-sided lumbar and glute stretch",
+		instructions: [
+			"Lie on your back with both knees bent, feet flat",
+			"Draw one knee up toward your chest with both hands",
+			"Keep the other foot flat on the floor",
+			"Hold 20-30 seconds, breathing normally",
+			"Lower slowly and repeat on the other side. 3 each side",
+		],
+		tips: ["Pull to a comfortable stretch, never into leg pain"],
+		isCustom: false,
+	},
+	{
+		id: "ex_double_knee_to_chest",
+		name: "Double Knee to Chest",
+		category: "flexibility",
+		primaryMuscles: ["lower_back"],
+		secondaryMuscles: ["glutes"],
+		equipment: [],
+		difficulty: "beginner",
+		description: "Symmetrical lumbar flexion stretch, often relieving in stenosis",
+		instructions: [
+			"Lie on your back with knees bent",
+			"Bring both knees up toward your chest",
+			"Hold behind the thighs rather than on top of the knees",
+			"Hold 20-30 seconds",
+			"Lower one leg at a time. Repeat 3 times",
+		],
+		tips: [
+			"Holding behind the thighs keeps the knee joint out of it",
+			"Skip this one if extension is what relieves your leg pain",
+		],
+		isCustom: false,
+	},
+	{
+		id: "ex_pelvic_tilt",
+		name: "Posterior Pelvic Tilt",
+		category: "strength",
+		primaryMuscles: ["abs", "lower_back"],
+		secondaryMuscles: ["glutes"],
+		equipment: [],
+		difficulty: "beginner",
+		description:
+			"Teaches control of the pelvis - the foundation for every stability drill below",
+		instructions: [
+			"Lie on your back, knees bent, feet flat",
+			"Flatten your lower back gently into the floor by tilting the pelvis",
+			"You should feel the lower abdominals switch on",
+			"Hold 5 seconds, then release to neutral",
+			"Repeat 10-15 times",
+		],
+		tips: [
+			"Small movement - nothing should lift off the floor",
+			"Do not hold your breath",
+		],
+		isCustom: false,
+	},
+
+	// --- STABILITY (McGill Big 3) ---------------------------------------------
+	{
+		id: "ex_mcgill_curl_up",
+		name: "McGill Curl-Up",
+		category: "strength",
+		primaryMuscles: ["abs"],
+		secondaryMuscles: ["obliques", "lower_back"],
+		equipment: [],
+		difficulty: "beginner",
+		description:
+			"Abdominal endurance without loading the spine into flexion, unlike a sit-up",
+		instructions: [
+			"Lie on your back. Bend ONE knee, leave the other leg straight",
+			"Slide both hands under your lower back to preserve its natural arch",
+			"Lift only your head and shoulder blades a few centimetres",
+			"Do NOT flatten your back or tuck your chin to your chest",
+			"Hold 10 seconds, rest, repeat. Try 6, then 4, then 2 reps",
+		],
+		tips: [
+			"Height is not the point - keeping the spine still is",
+			"Switch which knee is bent halfway through",
+		],
+		isCustom: false,
+	},
+	{
+		id: "ex_side_plank_modified",
+		name: "Side Plank (Knees Bent)",
+		category: "strength",
+		primaryMuscles: ["obliques"],
+		secondaryMuscles: ["abs", "lower_back", "glutes"],
+		equipment: [],
+		difficulty: "beginner",
+		description:
+			"Trains the lateral core with far less spinal load than a full side plank",
+		instructions: [
+			"Lie on your side, knees bent to 90 degrees",
+			"Prop up on your elbow, directly under your shoulder",
+			"Lift your hips so knees, hips and shoulders form a straight line",
+			"Hold 10 seconds, breathing normally, then lower",
+			"Repeat 6, then 4, then 2 reps per side",
+		],
+		tips: [
+			"Progress to straight legs only once 10 seconds is easy",
+			"Keep the top hip stacked over the bottom, not rolled back",
+		],
+		isCustom: false,
+	},
+	{
+		id: "ex_bird_dog",
+		name: "Bird Dog",
+		category: "strength",
+		primaryMuscles: ["lower_back"],
+		secondaryMuscles: ["abs", "glutes", "shoulders"],
+		equipment: [],
+		difficulty: "beginner",
+		description:
+			"Trains the back extensors to hold a neutral spine while the limbs move",
+		instructions: [
+			"Start on hands and knees, spine neutral",
+			"Extend one arm forward and the opposite leg back",
+			"Reach long rather than lifting high - do not let the back arch",
+			"Hold 10 seconds, return, then sweep the hand and knee together",
+			"Repeat 6, then 4, then 2 reps per side",
+		],
+		tips: [
+			"A glass of water balanced on your lower back should not spill",
+			"Squeeze the glute of the extended leg rather than lifting with the back",
+		],
+		isCustom: false,
+	},
+	{
+		id: "ex_dead_bug",
+		name: "Dead Bug",
+		category: "strength",
+		primaryMuscles: ["abs"],
+		secondaryMuscles: ["lower_back", "obliques"],
+		equipment: [],
+		difficulty: "beginner",
+		description:
+			"Anti-extension core control - keeps the lower back pinned while limbs move",
+		instructions: [
+			"Lie on your back, arms straight up, hips and knees bent to 90 degrees",
+			"Press your lower back gently into the floor and keep it there",
+			"Lower one arm overhead and the opposite leg toward the floor",
+			"Go only as far as you can WITHOUT the back lifting",
+			"Return and alternate. 8-10 per side",
+		],
+		tips: [
+			"The moment the lower back arches off the floor, you have gone too far",
+			"Exhale as the limbs lower",
+		],
+		isCustom: false,
+	},
+
+	// --- NERVE GLIDES ---------------------------------------------------------
+	{
+		id: "ex_sciatic_nerve_glide_supine",
+		name: "Sciatic Nerve Glide (Lying)",
+		category: "flexibility",
+		primaryMuscles: ["hamstrings"],
+		secondaryMuscles: ["calves", "lower_back"],
+		equipment: [],
+		difficulty: "beginner",
+		description:
+			"Slides the sciatic nerve through its sheath - a mobility drill, not a stretch",
+		instructions: [
+			"Lie on your back and bring one knee toward your chest, hands behind the thigh",
+			"Slowly straighten that knee until you feel a light pull, then bend it again",
+			"Add the ankle: point the toes as you straighten, pull them back as you bend",
+			"Move continuously and gently, about one second each way",
+			"10-15 slow repetitions per side",
+		],
+		tips: [
+			"NEVER hold the end position - a nerve glide moves, it does not stretch",
+			"Mild pulling is fine; tingling, burning or shooting pain means back off",
+			"Less is more here - stop before symptoms build",
+		],
+		isCustom: false,
+	},
+	{
+		id: "ex_sciatic_nerve_glide_seated",
+		name: "Sciatic Nerve Glide (Seated)",
+		category: "flexibility",
+		primaryMuscles: ["hamstrings"],
+		secondaryMuscles: ["calves", "lower_back"],
+		equipment: ["chair"],
+		difficulty: "beginner",
+		description: "The same glide done at a desk, for breaking up long sitting",
+		instructions: [
+			"Sit upright on a chair, both feet flat",
+			"Slump slightly and tuck your chin to your chest",
+			"Straighten one knee and pull the toes back toward you",
+			"At the same time lift your head up - this unloads the nerve at the top",
+			"Reverse both together. 10-15 slow repetitions per side",
+		],
+		tips: [
+			"Head and foot move in opposition - that is what makes it a glide",
+			"Keep it smooth and small",
+		],
+		isCustom: false,
+	},
+
+	// --- HIP / GLUTE ----------------------------------------------------------
+	{
+		id: "ex_piriformis_stretch",
+		name: "Piriformis Stretch (Figure 4)",
+		category: "flexibility",
+		primaryMuscles: ["glutes"],
+		secondaryMuscles: ["lower_back"],
+		equipment: [],
+		difficulty: "beginner",
+		description:
+			"Targets the deep glute muscle that can compress the sciatic nerve directly",
+		instructions: [
+			"Lie on your back with both knees bent",
+			"Cross one ankle over the opposite thigh, just above the knee",
+			"Reach through and pull the supporting thigh toward you",
+			"Keep your head and shoulders relaxed on the floor",
+			"Hold 30 seconds, 3 times per side",
+		],
+		tips: [
+			"Stretch should be felt deep in the buttock, not in the lower back",
+			"Can also be done seated in a chair if lying down is uncomfortable",
+		],
+		isCustom: false,
+	},
+	{
+		id: "ex_glute_bridge",
+		name: "Glute Bridge",
+		category: "strength",
+		primaryMuscles: ["glutes"],
+		secondaryMuscles: ["hamstrings", "lower_back"],
+		equipment: [],
+		difficulty: "beginner",
+		description:
+			"Builds the hip extensors so they, rather than the lower back, do the work",
+		instructions: [
+			"Lie on your back, knees bent, feet flat and hip-width apart",
+			"Brace your core lightly, then squeeze your glutes to lift the hips",
+			"Stop when hips, knees and shoulders form a straight line",
+			"Do not arch the lower back to get higher",
+			"Hold 2 seconds, lower slowly. 10-15 reps",
+		],
+		tips: [
+			"Drive through the heels",
+			"If you feel it in the lower back rather than the glutes, lift less high",
+		],
+		isCustom: false,
+	},
+	{
+		id: "ex_clamshell",
+		name: "Clamshell",
+		category: "strength",
+		primaryMuscles: ["glutes"],
+		secondaryMuscles: [],
+		equipment: [],
+		difficulty: "beginner",
+		description:
+			"Strengthens the hip abductors that stabilise the pelvis when you walk",
+		instructions: [
+			"Lie on your side, hips and knees bent, knees stacked",
+			"Rest your head on your lower arm, feet together",
+			"Keeping the feet touching, lift the top knee away",
+			"Do NOT let your pelvis roll backwards - only the knee moves",
+			"Lower with control. 15 reps per side",
+		],
+		tips: [
+			"Put your top hand on your hip to feel if it rolls",
+			"Add a band above the knees once 15 reps is easy",
+		],
+		isCustom: false,
+	},
+	{
+		id: "ex_kneeling_hip_flexor_stretch",
+		name: "Kneeling Hip Flexor Stretch",
+		category: "flexibility",
+		primaryMuscles: ["quadriceps"],
+		secondaryMuscles: ["lower_back", "glutes"],
+		equipment: [],
+		difficulty: "beginner",
+		description:
+			"Tight hip flexors tilt the pelvis forward and load the lumbar spine",
+		instructions: [
+			"Kneel on one knee with the other foot flat in front, both at 90 degrees",
+			"Tuck your pelvis under (posterior tilt) BEFORE moving forward",
+			"Shift your weight gently forward until you feel the front of the rear hip",
+			"Keep your torso upright and ribs down",
+			"Hold 30 seconds, 3 times per side",
+		],
+		tips: [
+			"The pelvic tuck is what makes this work - without it you just arch the back",
+			"Pad the down knee with a cushion",
+		],
+		isCustom: false,
+	},
+	{
+		id: "ex_supine_hamstring_stretch_strap",
+		name: "Supine Hamstring Stretch (Strap)",
+		category: "flexibility",
+		primaryMuscles: ["hamstrings"],
+		secondaryMuscles: ["calves"],
+		equipment: ["strap"],
+		difficulty: "beginner",
+		description:
+			"Hamstring length without the forward bend a standing toe-touch demands",
+		instructions: [
+			"Lie on your back, loop a strap or towel around one foot",
+			"Keep the other leg bent with the foot flat on the floor",
+			"Raise the strapped leg, keeping the knee softly straight",
+			"Pull only to a mild stretch behind the thigh",
+			"Hold 30 seconds, 3 times per side",
+		],
+		tips: [
+			"Lying down keeps the lumbar spine neutral - a standing toe-touch does not",
+			"If this reproduces leg symptoms, use the nerve glide instead",
+		],
+		isCustom: false,
+	},
+	{
+		id: "ex_walking_rehab",
+		name: "Walking (Graded)",
+		category: "cardio",
+		primaryMuscles: ["legs"],
+		secondaryMuscles: ["glutes", "lower_back"],
+		equipment: [],
+		difficulty: "beginner",
+		description:
+			"The single most consistently recommended activity for lumbar pain",
+		instructions: [
+			"Walk on level ground at a comfortable, unhurried pace",
+			"Start with whatever you can manage without symptoms building - even 5 minutes",
+			"Add roughly 10% per week rather than jumping ahead on a good day",
+			"Several short walks beat one long one early on",
+			"Keep an upright posture; avoid long strides",
+		],
+		tips: [
+			"Pace it by what you feel LATER that day, not during",
+			"If standing and walking make leg symptoms worse, try shorter bouts",
+		],
+		isCustom: false,
+	},
 ];
 
 // Add targetMuscles computed property to all exercises
@@ -1058,6 +1518,55 @@ export const searchExercises = (query: string): Exercise[] => {
 			ex.category.includes(lowerQuery)
 	);
 };
+
+/**
+ * Lumbar / sciatica rehab exercises, grouped by directional preference.
+ *
+ * These are NOT interchangeable. Disc-related sciatica usually settles with
+ * extension and flares with flexion; spinal stenosis is usually the reverse.
+ * Working out which group you are in is the point of the centralisation rule
+ * written into each exercise: symptoms retreating up out of the leg means keep
+ * going, symptoms travelling further down it means stop.
+ */
+export const REHAB_GROUPS = {
+	extension: [
+		"ex_prone_lying",
+		"ex_prone_on_elbows",
+		"ex_prone_press_up",
+		"ex_standing_extension",
+	],
+	flexion: [
+		"ex_single_knee_to_chest",
+		"ex_double_knee_to_chest",
+		"ex_pelvic_tilt",
+	],
+	stability: [
+		"ex_mcgill_curl_up",
+		"ex_side_plank_modified",
+		"ex_bird_dog",
+		"ex_dead_bug",
+	],
+	nerveGlides: [
+		"ex_sciatic_nerve_glide_supine",
+		"ex_sciatic_nerve_glide_seated",
+	],
+	hipAndGlute: [
+		"ex_piriformis_stretch",
+		"ex_glute_bridge",
+		"ex_clamshell",
+		"ex_kneeling_hip_flexor_stretch",
+		"ex_supine_hamstring_stretch_strap",
+	],
+	conditioning: ["ex_walking_rehab"],
+} as const;
+
+/** Every lumbar/sciatica exercise, in the order the groups are listed above. */
+export const REHAB_EXERCISE_IDS: string[] = Object.values(REHAB_GROUPS).flat();
+
+export const getRehabExercises = (): Exercise[] =>
+	REHAB_EXERCISE_IDS.map((id) => EXERCISE_DATABASE.find((e) => e.id === id)!).filter(
+		Boolean
+	);
 
 // Muscle group info for visualization
 export const MUSCLE_GROUP_INFO: Record<

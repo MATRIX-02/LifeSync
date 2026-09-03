@@ -35,5 +35,14 @@ export const objectToCamelCase = (obj: any): any => {
 	}, {});
 };
 
-export const generateId = (prefix: string = "id") =>
-	`${prefix}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+/**
+ * Workout rows live in Postgres columns typed `uuid` - workout_sessions.id,
+ * personal_records.id, body_measurements.id and body_weights.id all are. The
+ * old `${prefix}_${Date.now()}_${random}` scheme was rejected outright:
+ *
+ *     22P02  invalid input syntax for type uuid: "session_1788453315128_ovwol5qj3"
+ *
+ * Finance and study hit this and were fixed; workout was missed. Re-exported
+ * from the one shared generator rather than being a fourth copy of it.
+ */
+export { generateUUID as generateId } from "../../utils/uuid";

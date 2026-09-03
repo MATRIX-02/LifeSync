@@ -26,6 +26,7 @@ import {
 	Text,
 	TextInput,
 	TouchableOpacity,
+	TouchableWithoutFeedback,
 	View,
 } from "react-native";
 
@@ -1702,14 +1703,25 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
 	isEditing,
 	onSave,
 }) => (
-	<View>
-		<Modal
-			visible={visible}
-			animationType="slide"
-			presentationStyle="pageSheet"
-		>
-			<View style={styles.modalContainer}>
-				<View style={styles.modalHeader}>
+	// A bottom sheet, matching Add Transaction. `presentationStyle="pageSheet"`
+	// made this a full-screen page, which is far more than a four-field form
+	// needs. transparent + an overlay keeps the list visible behind it.
+	<Modal
+		visible={visible}
+		animationType="slide"
+		transparent
+		onRequestClose={onClose}
+	>
+		<View style={styles.sheetOverlay}>
+			{/* Backdrop is a sibling of the sheet: wrapping the sheet would make it
+			    claim the touch responder and swallow scrolls started on its own
+			    background. */}
+			<TouchableWithoutFeedback onPress={onClose}>
+				<View style={StyleSheet.absoluteFill} />
+			</TouchableWithoutFeedback>
+
+			<View style={styles.sheetContainer}>
+				<View style={styles.sheetHeader}>
 					<TouchableOpacity onPress={onClose}>
 						<Text style={styles.modalCancel}>Cancel</Text>
 					</TouchableOpacity>
@@ -1723,10 +1735,7 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
 					</TouchableOpacity>
 				</View>
 
-				<ScrollView
-					style={styles.modalContent}
-					showsVerticalScrollIndicator={false}
-				>
+				<ScrollView showsVerticalScrollIndicator={false}>
 					<View style={styles.formGroup}>
 						<Text style={styles.formLabel}>Group Name</Text>
 						<TextInput
@@ -1816,8 +1825,8 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
 					</View>
 				</ScrollView>
 			</View>
-		</Modal>
-	</View>
+		</View>
+	</Modal>
 );
 
 // Add Non-User Member Modal
@@ -1902,87 +1911,91 @@ const InviteUserModal: React.FC<InviteUserModalProps> = ({
 	const [localQuery, setLocalQuery] = useState(searchQuery);
 
 	return (
-		<Modal
-			visible={visible}
-			animationType="slide"
-			presentationStyle="pageSheet"
-		>
-			<View style={styles.modalContainer}>
-				<View style={styles.modalHeader}>
-					<TouchableOpacity onPress={onClose}>
-						<Text style={styles.modalCancel}>Cancel</Text>
-					</TouchableOpacity>
-					<Text style={styles.modalTitle}>Invite User</Text>
-					<View style={{ width: 60 }} />
-				</View>
+		<Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
+			<View style={styles.sheetOverlay}>
+				{/* Backdrop is a sibling of the sheet, so it cannot claim the
+				    touch responder and swallow the sheet's own scrolls. */}
+				<TouchableWithoutFeedback onPress={onClose}>
+					<View style={StyleSheet.absoluteFill} />
+				</TouchableWithoutFeedback>
 
-				<View style={styles.modalContent}>
-					<View style={styles.searchContainer}>
-						<Ionicons name="search" size={20} color={theme.textMuted} />
-						<TextInput
-							style={styles.searchInput}
-							placeholder="Search by name or email address"
-							placeholderTextColor={theme.textMuted}
-							value={localQuery}
-							onChangeText={setLocalQuery}
-							keyboardType="email-address"
-							autoCapitalize="none"
-							returnKeyType="search"
-							onSubmitEditing={() => onSearch(localQuery)}
-						/>
-						<TouchableOpacity
-							style={styles.searchButton}
-							onPress={() => onSearch(localQuery)}
-						>
-							{isSearching ? (
-								<ActivityIndicator size="small" color="#FFF" />
-							) : (
-								<Text style={styles.searchButtonText}>Search</Text>
-							)}
+				<View style={styles.sheetContainer}>
+					<View style={styles.sheetHeader}>
+						<TouchableOpacity onPress={onClose}>
+							<Text style={styles.modalCancel}>Cancel</Text>
 						</TouchableOpacity>
+						<Text style={styles.modalTitle}>Invite User</Text>
+						<View style={{ width: 60 }} />
 					</View>
 
-					{(searchResults?.length ?? 0) > 0 ? (
-						<View style={styles.searchResults}>
-							{searchResults?.map((user) => (
-								<View key={user.id} style={styles.searchResultItem}>
-									<View style={styles.searchResultAvatar}>
-										<Text style={styles.searchResultInitial}>
-											{getInitials(user.full_name || user.email)}
-										</Text>
-									</View>
-									<View style={styles.searchResultInfo}>
-										<Text style={styles.searchResultName}>
-											{user.full_name || "LifeSync User"}
-										</Text>
-										<Text style={styles.searchResultEmail}>{user.email}</Text>
-									</View>
-									<TouchableOpacity
-										style={styles.inviteButton}
-										onPress={() =>
-											onInvite(user.id, user.full_name || user.email)
-										}
-									>
-										<Text style={styles.inviteButtonText}>Invite</Text>
-									</TouchableOpacity>
-								</View>
-							))}
-						</View>
-					) : (
-						<View style={styles.searchEmpty}>
-							<Ionicons
-								name="people-outline"
-								size={48}
-								color={theme.textMuted}
+					<View>
+						<View style={styles.searchContainer}>
+							<Ionicons name="search" size={20} color={theme.textMuted} />
+							<TextInput
+								style={styles.searchInput}
+								placeholder="Search by name or email address"
+								placeholderTextColor={theme.textMuted}
+								value={localQuery}
+								onChangeText={setLocalQuery}
+								keyboardType="email-address"
+								autoCapitalize="none"
+								returnKeyType="search"
+								onSubmitEditing={() => onSearch(localQuery)}
 							/>
-							<Text style={styles.searchEmptyText}>
-								Search for users by name or email
-							</Text>
-							<Text style={styles.searchEmptySubtext}>
-								Find LifeSync users to add to your group
-							</Text>
+							<TouchableOpacity
+								style={styles.searchButton}
+								onPress={() => onSearch(localQuery)}
+							>
+								{isSearching ? (
+									<ActivityIndicator size="small" color="#FFF" />
+								) : (
+									<Text style={styles.searchButtonText}>Search</Text>
+								)}
+							</TouchableOpacity>
 						</View>
-					)}
+
+						{(searchResults?.length ?? 0) > 0 ? (
+							<View style={styles.searchResults}>
+								{searchResults?.map((user) => (
+									<View key={user.id} style={styles.searchResultItem}>
+										<View style={styles.searchResultAvatar}>
+											<Text style={styles.searchResultInitial}>
+												{getInitials(user.full_name || user.email)}
+											</Text>
+										</View>
+										<View style={styles.searchResultInfo}>
+											<Text style={styles.searchResultName}>
+												{user.full_name || "LifeSync User"}
+											</Text>
+											<Text style={styles.searchResultEmail}>{user.email}</Text>
+										</View>
+										<TouchableOpacity
+											style={styles.inviteButton}
+											onPress={() =>
+												onInvite(user.id, user.full_name || user.email)
+											}
+										>
+											<Text style={styles.inviteButtonText}>Invite</Text>
+										</TouchableOpacity>
+									</View>
+								))}
+							</View>
+						) : (
+							<View style={styles.searchEmpty}>
+								<Ionicons
+									name="people-outline"
+									size={48}
+									color={theme.textMuted}
+								/>
+								<Text style={styles.searchEmptyText}>
+									Search for users by name or email
+								</Text>
+								<Text style={styles.searchEmptySubtext}>
+									Find LifeSync users to add to your group
+								</Text>
+							</View>
+						)}
+					</View>
 				</View>
 			</View>
 		</Modal>
@@ -2171,272 +2184,276 @@ const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
 	};
 
 	return (
-		<Modal
-			visible={visible}
-			animationType="slide"
-			presentationStyle="pageSheet"
-		>
-			<View style={styles.modalContainer}>
-				<View style={styles.modalHeader}>
-					<TouchableOpacity onPress={onClose}>
-						<Text style={styles.modalCancel}>Cancel</Text>
-					</TouchableOpacity>
-					<Text style={styles.modalTitle}>Add Expense</Text>
-					<TouchableOpacity onPress={validateAndAdd}>
-						<Text style={styles.modalSave}>Add</Text>
-					</TouchableOpacity>
-				</View>
+		<Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
+			<View style={styles.sheetOverlay}>
+				{/* Backdrop is a sibling of the sheet, so it cannot claim the
+				    touch responder and swallow the sheet's own scrolls. */}
+				<TouchableWithoutFeedback onPress={onClose}>
+					<View style={StyleSheet.absoluteFill} />
+				</TouchableWithoutFeedback>
 
-				<ScrollView style={styles.modalContent}>
-					<View style={styles.formGroup}>
-						<Text style={styles.formLabel}>Description</Text>
-						<TextInput
-							style={styles.formInput}
-							placeholder="e.g., Dinner, Groceries, Uber"
-							placeholderTextColor={theme.textMuted}
-							value={expenseForm.description}
-							onChangeText={(text) =>
-								setExpenseForm((prev) => ({ ...prev, description: text }))
-							}
-						/>
+				<View style={styles.sheetContainer}>
+					<View style={styles.sheetHeader}>
+						<TouchableOpacity onPress={onClose}>
+							<Text style={styles.modalCancel}>Cancel</Text>
+						</TouchableOpacity>
+						<Text style={styles.modalTitle}>Add Expense</Text>
+						<TouchableOpacity onPress={validateAndAdd}>
+							<Text style={styles.modalSave}>Add</Text>
+						</TouchableOpacity>
 					</View>
 
-					<View style={styles.formGroup}>
-						<Text style={styles.formLabel}>Amount</Text>
-						<View style={styles.amountInputContainer}>
-							<Text style={styles.currencyPrefix}>{currency}</Text>
+					<ScrollView showsVerticalScrollIndicator={false}>
+						<View style={styles.formGroup}>
+							<Text style={styles.formLabel}>Description</Text>
 							<TextInput
-								style={styles.amountInput}
-								placeholder="0.00"
+								style={styles.formInput}
+								placeholder="e.g., Dinner, Groceries, Uber"
 								placeholderTextColor={theme.textMuted}
-								value={expenseForm.amount}
+								value={expenseForm.description}
 								onChangeText={(text) =>
-									setExpenseForm((prev) => ({ ...prev, amount: text }))
+									setExpenseForm((prev) => ({ ...prev, description: text }))
 								}
-								keyboardType="decimal-pad"
 							/>
 						</View>
-					</View>
 
-					<View style={styles.formGroup}>
-						<Text style={styles.formLabel}>Paid By</Text>
-						<ScrollView horizontal showsHorizontalScrollIndicator={false}>
-							{members.map((member) => (
-								<TouchableOpacity
-									key={member.id}
-									style={[
-										styles.payerOption,
-										expenseForm.paidBy === member.id &&
-											styles.payerOptionSelected,
-									]}
-									onPress={() =>
-										setExpenseForm((prev) => ({ ...prev, paidBy: member.id }))
+						<View style={styles.formGroup}>
+							<Text style={styles.formLabel}>Amount</Text>
+							<View style={styles.amountInputContainer}>
+								<Text style={styles.currencyPrefix}>{currency}</Text>
+								<TextInput
+									style={styles.amountInput}
+									placeholder="0.00"
+									placeholderTextColor={theme.textMuted}
+									value={expenseForm.amount}
+									onChangeText={(text) =>
+										setExpenseForm((prev) => ({ ...prev, amount: text }))
 									}
-								>
-									<View
-										style={[
-											styles.payerAvatar,
-											expenseForm.paidBy === member.id &&
-												styles.payerAvatarSelected,
-										]}
-									>
-										<Text
-											style={[
-												styles.payerInitial,
-												expenseForm.paidBy === member.id &&
-													styles.payerInitialSelected,
-											]}
-										>
-											{getInitials(member.name)}
-										</Text>
-									</View>
-									<Text
-										style={[
-											styles.payerName,
-											expenseForm.paidBy === member.id &&
-												styles.payerNameSelected,
-										]}
-									>
-										{member.isCurrentUser ? "You" : member.name}
-									</Text>
-								</TouchableOpacity>
-							))}
-						</ScrollView>
-					</View>
-
-					<View style={styles.formGroup}>
-						<Text style={styles.formLabel}>Category</Text>
-						<View style={styles.categoryGrid}>
-							{EXPENSE_CATEGORIES.map((cat) => (
-								<TouchableOpacity
-									key={cat.value}
-									style={[
-										styles.categoryOption,
-										expenseForm.category === cat.value && {
-											borderColor: theme.primary,
-											backgroundColor: theme.primary + "10",
-										},
-									]}
-									onPress={() =>
-										setExpenseForm((prev) => ({ ...prev, category: cat.value }))
-									}
-								>
-									<Ionicons
-										name={cat.icon as any}
-										size={20}
-										color={
-											expenseForm.category === cat.value
-												? theme.primary
-												: theme.textSecondary
-										}
-									/>
-									<Text
-										style={[
-											styles.categoryLabel,
-											expenseForm.category === cat.value && {
-												color: theme.primary,
-											},
-										]}
-									>
-										{cat.label}
-									</Text>
-								</TouchableOpacity>
-							))}
+									keyboardType="decimal-pad"
+								/>
+							</View>
 						</View>
-					</View>
 
-					<View style={styles.formGroup}>
-						<Text style={styles.formLabel}>Split Type</Text>
-						<View style={styles.splitTypeRow}>
-							{(["equal", "exact", "percentage", "shares"] as const).map(
-								(type) => (
+						<View style={styles.formGroup}>
+							<Text style={styles.formLabel}>Paid By</Text>
+							<ScrollView horizontal showsHorizontalScrollIndicator={false}>
+								{members.map((member) => (
 									<TouchableOpacity
-										key={type}
+										key={member.id}
 										style={[
-											styles.splitTypeOption,
-											expenseForm.splitType === type &&
-												styles.splitTypeOptionSelected,
+											styles.payerOption,
+											expenseForm.paidBy === member.id &&
+												styles.payerOptionSelected,
 										]}
 										onPress={() =>
-											setExpenseForm((prev) => ({ ...prev, splitType: type }))
+											setExpenseForm((prev) => ({ ...prev, paidBy: member.id }))
 										}
 									>
-										<Text
+										<View
 											style={[
-												styles.splitTypeText,
-												expenseForm.splitType === type &&
-													styles.splitTypeTextSelected,
+												styles.payerAvatar,
+												expenseForm.paidBy === member.id &&
+													styles.payerAvatarSelected,
 											]}
 										>
-											{type.charAt(0).toUpperCase() + type.slice(1)}
+											<Text
+												style={[
+													styles.payerInitial,
+													expenseForm.paidBy === member.id &&
+														styles.payerInitialSelected,
+												]}
+											>
+												{getInitials(member.name)}
+											</Text>
+										</View>
+										<Text
+											style={[
+												styles.payerName,
+												expenseForm.paidBy === member.id &&
+													styles.payerNameSelected,
+											]}
+										>
+											{member.isCurrentUser ? "You" : member.name}
 										</Text>
 									</TouchableOpacity>
-								)
-							)}
+								))}
+							</ScrollView>
 						</View>
-					</View>
 
-					{expenseForm.splitType === "equal" && amount > 0 && (
-						<View style={styles.splitPreview}>
-							<Text style={styles.splitPreviewTitle}>Split Preview</Text>
-							{members.map((member) => (
-								<View key={member.id} style={styles.splitPreviewRow}>
-									<Text style={styles.splitPreviewName}>
-										{member.isCurrentUser ? "You" : member.name}
-									</Text>
-									<Text style={styles.splitPreviewAmount}>
-										{currency}
-										{splitAmount.toFixed(2)}
-									</Text>
-								</View>
-							))}
-						</View>
-					)}
-
-					{expenseForm.splitType === "exact" && (
-						<View style={styles.customSplits}>
-							<Text style={styles.customSplitsTitle}>Exact Amounts</Text>
-							{members.map((member) => (
-								<View key={member.id} style={styles.customSplitRow}>
-									<Text style={styles.customSplitName}>
-										{member.isCurrentUser ? "You" : member.name}
-									</Text>
-									<View style={styles.customSplitInput}>
-										<Text style={styles.customSplitCurrency}>{currency}</Text>
-										<TextInput
-											style={styles.customSplitField}
-											placeholder="0.00"
-											placeholderTextColor={theme.textMuted}
-											value={expenseForm.customSplits[member.id] || ""}
-											onChangeText={(text) =>
-												handleExactChange(member.id, text)
-											}
-											keyboardType="decimal-pad"
-										/>
-									</View>
-								</View>
-							))}
-						</View>
-					)}
-
-					{expenseForm.splitType === "percentage" && (
-						<View style={styles.customSplits}>
-							<Text style={styles.customSplitsTitle}>Percentages</Text>
-							{members.map((member) => (
-								<View key={member.id} style={styles.customSplitRow}>
-									<Text style={styles.customSplitName}>
-										{member.isCurrentUser ? "You" : member.name}
-									</Text>
-									<View style={styles.customSplitInput}>
-										<TextInput
-											style={styles.customSplitField}
-											placeholder="0"
-											placeholderTextColor={theme.textMuted}
-											value={expenseForm.customSplits[member.id] || ""}
-											onChangeText={(text) =>
-												handlePercentageChange(member.id, text)
-											}
-											keyboardType={
-												Platform.OS === "ios" ? "decimal-pad" : "numeric"
+						<View style={styles.formGroup}>
+							<Text style={styles.formLabel}>Category</Text>
+							<View style={styles.categoryGrid}>
+								{EXPENSE_CATEGORIES.map((cat) => (
+									<TouchableOpacity
+										key={cat.value}
+										style={[
+											styles.categoryOption,
+											expenseForm.category === cat.value && {
+												borderColor: theme.primary,
+												backgroundColor: theme.primary + "10",
+											},
+										]}
+										onPress={() =>
+											setExpenseForm((prev) => ({ ...prev, category: cat.value }))
+										}
+									>
+										<Ionicons
+											name={cat.icon as any}
+											size={20}
+											color={
+												expenseForm.category === cat.value
+													? theme.primary
+													: theme.textSecondary
 											}
 										/>
-										<Text style={styles.customSplitCurrency}>%</Text>
-									</View>
-								</View>
-							))}
+										<Text
+											style={[
+												styles.categoryLabel,
+												expenseForm.category === cat.value && {
+													color: theme.primary,
+												},
+											]}
+										>
+											{cat.label}
+										</Text>
+									</TouchableOpacity>
+								))}
+							</View>
 						</View>
-					)}
 
-					{expenseForm.splitType === "shares" && (
-						<View style={styles.customSplits}>
-							<Text style={styles.customSplitsTitle}>
-								Shares (e.g., 2 shares = 2x)
-							</Text>
-							{members.map((member) => (
-								<View key={member.id} style={styles.customSplitRow}>
-									<Text style={styles.customSplitName}>
-										{member.isCurrentUser ? "You" : member.name}
-									</Text>
-									<View style={styles.customSplitInput}>
-										<TextInput
-											style={styles.customSplitField}
-											placeholder="1"
-											placeholderTextColor={theme.textMuted}
-											value={expenseForm.customSplits[member.id] || "1"}
-											onChangeText={(text) =>
-												handleSharesChange(member.id, text)
+						<View style={styles.formGroup}>
+							<Text style={styles.formLabel}>Split Type</Text>
+							<View style={styles.splitTypeRow}>
+								{(["equal", "exact", "percentage", "shares"] as const).map(
+									(type) => (
+										<TouchableOpacity
+											key={type}
+											style={[
+												styles.splitTypeOption,
+												expenseForm.splitType === type &&
+													styles.splitTypeOptionSelected,
+											]}
+											onPress={() =>
+												setExpenseForm((prev) => ({ ...prev, splitType: type }))
 											}
-											keyboardType="number-pad"
-										/>
-										<Text style={styles.customSplitCurrency}>shares</Text>
-									</View>
-								</View>
-							))}
+										>
+											<Text
+												style={[
+													styles.splitTypeText,
+													expenseForm.splitType === type &&
+														styles.splitTypeTextSelected,
+												]}
+											>
+												{type.charAt(0).toUpperCase() + type.slice(1)}
+											</Text>
+										</TouchableOpacity>
+									)
+								)}
+							</View>
 						</View>
-					)}
 
-					<View style={{ height: 50 }} />
-				</ScrollView>
+						{expenseForm.splitType === "equal" && amount > 0 && (
+							<View style={styles.splitPreview}>
+								<Text style={styles.splitPreviewTitle}>Split Preview</Text>
+								{members.map((member) => (
+									<View key={member.id} style={styles.splitPreviewRow}>
+										<Text style={styles.splitPreviewName}>
+											{member.isCurrentUser ? "You" : member.name}
+										</Text>
+										<Text style={styles.splitPreviewAmount}>
+											{currency}
+											{splitAmount.toFixed(2)}
+										</Text>
+									</View>
+								))}
+							</View>
+						)}
+
+						{expenseForm.splitType === "exact" && (
+							<View style={styles.customSplits}>
+								<Text style={styles.customSplitsTitle}>Exact Amounts</Text>
+								{members.map((member) => (
+									<View key={member.id} style={styles.customSplitRow}>
+										<Text style={styles.customSplitName}>
+											{member.isCurrentUser ? "You" : member.name}
+										</Text>
+										<View style={styles.customSplitInput}>
+											<Text style={styles.customSplitCurrency}>{currency}</Text>
+											<TextInput
+												style={styles.customSplitField}
+												placeholder="0.00"
+												placeholderTextColor={theme.textMuted}
+												value={expenseForm.customSplits[member.id] || ""}
+												onChangeText={(text) =>
+													handleExactChange(member.id, text)
+												}
+												keyboardType="decimal-pad"
+											/>
+										</View>
+									</View>
+								))}
+							</View>
+						)}
+
+						{expenseForm.splitType === "percentage" && (
+							<View style={styles.customSplits}>
+								<Text style={styles.customSplitsTitle}>Percentages</Text>
+								{members.map((member) => (
+									<View key={member.id} style={styles.customSplitRow}>
+										<Text style={styles.customSplitName}>
+											{member.isCurrentUser ? "You" : member.name}
+										</Text>
+										<View style={styles.customSplitInput}>
+											<TextInput
+												style={styles.customSplitField}
+												placeholder="0"
+												placeholderTextColor={theme.textMuted}
+												value={expenseForm.customSplits[member.id] || ""}
+												onChangeText={(text) =>
+													handlePercentageChange(member.id, text)
+												}
+												keyboardType={
+													Platform.OS === "ios" ? "decimal-pad" : "numeric"
+												}
+											/>
+											<Text style={styles.customSplitCurrency}>%</Text>
+										</View>
+									</View>
+								))}
+							</View>
+						)}
+
+						{expenseForm.splitType === "shares" && (
+							<View style={styles.customSplits}>
+								<Text style={styles.customSplitsTitle}>
+									Shares (e.g., 2 shares = 2x)
+								</Text>
+								{members.map((member) => (
+									<View key={member.id} style={styles.customSplitRow}>
+										<Text style={styles.customSplitName}>
+											{member.isCurrentUser ? "You" : member.name}
+										</Text>
+										<View style={styles.customSplitInput}>
+											<TextInput
+												style={styles.customSplitField}
+												placeholder="1"
+												placeholderTextColor={theme.textMuted}
+												value={expenseForm.customSplits[member.id] || "1"}
+												onChangeText={(text) =>
+													handleSharesChange(member.id, text)
+												}
+												keyboardType="number-pad"
+											/>
+											<Text style={styles.customSplitCurrency}>shares</Text>
+										</View>
+									</View>
+								))}
+							</View>
+						)}
+
+						<View style={{ height: 50 }} />
+					</ScrollView>
+				</View>
 			</View>
 		</Modal>
 	);
@@ -2478,69 +2495,45 @@ const SettlementModal: React.FC<SettlementModalProps> = ({
 	currency,
 	styles,
 }) => (
-	<Modal visible={visible} animationType="slide" presentationStyle="pageSheet">
-		<View style={styles.modalContainer}>
-			<View style={styles.modalHeader}>
-				<TouchableOpacity onPress={onClose}>
-					<Text style={styles.modalCancel}>Cancel</Text>
-				</TouchableOpacity>
-				<Text style={styles.modalTitle}>Record Settlement</Text>
-				<TouchableOpacity onPress={onSettle}>
-					<Text style={styles.modalSave}>Save</Text>
-				</TouchableOpacity>
-			</View>
+	<Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
+		<View style={styles.sheetOverlay}>
+			{/* Backdrop is a sibling of the sheet, so it cannot claim the
+			    touch responder and swallow the sheet's own scrolls. */}
+			<TouchableWithoutFeedback onPress={onClose}>
+				<View style={StyleSheet.absoluteFill} />
+			</TouchableWithoutFeedback>
 
-			<ScrollView style={styles.modalContent}>
-				<View style={styles.formGroup}>
-					<Text style={styles.formLabel}>Who is paying?</Text>
-					<View style={styles.memberSelectList}>
-						{members.map((member) => (
-							<TouchableOpacity
-								key={member.id}
-								style={[
-									styles.memberSelectOption,
-									settlementForm.from === member.id &&
-										styles.memberSelectOptionSelected,
-								]}
-								onPress={() =>
-									setSettlementForm((prev) => ({ ...prev, from: member.id }))
-								}
-							>
-								<Text
-									style={[
-										styles.memberSelectText,
-										settlementForm.from === member.id &&
-											styles.memberSelectTextSelected,
-									]}
-								>
-									{member.isCurrentUser ? "You" : member.name}
-								</Text>
-							</TouchableOpacity>
-						))}
-					</View>
+			<View style={styles.sheetContainer}>
+				<View style={styles.sheetHeader}>
+					<TouchableOpacity onPress={onClose}>
+						<Text style={styles.modalCancel}>Cancel</Text>
+					</TouchableOpacity>
+					<Text style={styles.modalTitle}>Record Settlement</Text>
+					<TouchableOpacity onPress={onSettle}>
+						<Text style={styles.modalSave}>Save</Text>
+					</TouchableOpacity>
 				</View>
 
-				<View style={styles.formGroup}>
-					<Text style={styles.formLabel}>Who are they paying?</Text>
-					<View style={styles.memberSelectList}>
-						{members
-							.filter((m) => m.id !== settlementForm.from)
-							.map((member) => (
+				<ScrollView showsVerticalScrollIndicator={false}>
+					<View style={styles.formGroup}>
+						<Text style={styles.formLabel}>Who is paying?</Text>
+						<View style={styles.memberSelectList}>
+							{members.map((member) => (
 								<TouchableOpacity
 									key={member.id}
 									style={[
 										styles.memberSelectOption,
-										settlementForm.to === member.id &&
+										settlementForm.from === member.id &&
 											styles.memberSelectOptionSelected,
 									]}
 									onPress={() =>
-										setSettlementForm((prev) => ({ ...prev, to: member.id }))
+										setSettlementForm((prev) => ({ ...prev, from: member.id }))
 									}
 								>
 									<Text
 										style={[
 											styles.memberSelectText,
-											settlementForm.to === member.id &&
+											settlementForm.from === member.id &&
 												styles.memberSelectTextSelected,
 										]}
 									>
@@ -2548,39 +2541,71 @@ const SettlementModal: React.FC<SettlementModalProps> = ({
 									</Text>
 								</TouchableOpacity>
 							))}
+						</View>
 					</View>
-				</View>
 
-				<View style={styles.formGroup}>
-					<Text style={styles.formLabel}>Amount</Text>
-					<View style={styles.amountInputContainer}>
-						<Text style={styles.currencyPrefix}>{currency}</Text>
+					<View style={styles.formGroup}>
+						<Text style={styles.formLabel}>Who are they paying?</Text>
+						<View style={styles.memberSelectList}>
+							{members
+								.filter((m) => m.id !== settlementForm.from)
+								.map((member) => (
+									<TouchableOpacity
+										key={member.id}
+										style={[
+											styles.memberSelectOption,
+											settlementForm.to === member.id &&
+												styles.memberSelectOptionSelected,
+										]}
+										onPress={() =>
+											setSettlementForm((prev) => ({ ...prev, to: member.id }))
+										}
+									>
+										<Text
+											style={[
+												styles.memberSelectText,
+												settlementForm.to === member.id &&
+													styles.memberSelectTextSelected,
+											]}
+										>
+											{member.isCurrentUser ? "You" : member.name}
+										</Text>
+									</TouchableOpacity>
+								))}
+						</View>
+					</View>
+
+					<View style={styles.formGroup}>
+						<Text style={styles.formLabel}>Amount</Text>
+						<View style={styles.amountInputContainer}>
+							<Text style={styles.currencyPrefix}>{currency}</Text>
+							<TextInput
+								style={styles.amountInput}
+								placeholder="0.00"
+								placeholderTextColor={theme.textMuted}
+								value={settlementForm.amount}
+								onChangeText={(text) =>
+									setSettlementForm((prev) => ({ ...prev, amount: text }))
+								}
+								keyboardType="decimal-pad"
+							/>
+						</View>
+					</View>
+
+					<View style={styles.formGroup}>
+						<Text style={styles.formLabel}>Note (Optional)</Text>
 						<TextInput
-							style={styles.amountInput}
-							placeholder="0.00"
+							style={styles.formInput}
+							placeholder="e.g., Venmo payment"
 							placeholderTextColor={theme.textMuted}
-							value={settlementForm.amount}
+							value={settlementForm.note}
 							onChangeText={(text) =>
-								setSettlementForm((prev) => ({ ...prev, amount: text }))
+								setSettlementForm((prev) => ({ ...prev, note: text }))
 							}
-							keyboardType="decimal-pad"
 						/>
 					</View>
-				</View>
-
-				<View style={styles.formGroup}>
-					<Text style={styles.formLabel}>Note (Optional)</Text>
-					<TextInput
-						style={styles.formInput}
-						placeholder="e.g., Venmo payment"
-						placeholderTextColor={theme.textMuted}
-						value={settlementForm.note}
-						onChangeText={(text) =>
-							setSettlementForm((prev) => ({ ...prev, note: text }))
-						}
-					/>
-				</View>
-			</ScrollView>
+				</ScrollView>
+			</View>
 		</View>
 	</Modal>
 );
@@ -2603,56 +2628,64 @@ const InvitationsModal: React.FC<InvitationsModalProps> = ({
 	theme,
 	styles,
 }) => (
-	<Modal visible={visible} animationType="slide" presentationStyle="pageSheet">
-		<View style={styles.modalContainer}>
-			<View style={styles.modalHeader}>
-				<TouchableOpacity onPress={onClose}>
-					<Text style={styles.modalCancel}>Close</Text>
-				</TouchableOpacity>
-				<Text style={styles.modalTitle}>Group Invitations</Text>
-				<View style={{ width: 60 }} />
-			</View>
+	<Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
+		<View style={styles.sheetOverlay}>
+			{/* Backdrop is a sibling of the sheet, so it cannot claim the
+			    touch responder and swallow the sheet's own scrolls. */}
+			<TouchableWithoutFeedback onPress={onClose}>
+				<View style={StyleSheet.absoluteFill} />
+			</TouchableWithoutFeedback>
 
-			<ScrollView style={styles.modalContent}>
-				{invitations.length === 0 ? (
-					<View style={styles.emptyInvitations}>
-						<Ionicons name="mail-outline" size={48} color={theme.textMuted} />
-						<Text style={styles.emptyInvitationsText}>
-							No pending invitations
-						</Text>
-					</View>
-				) : (
-					invitations.map((invitation) => (
-						<View key={invitation.id} style={styles.invitationCard}>
-							<View style={styles.invitationInfo}>
-								<Text style={styles.invitationGroupName}>
-									{invitation.groupName}
-								</Text>
-								<Text style={styles.invitationInvitedBy}>
-									Invited by {invitation.invitedByName}
-								</Text>
-								<Text style={styles.invitationExpiry}>
-									Expires {new Date(invitation.expiresAt).toLocaleDateString()}
-								</Text>
-							</View>
-							<View style={styles.invitationActions}>
-								<TouchableOpacity
-									style={styles.declineButton}
-									onPress={() => onRespond(invitation, false)}
-								>
-									<Text style={styles.declineButtonText}>Decline</Text>
-								</TouchableOpacity>
-								<TouchableOpacity
-									style={styles.acceptButton}
-									onPress={() => onRespond(invitation, true)}
-								>
-									<Text style={styles.acceptButtonText}>Accept</Text>
-								</TouchableOpacity>
-							</View>
+			<View style={styles.sheetContainer}>
+				<View style={styles.sheetHeader}>
+					<TouchableOpacity onPress={onClose}>
+						<Text style={styles.modalCancel}>Close</Text>
+					</TouchableOpacity>
+					<Text style={styles.modalTitle}>Group Invitations</Text>
+					<View style={{ width: 60 }} />
+				</View>
+
+				<ScrollView showsVerticalScrollIndicator={false}>
+					{invitations.length === 0 ? (
+						<View style={styles.emptyInvitations}>
+							<Ionicons name="mail-outline" size={48} color={theme.textMuted} />
+							<Text style={styles.emptyInvitationsText}>
+								No pending invitations
+							</Text>
 						</View>
-					))
-				)}
-			</ScrollView>
+					) : (
+						invitations.map((invitation) => (
+							<View key={invitation.id} style={styles.invitationCard}>
+								<View style={styles.invitationInfo}>
+									<Text style={styles.invitationGroupName}>
+										{invitation.groupName}
+									</Text>
+									<Text style={styles.invitationInvitedBy}>
+										Invited by {invitation.invitedByName}
+									</Text>
+									<Text style={styles.invitationExpiry}>
+										Expires {new Date(invitation.expiresAt).toLocaleDateString()}
+									</Text>
+								</View>
+								<View style={styles.invitationActions}>
+									<TouchableOpacity
+										style={styles.declineButton}
+										onPress={() => onRespond(invitation, false)}
+									>
+										<Text style={styles.declineButtonText}>Decline</Text>
+									</TouchableOpacity>
+									<TouchableOpacity
+										style={styles.acceptButton}
+										onPress={() => onRespond(invitation, true)}
+									>
+										<Text style={styles.acceptButtonText}>Accept</Text>
+									</TouchableOpacity>
+								</View>
+							</View>
+						))
+					)}
+				</ScrollView>
+			</View>
 		</View>
 	</Modal>
 );
@@ -3375,9 +3408,29 @@ const createStyles = (theme: Theme) =>
 			fontWeight: "600",
 		},
 		// Modal Styles
-		modalContainer: {
+		// Bottom-sheet variant, mirroring AddTransactionModal.
+		sheetOverlay: {
 			flex: 1,
+			backgroundColor: "rgba(0,0,0,0.5)",
+			justifyContent: "flex-end",
+		},
+		sheetContainer: {
 			backgroundColor: theme.background,
+			borderTopLeftRadius: 24,
+			borderTopRightRadius: 24,
+			maxHeight: "90%",
+			paddingHorizontal: 20,
+			paddingTop: 8,
+			paddingBottom: 20,
+		},
+		sheetHeader: {
+			flexDirection: "row",
+			justifyContent: "space-between",
+			alignItems: "center",
+			paddingVertical: 14,
+			marginBottom: 8,
+			borderBottomWidth: 1,
+			borderBottomColor: theme.border,
 		},
 		modalHeader: {
 			flexDirection: "row",
@@ -3401,10 +3454,6 @@ const createStyles = (theme: Theme) =>
 			fontSize: 16,
 			fontWeight: "600",
 			color: theme.primary,
-		},
-		modalContent: {
-			flex: 1,
-			padding: 16,
 		},
 		// Form Styles
 		formGroup: {

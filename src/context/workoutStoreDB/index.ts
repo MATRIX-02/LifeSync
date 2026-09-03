@@ -4,6 +4,7 @@
  */
 import { create } from "zustand";
 import { supabase as supabaseClient } from "../../config/supabase";
+import { estimateSessionCalories } from "../../utils/calories";
 import { generateId, objectToCamelCase, objectToSnakeCase } from "./helpers";
 import type {
 	PersonalRecord,
@@ -183,7 +184,7 @@ export const useWorkoutStore = create<WorkoutStore>()((set, get) => ({
 		const { userId, bodyMeasurements } = get();
 		if (!userId) return;
 
-		const newMeasurement = { ...measurement, id: generateId("measurement") };
+		const newMeasurement = { ...measurement, id: generateId() };
 		const dbData = objectToSnakeCase({ ...newMeasurement, user_id: userId });
 		const { error } = await supabase.from("body_measurements").insert(dbData);
 		if (error) {
@@ -243,7 +244,7 @@ export const useWorkoutStore = create<WorkoutStore>()((set, get) => ({
 		if (!userId) return;
 
 		const newWeight = {
-			id: generateId("weight"),
+			id: generateId(),
 			date: new Date().toISOString(),
 			weight,
 			unit,
@@ -297,7 +298,9 @@ export const useWorkoutStore = create<WorkoutStore>()((set, get) => ({
 		const dbData = objectToSnakeCase({
 			...plan,
 			user_id: userId,
-			exercises: JSON.stringify(plan.exercises || []),
+			// `exercises` is a jsonb column: pass the array. JSON.stringify would
+			// store a JSON *string* inside the jsonb instead.
+			exercises: plan.exercises || [],
 		});
 		const { error } = await supabase.from("workout_plans").insert(dbData);
 		if (error) {
@@ -313,7 +316,7 @@ export const useWorkoutStore = create<WorkoutStore>()((set, get) => ({
 
 		const dbUpdates: any = { ...updates, updated_at: new Date().toISOString() };
 		if (updates.exercises)
-			dbUpdates.exercises = JSON.stringify(updates.exercises);
+			dbUpdates.exercises = updates.exercises;
 
 		const { error } = await supabase
 			.from("workout_plans")
@@ -371,10 +374,10 @@ export const useWorkoutStore = create<WorkoutStore>()((set, get) => ({
 			if (plan?.exercises.length) {
 				exercises = plan.exercises.map((ex, i) => ({
 					...ex,
-					id: generateId("ex"),
+					id: generateId(),
 					sets: ex.sets.map((s, j) => ({
 						...s,
-						id: generateId("set"),
+						id: generateId(),
 						completed: false,
 					})),
 				}));
@@ -383,7 +386,7 @@ export const useWorkoutStore = create<WorkoutStore>()((set, get) => ({
 
 		set({
 			currentSession: {
-				id: generateId("session"),
+				id: generateId(),
 				planId,
 				planName,
 				name: planName || "Quick Workout",
@@ -463,7 +466,7 @@ export const useWorkoutStore = create<WorkoutStore>()((set, get) => ({
 						if (ex.id !== exerciseId) return ex;
 						const lastSet = ex.sets[ex.sets.length - 1];
 						const newSet: WorkoutSet = {
-							id: generateId("set"),
+							id: generateId(),
 							setNumber: ex.sets.length + 1,
 							reps: lastSet?.reps || 10,
 							weight: lastSet?.weight || 0,
@@ -493,7 +496,7 @@ export const useWorkoutStore = create<WorkoutStore>()((set, get) => ({
 		}),
 
 	finishWorkout: async (notes, mood, energyLevel) => {
-		const { currentSession, userId, workoutSessions } = get();
+		const { currentSession, userId, workoutSessions, fitnessProfile } = get();
 		if (!currentSession || !userId) return;
 
 		const endTime = new Date();
@@ -507,11 +510,20 @@ export const useWorkoutStore = create<WorkoutStore>()((set, get) => ({
 			});
 		});
 
+		// Computed once, at finish, so the figure stays put if body weight later
+		// changes. Stays undefined - not 0 - when there is no weight to scale by.
+		const caloriesBurned = estimateSessionCalories(
+			{ duration, exercises: currentSession.exercises },
+			fitnessProfile?.weight,
+			fitnessProfile?.fitnessLevel
+		);
+
 		const completedSession: WorkoutSession = {
 			...currentSession,
 			endTime,
 			duration,
 			totalVolume,
+			caloriesBurned,
 			notes,
 			mood,
 			energyLevel,
@@ -520,7 +532,7 @@ export const useWorkoutStore = create<WorkoutStore>()((set, get) => ({
 		const dbData = objectToSnakeCase({
 			...completedSession,
 			user_id: userId,
-			exercises: JSON.stringify(completedSession.exercises),
+			exercises: completedSession.exercises || [],
 		});
 
 		const { error } = await supabase.from("workout_sessions").insert(dbData);
@@ -543,7 +555,7 @@ export const useWorkoutStore = create<WorkoutStore>()((set, get) => ({
 		const dbData = objectToSnakeCase({
 			...session,
 			user_id: userId,
-			exercises: JSON.stringify(session.exercises || []),
+			exercises: session.exercises || [],
 		});
 		const { error } = await supabase.from("workout_sessions").insert(dbData);
 		if (error) {
@@ -585,7 +597,7 @@ export const useWorkoutStore = create<WorkoutStore>()((set, get) => ({
 		);
 		if (!existingPR || value > existingPR.value) {
 			const newPR: PersonalRecord = {
-				id: generateId("pr"),
+				id: generateId(),
 				exerciseId,
 				exerciseName,
 				type,
@@ -734,7 +746,7 @@ export const useWorkoutStore = create<WorkoutStore>()((set, get) => ({
 					objectToSnakeCase({
 						...p,
 						user_id: userId,
-						exercises: JSON.stringify(p.exercises || []),
+						exercises: p.exercises || [],
 					})
 				);
 				await supabase
@@ -746,7 +758,7 @@ export const useWorkoutStore = create<WorkoutStore>()((set, get) => ({
 					objectToSnakeCase({
 						...s,
 						user_id: userId,
-						exercises: JSON.stringify(s.exercises || []),
+						exercises: s.exercises || [],
 					})
 				);
 				for (let i = 0; i < sessionsData.length; i += 200) {

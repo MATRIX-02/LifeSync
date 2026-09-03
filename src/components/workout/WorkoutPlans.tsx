@@ -4,6 +4,7 @@ import { Alert } from "@/src/components/CustomAlert";
 import { SubscriptionCheckResult } from "@/src/components/PremiumFeatureGate";
 import { Theme } from "@/src/context/themeContext";
 import { useWorkoutStore } from "@/src/context/workoutStoreDB";
+import { generateUUID } from "@/src/utils/uuid";
 import {
 	EXERCISE_DATABASE,
 	getExercisesByMuscle,
@@ -110,12 +111,16 @@ export default function WorkoutPlans({
 			return;
 		}
 
+		// Only fields that are real columns on workout_plans. Both stores spread
+		// whatever they are given straight into the PostgREST payload, and one
+		// unknown key rejects the ENTIRE request - `targetMuscles` used to ride
+		// along here and there is no such column (it belongs to custom_exercises).
 		const planData = {
 			name: planName.trim(),
 			description: planDescription.trim() || undefined,
 			exercises: selectedExercises,
 			estimatedDuration: selectedExercises.length * 5 + 10, // Rough estimate
-			targetMuscles: [
+			targetMuscleGroups: [
 				...new Set(selectedExercises.flatMap((e) => e.targetMuscles)),
 			],
 		};
@@ -125,16 +130,17 @@ export default function WorkoutPlans({
 		} else {
 			addWorkoutPlan({
 				...planData,
-				id: Date.now().toString(),
+				// workout_plans.id is a uuid column - Date.now().toString() is
+				// rejected with 22P02 before the row is ever written.
+				id: generateUUID(),
 				category: "strength",
 				// Default to the user's own level instead of always "intermediate".
 				difficulty: fitnessProfile?.fitnessLevel || "intermediate",
-				targetMuscleGroups: planData.targetMuscles,
 				isCustom: true,
 				color: "#6366F1",
 				icon: "barbell",
-				createdAt: new Date().toISOString() as any,
-				updatedAt: new Date().toISOString() as any,
+				createdAt: new Date(),
+				updatedAt: new Date(),
 				isActive: false,
 			});
 		}
@@ -344,7 +350,7 @@ export default function WorkoutPlans({
 			"ex_bench_press",
 			"ex_incline_bench",
 			"ex_overhead_press",
-			"ex_tricep_dips",
+			"ex_tricep_pushdown",
 			"ex_cable_crossover",
 		],
 		"Pull Day": [
@@ -355,14 +361,14 @@ export default function WorkoutPlans({
 			"ex_barbell_curl",
 		],
 		"Leg Day": [
-			"ex_squat",
+			"ex_barbell_squat",
 			"ex_leg_press",
 			"ex_lunges",
 			"ex_leg_curl",
-			"ex_calf_raise",
+			"ex_calf_raises",
 		],
 		"Full Body": [
-			"ex_squat",
+			"ex_barbell_squat",
 			"ex_bench_press",
 			"ex_deadlift",
 			"ex_overhead_press",
@@ -377,9 +383,8 @@ export default function WorkoutPlans({
 		],
 		"Core Focus": [
 			"ex_plank",
-			"ex_bicycle_crunch",
-			"ex_cable_crunch",
-			"ex_leg_raise",
+			"ex_crunches",
+			"ex_hanging_leg_raise",
 			"ex_russian_twist",
 		],
 		// Yoga Templates
@@ -441,9 +446,115 @@ export default function WorkoutPlans({
 			"ex_mountain_climbers",
 			"ex_high_knees",
 			"ex_plank",
-			"ex_bicycle_crunch",
+			"ex_crunches",
 			"ex_jumping_jacks",
 		],
+		// Lower Back / Sciatica.
+		//
+		// "Extension" and "Flexion" are deliberately separate templates rather
+		// than one combined routine: disc-related sciatica usually settles with
+		// extension and flares with flexion, and spinal stenosis is the reverse.
+		// Putting both in one plan would guarantee half of it works against you.
+		// The remaining three are spine-neutral and suit either.
+		"Sciatica Daily Relief": [
+			"ex_cat_cow",
+			"ex_single_knee_to_chest",
+			"ex_piriformis_stretch",
+			"ex_sciatic_nerve_glide_supine",
+			"ex_glute_bridge",
+			"ex_childs_pose",
+		],
+		"Back Extension (McKenzie)": [
+			"ex_prone_lying",
+			"ex_prone_on_elbows",
+			"ex_prone_press_up",
+			"ex_standing_extension",
+			"ex_glute_bridge",
+		],
+		"Back Flexion Relief": [
+			"ex_pelvic_tilt",
+			"ex_single_knee_to_chest",
+			"ex_double_knee_to_chest",
+			"ex_childs_pose",
+			"ex_piriformis_stretch",
+		],
+		"Lumbar Core Stability": [
+			"ex_pelvic_tilt",
+			"ex_mcgill_curl_up",
+			"ex_side_plank_modified",
+			"ex_bird_dog",
+			"ex_dead_bug",
+			"ex_glute_bridge",
+		],
+		"Nerve Glides & Mobility": [
+			"ex_cat_cow",
+			"ex_sciatic_nerve_glide_supine",
+			"ex_sciatic_nerve_glide_seated",
+			"ex_piriformis_stretch",
+			"ex_supine_hamstring_stretch_strap",
+			"ex_kneeling_hip_flexor_stretch",
+		],
+		"Hip & Glute Support": [
+			"ex_clamshell",
+			"ex_glute_bridge",
+			"ex_bird_dog",
+			"ex_kneeling_hip_flexor_stretch",
+			"ex_piriformis_stretch",
+			"ex_walking_rehab",
+		],
+	};
+
+	/**
+	 * Per-exercise set/rep prescriptions, overriding the 3x10 default.
+	 *
+	 * 3x10 is meaningless for most rehab work: a stretch is a timed hold, a
+	 * nerve glide is one continuous set of slow repetitions and must NOT be
+	 * held, and the McGill Big 3 are deliberately a DESCENDING pyramid (6/4/2
+	 * holds) rather than straight sets - the endurance comes from the repeated
+	 * short holds, not from grinding out the last rep of a fixed set.
+	 *
+	 * `reps` and `duration` are mutually exclusive; `duration` is seconds.
+	 * Anything absent from this table keeps the old 3x10 behaviour.
+	 */
+	const TEMPLATE_PRESCRIPTIONS: Record<
+		string,
+		{ setReps?: number[]; setDurations?: number[]; rest: number }
+	> = {
+		// Sustained positions
+		ex_prone_lying: { setDurations: [180], rest: 0 },
+		ex_prone_on_elbows: { setDurations: [120], rest: 30 },
+		// Repeated extension: little and often, no hold
+		ex_prone_press_up: { setReps: [10, 10, 10], rest: 30 },
+		ex_standing_extension: { setReps: [10], rest: 0 },
+
+		// Flexion stretches
+		ex_single_knee_to_chest: { setDurations: [30, 30, 30], rest: 15 },
+		ex_double_knee_to_chest: { setDurations: [30, 30, 30], rest: 15 },
+		ex_pelvic_tilt: { setReps: [15], rest: 30 },
+
+		// McGill Big 3 - descending pyramid of 10-second holds
+		ex_mcgill_curl_up: { setReps: [6, 4, 2], rest: 30 },
+		ex_side_plank_modified: { setReps: [6, 4, 2], rest: 30 },
+		ex_bird_dog: { setReps: [6, 4, 2], rest: 30 },
+		ex_dead_bug: { setReps: [10, 10], rest: 45 },
+
+		// Nerve glides - continuous, never held
+		ex_sciatic_nerve_glide_supine: { setReps: [12], rest: 30 },
+		ex_sciatic_nerve_glide_seated: { setReps: [12], rest: 30 },
+
+		// Hip and glute
+		ex_piriformis_stretch: { setDurations: [30, 30, 30], rest: 15 },
+		ex_glute_bridge: { setReps: [12, 12, 12], rest: 45 },
+		ex_clamshell: { setReps: [15, 15], rest: 30 },
+		ex_kneeling_hip_flexor_stretch: { setDurations: [30, 30, 30], rest: 15 },
+		ex_supine_hamstring_stretch_strap: { setDurations: [30, 30, 30], rest: 15 },
+
+		// Conditioning
+		ex_walking_rehab: { setDurations: [600], rest: 0 },
+
+		// Shared yoga poses that these plans also pull in
+		ex_cat_cow: { setReps: [12], rest: 20 },
+		ex_childs_pose: { setDurations: [60], rest: 0 },
 	};
 
 	const handleSelectTemplate = (templateName: string) => {
@@ -456,42 +567,31 @@ export default function WorkoutPlans({
 		exerciseIds.forEach((exId, index) => {
 			const exercise = EXERCISE_DATABASE.find((e) => e.id === exId);
 			if (exercise) {
+				// Fall back to the original 3x10 for anything without a prescription.
+				const rx = TEMPLATE_PRESCRIPTIONS[exId];
+				const reps = rx?.setReps;
+				const durations = rx?.setDurations;
+				const count = reps?.length ?? durations?.length ?? 3;
+
+				const sets = Array.from({ length: count }, (_, i) => ({
+					id: String(i + 1),
+					setNumber: i + 1,
+					reps: durations ? undefined : reps?.[i] ?? 10,
+					duration: durations?.[i],
+					weight: 0,
+					completed: false,
+					isWarmup: false,
+					isDropset: false,
+				}));
+
 				exercises.push({
 					id: `${Date.now()}_${index}`,
 					exerciseId: exercise.id,
 					exerciseName: exercise.name,
 					targetMuscles: exercise.targetMuscles,
-					sets: [
-						{
-							id: "1",
-							setNumber: 1,
-							reps: 10,
-							weight: 0,
-							completed: false,
-							isWarmup: false,
-							isDropset: false,
-						},
-						{
-							id: "2",
-							setNumber: 2,
-							reps: 10,
-							weight: 0,
-							completed: false,
-							isWarmup: false,
-							isDropset: false,
-						},
-						{
-							id: "3",
-							setNumber: 3,
-							reps: 10,
-							weight: 0,
-							completed: false,
-							isWarmup: false,
-							isDropset: false,
-						},
-					],
-					targetSets: 3,
-					restBetweenSets: 60,
+					sets,
+					targetSets: count,
+					restBetweenSets: rx?.rest ?? 60,
 					order: index,
 				});
 			}
@@ -746,6 +846,49 @@ export default function WorkoutPlans({
 												/>
 												<Text
 													style={[styles.templateText, { color: theme.error }]}
+												>
+													{template.name}
+												</Text>
+											</TouchableOpacity>
+										))}
+									</View>
+
+									<Text style={[styles.editorSectionTitle, { marginTop: 20 }]}>
+										🩺 Lower Back &amp; Sciatica
+									</Text>
+									{/* Extension and Flexion are opposites on purpose - see the
+									    note above TEMPLATE_EXERCISES. */}
+									<Text style={styles.templateNote}>
+										Pick the direction that eases your leg pain. Symptoms moving
+										UP out of the leg is good; further DOWN it means stop.
+									</Text>
+									<View style={styles.templateGrid}>
+										{[
+											{ name: "Sciatica Daily Relief", icon: "medkit" },
+											{ name: "Back Extension (McKenzie)", icon: "arrow-up" },
+											{ name: "Back Flexion Relief", icon: "arrow-down" },
+											{ name: "Lumbar Core Stability", icon: "shield-checkmark" },
+											{ name: "Nerve Glides & Mobility", icon: "pulse" },
+											{ name: "Hip & Glute Support", icon: "body" },
+										].map((template) => (
+											<TouchableOpacity
+												key={template.name}
+												style={[
+													styles.templateCard,
+													{ backgroundColor: theme.success + "15" },
+												]}
+												onPress={() => handleSelectTemplate(template.name)}
+											>
+												<Ionicons
+													name={template.icon as any}
+													size={18}
+													color={theme.success}
+												/>
+												<Text
+													style={[
+														styles.templateText,
+														{ color: theme.success },
+													]}
 												>
 													{template.name}
 												</Text>
@@ -1611,6 +1754,12 @@ const createStyles = (theme: Theme) =>
 		},
 		templateTextActive: {
 			color: "#FFFFFF",
+		},
+		templateNote: {
+			fontSize: 12,
+			lineHeight: 17,
+			color: theme.textMuted,
+			marginBottom: 10,
 		},
 		selectedSection: {
 			marginBottom: 12,

@@ -2,7 +2,6 @@
 
 import { useSubscriptionCheck } from "@/src/components/PremiumFeatureGate";
 import {
-	DrawerEdgeSwipe,
 	SharedDrawer,
 } from "@/src/components/SharedDrawer";
 import { useFinanceStore } from "@/src/context/financeStoreDB";
@@ -221,12 +220,6 @@ export default function FinanceScreen() {
 			/>
 
 			{/* Main Content */}
-			{/* Swipe from the left edge to open the drawer */}
-			<DrawerEdgeSwipe
-				drawerAnim={drawerAnim}
-				drawerOpen={drawerOpen}
-				setDrawerOpen={setDrawerOpen}
-			/>
 
 			{/* Drawer Overlay */}
 			{drawerOpen && (

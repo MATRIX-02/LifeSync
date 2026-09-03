@@ -3,7 +3,6 @@
 import { useSubscriptionCheck } from "@/src/components/PremiumFeatureGate";
 import { SafeAreaView } from "react-native-safe-area-context";
 import {
-	DrawerEdgeSwipe,
 	SharedDrawer,
 } from "@/src/components/SharedDrawer";
 import {
@@ -214,12 +213,6 @@ export default function WorkoutTrackerScreen() {
 				backgroundColor={theme.background}
 			/>
 
-			{/* Swipe from the left edge to open the drawer */}
-			<DrawerEdgeSwipe
-				drawerAnim={drawerAnim}
-				drawerOpen={drawerOpen}
-				setDrawerOpen={setDrawerOpen}
-			/>
 
 			{/* Drawer Overlay */}
 			{drawerOpen && (

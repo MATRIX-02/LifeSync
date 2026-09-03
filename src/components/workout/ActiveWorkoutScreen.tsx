@@ -85,19 +85,34 @@ export default function ActiveWorkoutScreen({
 		return () => clearInterval(timer);
 	}, [currentSession]);
 
-	// Rest timer
+	// Rest timer countdown.
+	//
+	// `restTimer` is deliberately NOT a dependency. It used to be, which meant
+	// the interval was torn down and rebuilt on every tick - and, worse, the
+	// effect's own `restTimer <= 0` guard returned early once the count reached
+	// zero, so the branch that cleared the banner was never reached and 0:00
+	// stayed on screen forever. Dismissal is now a separate effect below.
 	useEffect(() => {
-		if (!isRestTimerRunning || restTimer === null || restTimer <= 0) return;
+		if (!isRestTimerRunning) return;
 
 		const timer = setInterval(() => {
-			setRestTimer((prev) => {
-				if (prev && prev > 0) return prev - 1;
-				setIsRestTimerRunning(false);
-				return null;
-			});
+			setRestTimer((prev) => (prev === null ? null : Math.max(0, prev - 1)));
 		}, 1000);
 
 		return () => clearInterval(timer);
+	}, [isRestTimerRunning]);
+
+	// Dismiss the banner once the countdown lands on zero, after holding 0:00
+	// briefly so it is actually seen rather than skipping from 0:01 to gone.
+	useEffect(() => {
+		if (!isRestTimerRunning || restTimer === null || restTimer > 0) return;
+
+		const done = setTimeout(() => {
+			setIsRestTimerRunning(false);
+			setRestTimer(null);
+		}, 1200);
+
+		return () => clearTimeout(done);
 	}, [isRestTimerRunning, restTimer]);
 
 	const formatTime = (seconds: number) => {
@@ -340,14 +355,23 @@ export default function ActiveWorkoutScreen({
 
 			{/* Rest Timer Banner */}
 			{isRestTimerRunning && restTimer !== null && (
-				<View style={styles.restTimerBanner}>
+				<View
+					style={[
+						styles.restTimerBanner,
+						restTimer === 0 && { backgroundColor: theme.success },
+					]}
+				>
 					<View style={styles.restTimerContent}>
-						<Text style={styles.restTimerLabel}>Rest Time</Text>
+						<Text style={styles.restTimerLabel}>
+							{restTimer === 0 ? "Rest complete" : "Rest Time"}
+						</Text>
 						<Text style={styles.restTimerValue}>{formatTime(restTimer)}</Text>
 					</View>
-					<TouchableOpacity onPress={stopRestTimer} style={styles.skipButton}>
-						<Text style={styles.skipButtonText}>Skip</Text>
-					</TouchableOpacity>
+					{restTimer > 0 && (
+						<TouchableOpacity onPress={stopRestTimer} style={styles.skipButton}>
+							<Text style={styles.skipButtonText}>Skip</Text>
+						</TouchableOpacity>
+					)}
 				</View>
 			)}
 

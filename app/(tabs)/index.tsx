@@ -30,7 +30,6 @@ import Svg, { Circle } from "react-native-svg";
 
 import { useSubscriptionCheck } from "@/src/components/PremiumFeatureGate";
 import {
-	DrawerEdgeSwipe,
 	SharedDrawer,
 } from "@/src/components/SharedDrawer";
 import { useAuthStore } from "@/src/context/authStore";
@@ -453,12 +452,6 @@ export default function DashboardScreen() {
 				backgroundColor={theme.background}
 			/>
 
-			{/* Swipe from the left edge to open the drawer */}
-			<DrawerEdgeSwipe
-				drawerAnim={drawerAnim}
-				drawerOpen={drawerOpen}
-				setDrawerOpen={setDrawerOpen}
-			/>
 
 			{/* Drawer Overlay */}
 			{drawerOpen && (

@@ -11,7 +11,8 @@ import {
 	EXERCISE_DATABASE,
 	MUSCLE_GROUP_INFO,
 } from "@/src/data/exerciseDatabase";
-import { MuscleGroup } from "@/src/types/workout";
+import { Exercise, MuscleGroup } from "@/src/types/workout";
+import { generateUUID } from "@/src/utils/uuid";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useRouter } from "expo-router";
 import React, { useCallback, useEffect, useState } from "react";
@@ -284,8 +285,12 @@ export default function WorkoutDashboard({
 			return;
 		}
 
-		const newExercise: any = {
-			id: `custom_${Date.now()}`,
+		// Every key here becomes a column in the PostgREST payload, and one
+		// unknown key rejects the whole insert. `muscleGroup` and `isCompound`
+		// were not columns, and custom_exercises.id is a uuid - so this write
+		// could never have succeeded.
+		const newExercise: Exercise = {
+			id: generateUUID(),
 			name: customExerciseName.trim(),
 			category: customExerciseCategory,
 			primaryMuscles: customExerciseMuscles,
@@ -296,9 +301,6 @@ export default function WorkoutDashboard({
 			description: customExerciseDescription.trim() || "Custom exercise",
 			instructions: [],
 			isCustom: true,
-			muscleGroup: customExerciseMuscles[0] || "chest",
-			isCompound: customExerciseMuscles.length > 1,
-			createdAt: new Date().toISOString(),
 		};
 
 		addCustomExercise(newExercise);

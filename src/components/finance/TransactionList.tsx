@@ -1,6 +1,7 @@
 // Transaction List - Full transaction history with filters
 
 import { Alert } from "@/src/components/CustomAlert";
+import AddTransactionModal from "@/src/components/finance/AddTransactionModal";
 import { SubscriptionCheckResult } from "@/src/components/PremiumFeatureGate";
 import { useFinanceStore } from "@/src/context/financeStoreDB";
 import {
@@ -37,8 +38,47 @@ interface TransactionListProps {
 }
 
 type FilterType = "all" | "income" | "expense" | "transfer";
-type SortType = "date" | "amount" | "category";
 type DateFilter = "all" | "today" | "week" | "month" | "year";
+
+/**
+ * Local calendar date as "YYYY-MM-DD", the same format Transaction.date uses.
+ *
+ * toISOString() returns UTC, so in IST (+05:30) everything before 05:30 local
+ * reports YESTERDAY - which made the "Today" heading and the Today filter
+ * attach to the wrong day for the first few hours of every morning.
+ */
+const toDateKey = (d: Date): string =>
+	`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
+		d.getDate()
+	).padStart(2, "0")}`;
+
+const daysAgoKey = (days: number): string => {
+	const d = new Date();
+	d.setDate(d.getDate() - days);
+	return toDateKey(d);
+};
+
+/**
+ * Newest first: date, then time, then insertion order.
+ *
+ * The old comparator comparded date ALONE, so every transaction sharing a day
+ * kept whatever order the store happened to return - a new entry could land
+ * anywhere in today's group instead of at the top. `date` and `time` are
+ * fixed-width strings ("2026-09-03", "14:05:00"), so comparing them directly
+ * is both correct and cheaper than parsing a Date.
+ */
+const byNewestFirst = (a: Transaction, b: Transaction): number => {
+	if (a.date !== b.date) return a.date < b.date ? 1 : -1;
+	const at = a.time || "";
+	const bt = b.time || "";
+	if (at !== bt) return at < bt ? 1 : -1;
+	// Same second: fall back to when the row was written, so the order is at
+	// least stable rather than dependent on the store's fetch order.
+	const ac = a.createdAt || "";
+	const bc = b.createdAt || "";
+	if (ac !== bc) return ac < bc ? 1 : -1;
+	return 0;
+};
 
 interface GroupedTransactions {
 	date: string;
@@ -76,6 +116,7 @@ export default function TransactionList({
 		useState<Transaction | null>(null);
 	const [showEditModal, setShowEditModal] = useState(false);
 	const [selectionMode, setSelectionMode] = useState(false);
+	const [showAddTransaction, setShowAddTransaction] = useState(false);
 	const [selectedIds, setSelectedIds] = useState<string[]>([]);
 	const [editForm, setEditForm] = useState({
 		amount: "",
@@ -94,24 +135,17 @@ export default function TransactionList({
 		}
 
 		// Apply date filter
-		const now = new Date();
-		const today = now.toISOString().split("T")[0];
+		const today = toDateKey(new Date());
 		if (dateFilter === "today") {
 			filtered = filtered.filter((t) => t.date === today);
 		} else if (dateFilter === "week") {
-			const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
-				.toISOString()
-				.split("T")[0];
+			const weekAgo = daysAgoKey(7);
 			filtered = filtered.filter((t) => t.date >= weekAgo);
 		} else if (dateFilter === "month") {
-			const monthAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000)
-				.toISOString()
-				.split("T")[0];
+			const monthAgo = daysAgoKey(30);
 			filtered = filtered.filter((t) => t.date >= monthAgo);
 		} else if (dateFilter === "year") {
-			const yearAgo = new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000)
-				.toISOString()
-				.split("T")[0];
+			const yearAgo = daysAgoKey(365);
 			filtered = filtered.filter((t) => t.date >= yearAgo);
 		}
 
@@ -147,21 +181,20 @@ export default function TransactionList({
 			});
 		}
 
-		// Sort by date descending
-		filtered.sort(
-			(a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
-		);
+		// Newest first, down to the time of day.
+		filtered.sort(byNewestFirst);
 
 		// Group by date
 		const groups: Record<string, GroupedTransactions> = {};
 		filtered.forEach((t) => {
 			if (!groups[t.date]) {
-				const date = new Date(t.date);
+				// "2026-09-03" through new Date() is parsed as UTC midnight, which
+				// renders as the PREVIOUS day for anyone west of UTC. Build it from
+				// the parts instead so the weekday and day number are the real ones.
+				const [y, m, d] = t.date.split("-").map(Number);
+				const date = new Date(y, m - 1, d);
 				const isToday = t.date === today;
-				const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000)
-					.toISOString()
-					.split("T")[0];
-				const isYesterday = t.date === yesterday;
+				const isYesterday = t.date === daysAgoKey(1);
 
 				let displayDate = date.toLocaleDateString("en-US", {
 					weekday: "long",
@@ -184,9 +217,8 @@ export default function TransactionList({
 			else if (t.type === "expense") groups[t.date].totalExpense += t.amount;
 		});
 
-		return Object.values(groups).sort(
-			(a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
-		);
+		// Groups are keyed by "YYYY-MM-DD", so a plain string compare orders them.
+		return Object.values(groups).sort((a, b) => (a.date < b.date ? 1 : -1));
 	}, [
 		transactions,
 		filterType,
@@ -322,15 +354,10 @@ export default function TransactionList({
 		let accountBalance = account ? account.balance : 0;
 		let totalBalance = currentTotal;
 
-		// Sort all transactions in descending chronological order (newest first)
-		const sortedDesc = [...transactions].sort((a, b) => {
-			const da = new Date(a.date).getTime();
-			const db = new Date(b.date).getTime();
-			if (da !== db) return db - da;
-			// if same date, compare time strings
-			if (a.time !== b.time) return a.time < b.time ? 1 : -1;
-			return 0;
-		});
+		// Newest first, using the SAME comparator the list is ordered by. If the
+		// two disagree, the running balance is walked back in a different order
+		// than the rows are drawn in and same-day closing balances come out wrong.
+		const sortedDesc = [...transactions].sort(byNewestFirst);
 
 		for (const t of sortedDesc) {
 			// stop once we've reached the transaction itself
@@ -750,6 +777,28 @@ export default function TransactionList({
 				}
 			/>
 
+			{/* Add a transaction from here too, not just from the Home tab.
+			    Hidden during multi-select, where the bar owns the actions. */}
+			{!selectionMode && (
+				<TouchableOpacity
+					style={styles.addFab}
+					onPress={() => setShowAddTransaction(true)}
+					activeOpacity={0.85}
+					accessibilityLabel="Add transaction"
+				>
+					<Ionicons name="add" size={28} color="#FFF" />
+				</TouchableOpacity>
+			)}
+
+			<AddTransactionModal
+				visible={showAddTransaction}
+				onClose={() => setShowAddTransaction(false)}
+				theme={theme}
+				currency={currency}
+				subscriptionCheck={subscriptionCheck}
+				currentMonthTransactionCount={currentMonthTransactionCount}
+			/>
+
 			{/* Transaction Detail Modal */}
 			<Modal
 				visible={!!selectedTransaction}
@@ -1074,6 +1123,23 @@ const createStyles = (theme: Theme) =>
 		container: {
 			flex: 1,
 			backgroundColor: theme.background,
+		},
+		addFab: {
+			position: "absolute",
+			right: 20,
+			bottom: 24,
+			width: 56,
+			height: 56,
+			borderRadius: 28,
+			backgroundColor: theme.primary,
+			justifyContent: "center",
+			alignItems: "center",
+			// Raised above the list; the modals render above this anyway.
+			elevation: 6,
+			shadowColor: "#000",
+			shadowOpacity: 0.3,
+			shadowRadius: 6,
+			shadowOffset: { width: 0, height: 3 },
 		},
 		searchContainer: {
 			flexDirection: "row",

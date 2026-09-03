@@ -112,11 +112,18 @@ export interface WorkoutExercise {
 	supersetWith?: string;
 }
 
+/**
+ * Mirrors the `custom_exercises` table exactly.
+ *
+ * Every field here is spread into the PostgREST payload, so anything that is
+ * not a real column rejects the whole insert. `muscleGroup` and `isCompound`
+ * used to be REQUIRED by this type while having no columns behind them, which
+ * meant creating a custom exercise could never succeed. Nothing read them.
+ */
 export interface CustomExercise {
 	id: string;
 	name: string;
 	category?: string;
-	muscleGroup: string;
 	primaryMuscles: MuscleGroup[];
 	secondaryMuscles?: MuscleGroup[];
 	targetMuscles?: MuscleGroup[];
@@ -128,8 +135,7 @@ export interface CustomExercise {
 	videoUrl?: string;
 	imageUrl?: string;
 	isCustom?: boolean;
-	isCompound: boolean;
-	createdAt: string;
+	createdAt?: string;
 }
 
 export interface WorkoutPlan {

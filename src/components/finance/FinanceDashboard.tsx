@@ -1,5 +1,6 @@
 // Finance Dashboard - Main overview with quick actions
 import { Alert } from "@/src/components/CustomAlert";
+import AddTransactionModal from "@/src/components/finance/AddTransactionModal";
 import { LoadingState } from "@/src/components/LoadingState";
 import { useModuleRefresh } from "@/src/hooks/useModuleRefresh";
 import { SubscriptionCheckResult } from "@/src/components/PremiumFeatureGate";
@@ -12,7 +13,6 @@ import {
 	ExpenseCategory,
 	INCOME_CATEGORIES,
 	IncomeCategory,
-	PaymentMethod,
 	TransactionType,
 } from "@/src/types/finance";
 import Ionicons from "@expo/vector-icons/Ionicons";
@@ -67,8 +67,23 @@ export default function FinanceDashboard({
 	const styles = createStyles(theme);
 	const { refreshing, onRefresh } = useModuleRefresh("finance");
 
+	// Transactions recorded this calendar month, for the plan limit. Matches
+	// what finance.tsx passes to TransactionList, so the ceiling is the same
+	// from either entry point.
+	const currentMonthTransactionCount = useMemo(() => {
+		const now = new Date();
+		return transactions.filter((t) => {
+			const d = new Date(t.date);
+			return (
+				d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear()
+			);
+		}).length;
+	}, [transactions]);
+
 	const [showAddAccount, setShowAddAccount] = useState(false);
 	const [showAddTransaction, setShowAddTransaction] = useState(false);
+	// Only decides which tab AddTransactionModal opens on; the modal owns the
+	// rest of the form.
 	const [transactionType, setTransactionType] =
 		useState<TransactionType>("expense");
 	const [hideBalance, setHideBalance] = useState(false);
@@ -78,17 +93,6 @@ export default function FinanceDashboard({
 	const [accountType, setAccountType] = useState<Account["type"]>("bank");
 	const [accountBalance, setAccountBalance] = useState("");
 	const [accountColor, setAccountColor] = useState(COLORS[0]);
-
-	// Add Transaction Form State
-	const [amount, setAmount] = useState("");
-	const [description, setDescription] = useState("");
-	const [selectedCategory, setSelectedCategory] = useState<
-		ExpenseCategory | IncomeCategory
-	>("food");
-	const [selectedAccount, setSelectedAccount] = useState<string>("");
-	// Destination account, transfers only.
-	const [selectedToAccount, setSelectedToAccount] = useState<string>("");
-	const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("upi");
 
 	// Editing Account State
 	const [editingAccount, setEditingAccount] = useState<Account | null>(null);
@@ -164,79 +168,6 @@ export default function FinanceDashboard({
 		Alert.alert("Success", "Account added successfully!");
 	};
 
-	const handleAddTransaction = () => {
-		if (!amount || parseFloat(amount) <= 0) {
-			Alert.alert("Error", "Please enter a valid amount");
-			return;
-		}
-		if (!description.trim()) {
-			Alert.alert("Error", "Please enter a description");
-			return;
-		}
-		if (!selectedAccount) {
-			Alert.alert("Error", "Please select an account");
-			return;
-		}
-		if (transactionType === "transfer") {
-			if (!selectedToAccount) {
-				Alert.alert("Error", "Please select the account to transfer to");
-				return;
-			}
-			if (selectedToAccount === selectedAccount) {
-				Alert.alert("Error", "Source and destination accounts must differ");
-				return;
-			}
-		}
-
-		// For credit card expenses, payment method is always credit_card
-		const selectedSourceAccount = accounts.find(
-			(a) => a.id === selectedAccount
-		);
-		const finalPaymentMethod =
-			selectedSourceAccount?.type === "credit_card"
-				? "credit_card"
-				: paymentMethod;
-
-		// Validate credit card limit
-		if (selectedSourceAccount?.type === "credit_card") {
-			const creditLimit = selectedSourceAccount.creditLimit || 0;
-			const currentUsed = selectedSourceAccount.creditUsed || 0;
-			const availableCredit = creditLimit - currentUsed;
-			const transactionAmount = parseFloat(amount);
-
-			if (transactionAmount > availableCredit) {
-				Alert.alert(
-					"Credit Limit Exceeded",
-					`Available credit: ${currency}${formatAmount(
-						availableCredit
-					)}\nTrying to spend: ${currency}${formatAmount(transactionAmount)}`,
-					[{ text: "OK" }]
-				);
-				return;
-			}
-		}
-
-		addTransaction({
-			type: transactionType,
-			amount: parseFloat(amount),
-			category: selectedCategory,
-			description: description.trim(),
-			date: today,
-			time: new Date().toTimeString().split(" ")[0],
-			accountId: selectedAccount,
-			toAccountId:
-				transactionType === "transfer" ? selectedToAccount : undefined,
-			paymentMethod: finalPaymentMethod as any,
-			isRecurring: false,
-		});
-
-		setAmount("");
-		setDescription("");
-		setSelectedToAccount("");
-		setShowAddTransaction(false);
-		Alert.alert("Success", "Transaction added successfully!");
-	};
-
 	const formatAmount = (value: number) => {
 		return value.toLocaleString("en-IN", {
 			minimumFractionDigits: 0,
@@ -250,14 +181,6 @@ export default function FinanceDashboard({
 		"credit_card",
 		"wallet",
 		"investment",
-	];
-	const paymentMethods: PaymentMethod[] = [
-		"cash",
-		"credit_card",
-		"debit_card",
-		"upi",
-		"net_banking",
-		"wallet",
 	];
 
 	const startEdit = (account: Account) => {
@@ -416,7 +339,6 @@ export default function FinanceDashboard({
 					style={styles.quickAction}
 					onPress={() => {
 						setTransactionType("expense");
-						setSelectedCategory("food");
 						setShowAddTransaction(true);
 					}}
 				>
@@ -435,7 +357,6 @@ export default function FinanceDashboard({
 					style={styles.quickAction}
 					onPress={() => {
 						setTransactionType("income");
-						setSelectedCategory("salary");
 						setShowAddTransaction(true);
 					}}
 				>
@@ -963,286 +884,16 @@ export default function FinanceDashboard({
 			</Modal>
 
 			{/* Add Transaction Modal */}
-			<Modal visible={showAddTransaction} animationType="slide" transparent>
-				<View style={styles.modalOverlay}>
-					<View style={styles.modalContent}>
-						<View style={styles.modalHeader}>
-							<Text style={styles.modalTitle}>
-								Add{" "}
-								{transactionType.charAt(0).toUpperCase() +
-									transactionType.slice(1)}
-							</Text>
-							<TouchableOpacity onPress={() => setShowAddTransaction(false)}>
-								<Ionicons name="close" size={24} color={theme.text} />
-							</TouchableOpacity>
-						</View>
-
-						<ScrollView showsVerticalScrollIndicator={false}>
-							{/* Transaction Type Tabs */}
-							<View style={styles.transactionTypeTabs}>
-								{(["expense", "income", "transfer"] as TransactionType[]).map(
-									(type) => (
-										<TouchableOpacity
-											key={type}
-											style={[
-												styles.transactionTypeTab,
-												transactionType === type &&
-													styles.transactionTypeTabActive,
-											]}
-											onPress={() => {
-												setTransactionType(type);
-												if (type === "income") setSelectedCategory("salary");
-												else if (type === "expense")
-													setSelectedCategory("food");
-												else {
-													// The category picker is hidden for transfers, so
-													// pin a neutral one instead of keeping whatever the
-													// previous type had selected.
-													setSelectedCategory("other");
-													setSelectedToAccount("");
-												}
-											}}
-										>
-											<Text
-												style={[
-													styles.transactionTypeText,
-													transactionType === type &&
-														styles.transactionTypeTextActive,
-												]}
-											>
-												{type.charAt(0).toUpperCase() + type.slice(1)}
-											</Text>
-										</TouchableOpacity>
-									)
-								)}
-							</View>
-
-							<View style={styles.formGroup}>
-								<Text style={styles.formLabel}>Amount</Text>
-								<View style={styles.amountInput}>
-									<Text style={styles.currencySymbol}>{currency}</Text>
-									<TextInput
-										style={styles.amountField}
-										value={amount}
-										onChangeText={setAmount}
-										placeholder="0.00"
-										placeholderTextColor={theme.textMuted}
-										keyboardType={
-											Platform.OS === "ios" ? "decimal-pad" : "numeric"
-										}
-									/>
-								</View>
-							</View>
-
-							<View style={styles.formGroup}>
-								<Text style={styles.formLabel}>Description</Text>
-								<TextInput
-									style={styles.formInput}
-									value={description}
-									onChangeText={setDescription}
-									placeholder="What's this for?"
-									placeholderTextColor={theme.textMuted}
-								/>
-							</View>
-
-							{transactionType !== "transfer" && (
-								<View style={styles.formGroup}>
-									<Text style={styles.formLabel}>Category</Text>
-									<ScrollView horizontal showsHorizontalScrollIndicator={false}>
-										<View style={styles.categorySelector}>
-											{Object.entries(
-												transactionType === "income"
-													? INCOME_CATEGORIES
-													: EXPENSE_CATEGORIES
-											).map(([key, cat]) => (
-												<TouchableOpacity
-													key={`${transactionType}-${key}`}
-													style={[
-														styles.categoryOption,
-														selectedCategory === key && {
-															backgroundColor: cat.color + "30",
-															borderColor: cat.color,
-														},
-													]}
-													onPress={() => setSelectedCategory(key as any)}
-												>
-													<Ionicons
-														name={cat.icon as any}
-														size={20}
-														color={
-															selectedCategory === key
-																? cat.color
-																: theme.textMuted
-														}
-													/>
-													<Text
-														style={[
-															styles.categoryText,
-															selectedCategory === key && { color: cat.color },
-														]}
-														numberOfLines={1}
-													>
-														{cat.name}
-													</Text>
-												</TouchableOpacity>
-											))}
-										</View>
-									</ScrollView>
-								</View>
-							)}
-
-							<View style={styles.formGroup}>
-								<Text style={styles.formLabel}>
-									{transactionType === "transfer" ? "From Account" : "Account"}
-								</Text>
-								<View style={styles.accountSelector}>
-									{accounts.map((acc) => (
-										<TouchableOpacity
-											key={acc.id}
-											style={[
-												styles.accountOption,
-												selectedAccount === acc.id && {
-													backgroundColor: acc.color + "20",
-													borderColor: acc.color,
-												},
-											]}
-											onPress={() => setSelectedAccount(acc.id)}
-										>
-											<Text
-												style={[
-													styles.accountOptionText,
-													selectedAccount === acc.id && { color: acc.color },
-												]}
-											>
-												{acc.name}
-											</Text>
-										</TouchableOpacity>
-									))}
-								</View>
-								{accounts.length === 0 && (
-									<TouchableOpacity
-										style={styles.addAccountHint}
-										onPress={() => {
-											setShowAddTransaction(false);
-											setShowAddAccount(true);
-										}}
-									>
-										<Ionicons
-											name="add-circle-outline"
-											size={16}
-											color={theme.primary}
-										/>
-										<Text style={styles.addAccountHintText}>
-											Add an account first
-										</Text>
-									</TouchableOpacity>
-								)}
-							</View>
-
-							{transactionType === "transfer" && (
-								<View style={styles.formGroup}>
-									<Text style={styles.formLabel}>To Account</Text>
-									<View style={styles.accountSelector}>
-										{accounts
-											.filter((acc) => acc.id !== selectedAccount)
-											.map((acc) => (
-												<TouchableOpacity
-													key={acc.id}
-													style={[
-														styles.accountOption,
-														selectedToAccount === acc.id && {
-															backgroundColor: acc.color + "20",
-															borderColor: acc.color,
-														},
-													]}
-													onPress={() => setSelectedToAccount(acc.id)}
-												>
-													<Text
-														style={[
-															styles.accountOptionText,
-															selectedToAccount === acc.id && {
-																color: acc.color,
-															},
-														]}
-													>
-														{acc.name}
-													</Text>
-												</TouchableOpacity>
-											))}
-									</View>
-									{accounts.filter((acc) => acc.id !== selectedAccount).length ===
-										0 && (
-										<Text style={styles.addAccountHintText}>
-											You need a second account to transfer to.
-										</Text>
-									)}
-								</View>
-							)}
-
-							<View style={styles.formGroup}>
-								<Text style={styles.formLabel}>Payment Method</Text>
-								{selectedAccount &&
-								accounts.find((a) => a.id === selectedAccount)?.type ===
-									"credit_card" ? (
-									// For credit cards, show read-only credit_card payment method
-									<View style={[styles.paymentSelector, { opacity: 0.7 }]}>
-										<TouchableOpacity
-											style={[styles.paymentOption, styles.paymentOptionActive]}
-											disabled
-										>
-											<Text
-												style={[styles.paymentText, styles.paymentTextActive]}
-											>
-												CREDIT CARD
-											</Text>
-										</TouchableOpacity>
-										<Text
-											style={{
-												color: theme.textMuted,
-												fontSize: 12,
-												marginTop: 8,
-											}}
-										>
-											Auto-selected for credit card accounts
-										</Text>
-									</View>
-								) : (
-									// For other accounts, show all payment methods
-									<View style={styles.paymentSelector}>
-										{paymentMethods.map((method) => (
-											<TouchableOpacity
-												key={method}
-												style={[
-													styles.paymentOption,
-													paymentMethod === method &&
-														styles.paymentOptionActive,
-												]}
-												onPress={() => setPaymentMethod(method)}
-											>
-												<Text
-													style={[
-														styles.paymentText,
-														paymentMethod === method &&
-															styles.paymentTextActive,
-													]}
-												>
-													{method.replace("_", " ").toUpperCase()}
-												</Text>
-											</TouchableOpacity>
-										))}
-									</View>
-								)}
-							</View>
-							<TouchableOpacity
-								style={styles.submitButton}
-								onPress={handleAddTransaction}
-							>
-								<Text style={styles.submitButtonText}>Add Transaction</Text>
-							</TouchableOpacity>
-						</ScrollView>
-					</View>
-				</View>
-			</Modal>
+			<AddTransactionModal
+				visible={showAddTransaction}
+				onClose={() => setShowAddTransaction(false)}
+				theme={theme}
+				currency={currency}
+				initialType={transactionType}
+				onAddAccount={() => setShowAddAccount(true)}
+				subscriptionCheck={subscriptionCheck}
+				currentMonthTransactionCount={currentMonthTransactionCount}
+			/>
 
 			{/* Edit Account Modal */}
 			{editingAccount && (
@@ -1966,124 +1617,5 @@ const createStyles = (theme: Theme) =>
 			fontSize: 16,
 			fontWeight: "600",
 			color: "#FFF",
-		},
-		transactionTypeTabs: {
-			flexDirection: "row",
-			backgroundColor: theme.surface,
-			borderRadius: 12,
-			padding: 4,
-			marginBottom: 20,
-		},
-		transactionTypeTab: {
-			flex: 1,
-			paddingVertical: 10,
-			alignItems: "center",
-			borderRadius: 10,
-		},
-		transactionTypeTabActive: {
-			backgroundColor: theme.primary,
-		},
-		transactionTypeText: {
-			fontSize: 14,
-			fontWeight: "500",
-			color: theme.textMuted,
-		},
-		transactionTypeTextActive: {
-			color: "#FFF",
-		},
-		amountInput: {
-			flexDirection: "row",
-			alignItems: "center",
-			backgroundColor: theme.surface,
-			borderRadius: 12,
-			paddingHorizontal: 14,
-			borderWidth: 1,
-			borderColor: theme.border,
-		},
-		currencySymbol: {
-			fontSize: 24,
-			fontWeight: "700",
-			color: theme.text,
-			marginRight: 8,
-		},
-		amountField: {
-			flex: 1,
-			fontSize: 24,
-			fontWeight: "700",
-			color: theme.text,
-			paddingVertical: 14,
-		},
-		categorySelector: {
-			flexDirection: "row",
-			gap: 8,
-		},
-		categoryOption: {
-			alignItems: "center",
-			paddingVertical: 12,
-			paddingHorizontal: 14,
-			backgroundColor: theme.surface,
-			borderRadius: 12,
-			borderWidth: 1,
-			borderColor: theme.border,
-			minWidth: 80,
-			gap: 6,
-		},
-		categoryText: {
-			fontSize: 11,
-			color: theme.textMuted,
-			fontWeight: "500",
-		},
-		accountSelector: {
-			flexDirection: "row",
-			flexWrap: "wrap",
-			gap: 8,
-		},
-		accountOption: {
-			paddingVertical: 10,
-			paddingHorizontal: 16,
-			backgroundColor: theme.surface,
-			borderRadius: 10,
-			borderWidth: 1,
-			borderColor: theme.border,
-		},
-		accountOptionText: {
-			fontSize: 14,
-			color: theme.text,
-			fontWeight: "500",
-		},
-		addAccountHint: {
-			flexDirection: "row",
-			alignItems: "center",
-			gap: 6,
-			marginTop: 8,
-		},
-		addAccountHintText: {
-			fontSize: 13,
-			color: theme.primary,
-		},
-		paymentSelector: {
-			flexDirection: "row",
-			flexWrap: "wrap",
-			gap: 8,
-		},
-		paymentOption: {
-			paddingVertical: 8,
-			paddingHorizontal: 12,
-			backgroundColor: theme.surface,
-			borderRadius: 8,
-			borderWidth: 1,
-			borderColor: theme.border,
-		},
-		paymentOptionActive: {
-			backgroundColor: theme.primary + "20",
-			borderColor: theme.primary,
-		},
-		paymentText: {
-			fontSize: 11,
-			color: theme.textMuted,
-			fontWeight: "500",
-		},
-		paymentTextActive: {
-			color: theme.primary,
 		},
 	});
