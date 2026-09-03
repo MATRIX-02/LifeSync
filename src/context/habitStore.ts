@@ -4,6 +4,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
 	Habit,
 	HabitLog,
+	DayProgress,
 	HabitStats,
 	UserProfile,
 	AppSettings,
@@ -331,17 +332,12 @@ export const useHabitStore = create<HabitStore>()(
 					}
 				}
 
-				// Build last 7 days and 30 days history
-				const last7Days: {
-					date: string;
-					completed: boolean;
-					value?: number;
-				}[] = [];
-				const last30Days: {
-					date: string;
-					completed: boolean;
-					value?: number;
-				}[] = [];
+				// Build last 7 days and 30 days history.
+				// NOTE: this legacy store is not frequency-aware - every day counts
+				// as scheduled and one log completes it. habitStoreDB does this
+				// properly; nothing renders these values.
+				const last7Days: DayProgress[] = [];
+				const last30Days: DayProgress[] = [];
 
 				for (let i = 0; i < 30; i++) {
 					const date = new Date(today);
@@ -351,7 +347,14 @@ export const useHabitStore = create<HabitStore>()(
 					const completed = dayLogs.length > 0;
 					const value = dayLogs.length > 0 ? dayLogs[0].value : undefined;
 
-					const dayData = { date: dateStr, completed, value };
+					const dayData: DayProgress = {
+						date: dateStr,
+						completed,
+						value,
+						active: true,
+						done: dayLogs.length,
+						target: 1,
+					};
 					last30Days.push(dayData);
 					if (i < 7) {
 						last7Days.push(dayData);
@@ -361,6 +364,8 @@ export const useHabitStore = create<HabitStore>()(
 				const stats: HabitStats = {
 					habitId,
 					totalCompleted,
+					totalScheduled: last30Days.length,
+					totalLogs: totalCompleted,
 					currentStreak,
 					longestStreak,
 					completionRate,
@@ -369,8 +374,12 @@ export const useHabitStore = create<HabitStore>()(
 					bestValue,
 					weeklyCompletions,
 					monthlyCompletions,
+					scheduledDays7: last7Days.length,
+					scheduledDays30: last30Days.length,
+					completedDays30: last30Days.filter((d) => d.completed).length,
 					last7Days,
 					last30Days,
+					days: last30Days,
 				};
 
 				set((state) => {

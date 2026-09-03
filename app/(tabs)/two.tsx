@@ -29,12 +29,13 @@ import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system/legacy";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import * as Sharing from "expo-sharing";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
 	ActivityIndicator,
 	Image,
 	Linking,
 	Modal,
+	Platform,
 	ScrollView,
 	StatusBar,
 	StyleSheet,
@@ -43,6 +44,129 @@ import {
 	TouchableOpacity,
 	View,
 } from "react-native";
+
+// ---------------------------------------------------------------------------
+// Scheduled-reminders view model
+//
+// The raw list is one entry per trigger, so a single "8 times a day" habit
+// produces eight identical-looking cards and a handful of habits fills the
+// screen with noise. These helpers fold that list into one row per source, with
+// the individual times shown as chips.
+// ---------------------------------------------------------------------------
+
+const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+type TriggerInfo = {
+	label: string;
+	/** Minutes past midnight, for sorting. Null when not a clock trigger. */
+	timeOfDay: number | null;
+	nextAt: number;
+};
+
+const describeTrigger = (trigger: any): TriggerInfo => {
+	const now = Date.now();
+	const pad = (n: number) => String(n).padStart(2, "0");
+
+	if (!trigger) {
+		return { label: "Unknown", timeOfDay: null, nextAt: Number.MAX_SAFE_INTEGER };
+	}
+
+	const hour = Number(trigger.hour ?? 0);
+	const minute = Number(trigger.minute ?? 0);
+	const clock = `${pad(hour)}:${pad(minute)}`;
+
+	// Daily: expo reports "daily", older builds report the numeric enum 0.
+	if (trigger.type === "daily" || trigger.type === 0) {
+		const next = new Date();
+		next.setHours(hour, minute, 0, 0);
+		if (next.getTime() <= now) next.setDate(next.getDate() + 1);
+		return { label: clock, timeOfDay: hour * 60 + minute, nextAt: next.getTime() };
+	}
+
+	// Weekly - what "specific days" habits produce. The old UI called these
+	// "One-time trigger", which was simply wrong.
+	if (trigger.type === "weekly" || trigger.weekday != null) {
+		const weekday = Number(trigger.weekday ?? 1); // expo: 1 = Sunday
+		const next = new Date();
+		const targetDow = (weekday - 1 + 7) % 7;
+		next.setHours(hour, minute, 0, 0);
+		let delta = (targetDow - next.getDay() + 7) % 7;
+		if (delta === 0 && next.getTime() <= now) delta = 7;
+		next.setDate(next.getDate() + delta);
+		return {
+			label: `${WEEKDAYS[targetDow]} ${clock}`,
+			timeOfDay: hour * 60 + minute,
+			nextAt: next.getTime(),
+		};
+	}
+
+	if (trigger.date) {
+		const d = new Date(trigger.date);
+		if (!isNaN(d.getTime())) {
+			return {
+				label: d.toLocaleString([], {
+					day: "numeric",
+					month: "short",
+					hour: "2-digit",
+					minute: "2-digit",
+				}),
+				timeOfDay: null,
+				nextAt: d.getTime(),
+			};
+		}
+	}
+
+	if (trigger.seconds) {
+		const secs = Number(trigger.seconds);
+		return {
+			label: secs >= 60 ? `in ${Math.round(secs / 60)}m` : `in ${secs}s`,
+			timeOfDay: null,
+			nextAt: now + secs * 1000,
+		};
+	}
+
+	return { label: "One-off", timeOfDay: null, nextAt: Number.MAX_SAFE_INTEGER };
+};
+
+const relativeTime = (timestamp: number): string => {
+	if (timestamp === Number.MAX_SAFE_INTEGER) return "unscheduled";
+	const diff = timestamp - Date.now();
+	if (diff <= 0) return "due now";
+	const mins = Math.round(diff / 60000);
+	if (mins < 60) return `in ${mins}m`;
+	const hours = Math.floor(mins / 60);
+	if (hours < 24) return `in ${hours}h ${mins % 60}m`;
+	return `in ${Math.round(hours / 24)}d`;
+};
+
+/** Human label + icon + colour for each notification `data.type`. */
+const REMINDER_KINDS: Record<
+	string,
+	{ label: string; icon: string; color: string }
+> = {
+	habit_reminder: { label: "Habits", icon: "checkmark-circle", color: "#A78BFA" },
+	bill_reminder: { label: "Bills", icon: "receipt", color: "#FBBF24" },
+	water_reminder: { label: "Hydration", icon: "water", color: "#60A5FA" },
+	water_reminder_single: { label: "Hydration", icon: "water", color: "#60A5FA" },
+	study_reminder: { label: "Study", icon: "school", color: "#06B6D4" },
+	revision_reminder: { label: "Revision", icon: "repeat", color: "#06B6D4" },
+	flashcard_review: { label: "Flashcards", icon: "albums", color: "#06B6D4" },
+	goal_deadline: { label: "Goals", icon: "flag", color: "#34D399" },
+	pomodoro_end: { label: "Pomodoro", icon: "timer", color: "#F87171" },
+	break_end: { label: "Breaks", icon: "cafe", color: "#F87171" },
+	fasting_milestone: { label: "Fasting", icon: "hourglass", color: "#FB923C" },
+	fasting_complete: { label: "Fasting", icon: "hourglass", color: "#FB923C" },
+	timer_progress: { label: "Timers", icon: "time", color: "#94A3B8" },
+	alarm_test: { label: "Test", icon: "flask", color: "#94A3B8" },
+	test: { label: "Test", icon: "flask", color: "#94A3B8" },
+};
+
+const kindFor = (type?: string) =>
+	REMINDER_KINDS[type || ""] || {
+		label: "Other",
+		icon: "notifications",
+		color: "#94A3B8",
+	};
 
 export default function SettingsScreen() {
 	const router = useRouter();
@@ -389,50 +513,81 @@ export default function SettingsScreen() {
 		try {
 			const reminders =
 				await NotificationService.getAllScheduledNotifications();
-
-			// Helper to compute next-occurrence timestamp for a notification trigger
-			const getNextTriggerTime = (notif: any): number => {
-				try {
-					const trig = notif.trigger || {};
-					const now = Date.now();
-					// Daily trigger (some platforms use 'daily' string, others numeric code 0)
-					if (trig.type === "daily" || trig.type === 0) {
-						const hour = Number(trig.hour ?? 0);
-						const minute = Number(trig.minute ?? 0);
-						const cand = new Date();
-						cand.setHours(hour, minute, 0, 0);
-						if (cand.getTime() <= now) cand.setDate(cand.getDate() + 1);
-						return cand.getTime();
-					}
-
-					// Specific date trigger
-					if (trig.date) {
-						const d = new Date(trig.date);
-						if (!isNaN(d.getTime())) return d.getTime();
-					}
-
-					// Time-interval trigger
-					if (trig.seconds) {
-						return now + Number(trig.seconds) * 1000;
-					}
-
-					// Fallback: sort by identifier stable order
-					return Number.MAX_SAFE_INTEGER;
-				} catch (e) {
-					return Number.MAX_SAFE_INTEGER;
-				}
-			};
-
-			const sorted = reminders.slice().sort((a: any, b: any) => {
-				return getNextTriggerTime(a) - getNextTriggerTime(b);
-			});
-
-			setScheduledNotifications(sorted);
+			setScheduledNotifications(reminders);
 			setShowDeveloper(true);
 		} catch (error) {
 			Alert.alert("Error", "Failed to fetch scheduled reminders");
 		}
 	};
+
+	// One row per source (a habit, or a whole feature like Hydration) instead of
+	// one row per trigger. Sorted so whatever fires next is at the top.
+	const reminderGroups = useMemo(() => {
+		type Group = {
+			key: string;
+			kindLabel: string;
+			icon: string;
+			color: string;
+			title: string;
+			body: string;
+			times: { label: string; nextAt: number; timeOfDay: number | null }[];
+			nextAt: number;
+			ids: string[];
+		};
+
+		const groups = new Map<string, Group>();
+
+		for (const notif of scheduledNotifications as any[]) {
+			const data = notif?.content?.data || {};
+			const kind = kindFor(data.type);
+			// Habits group per habit; everything else groups per feature.
+			const key = data.habitId ? `habit:${data.habitId}` : `type:${data.type || "other"}`;
+			const habitName = data.habitId
+				? habitStore.habits.find((h) => h.id === data.habitId)?.name
+				: undefined;
+			const info = describeTrigger(notif?.trigger);
+
+			const existing = groups.get(key);
+			if (existing) {
+				existing.times.push(info);
+				existing.nextAt = Math.min(existing.nextAt, info.nextAt);
+				existing.ids.push(notif.identifier);
+			} else {
+				groups.set(key, {
+					key,
+					kindLabel: kind.label,
+					icon: kind.icon,
+					color: kind.color,
+					title: habitName || notif?.content?.title || kind.label,
+					body: notif?.content?.body || "",
+					times: [info],
+					nextAt: info.nextAt,
+					ids: [notif.identifier],
+				});
+			}
+		}
+
+		return Array.from(groups.values())
+			.map((g) => ({
+				...g,
+				times: g.times.sort(
+					(a, b) => (a.timeOfDay ?? 0) - (b.timeOfDay ?? 0) || a.nextAt - b.nextAt
+				),
+			}))
+			.sort((a, b) => a.nextAt - b.nextAt);
+	}, [scheduledNotifications, habitStore.habits]);
+
+	// Counts per feature, for the summary strip.
+	const reminderTotals = useMemo(() => {
+		const totals = new Map<string, { label: string; color: string; count: number }>();
+		for (const notif of scheduledNotifications as any[]) {
+			const kind = kindFor(notif?.content?.data?.type);
+			const entry = totals.get(kind.label);
+			if (entry) entry.count += 1;
+			else totals.set(kind.label, { label: kind.label, color: kind.color, count: 1 });
+		}
+		return Array.from(totals.values()).sort((a, b) => b.count - a.count);
+	}, [scheduledNotifications]);
 
 	const handleToggleNotifications = async () => {
 		if (!notificationsEnabled) {
@@ -1022,6 +1177,77 @@ export default function SettingsScreen() {
 						/>
 
 						<View style={styles.divider} />
+
+						{/* Android owns the per-channel sound picker: the app can only
+						    ship sounds bundled at build time, and a channel's settings
+						    are frozen after creation. Sending the user to the system
+						    screen is the supported way to choose any tone or audio
+						    file, and their choice takes precedence over ours. */}
+						{Platform.OS === "android" && (
+							<>
+								<TouchableOpacity
+									style={styles.settingRow}
+									onPress={() =>
+										NotificationService.openChannelSettings("reminder")
+									}
+								>
+									<View
+										style={[
+											styles.settingIcon,
+											{ backgroundColor: theme.primary + "20" },
+										]}
+									>
+										<Ionicons
+											name="musical-notes"
+											size={20}
+											color={theme.primary}
+										/>
+									</View>
+									<View style={styles.settingContent}>
+										<Text style={styles.settingLabel}>Reminder Sound</Text>
+										<Text style={styles.settingDescription}>
+											Choose any tone or audio file on your device
+										</Text>
+									</View>
+									<Ionicons
+										name="open-outline"
+										size={18}
+										color={theme.textMuted}
+									/>
+								</TouchableOpacity>
+
+								<View style={styles.divider} />
+
+								<TouchableOpacity
+									style={styles.settingRow}
+									onPress={() =>
+										NotificationService.openChannelSettings("alarm")
+									}
+								>
+									<View
+										style={[
+											styles.settingIcon,
+											{ backgroundColor: "#F87171" + "20" },
+										]}
+									>
+										<Ionicons name="alarm" size={20} color="#F87171" />
+									</View>
+									<View style={styles.settingContent}>
+										<Text style={styles.settingLabel}>Alarm Sound</Text>
+										<Text style={styles.settingDescription}>
+											Used by habits with Alarm switched on
+										</Text>
+									</View>
+									<Ionicons
+										name="open-outline"
+										size={18}
+										color={theme.textMuted}
+									/>
+								</TouchableOpacity>
+
+								<View style={styles.divider} />
+							</>
+						)}
 
 						<SettingRow
 							icon="phone-portrait"
@@ -2180,6 +2406,32 @@ export default function SettingsScreen() {
 						<View style={{ width: 24 }} />
 					</View>
 
+					{/* Summary strip: what is scheduled, and for which feature. The
+					    notification queue is shared across every module, so the
+					    breakdown matters. */}
+					{scheduledNotifications.length > 0 && (
+						<View style={styles.reminderSummary}>
+							<Text style={styles.reminderSummaryCount}>
+								{scheduledNotifications.length} scheduled
+							</Text>
+							<View style={styles.reminderChipRow}>
+								{reminderTotals.map((t) => (
+									<View
+										key={t.label}
+										style={[
+											styles.reminderKindChip,
+											{ backgroundColor: t.color + "22", borderColor: t.color },
+										]}
+									>
+										<Text style={[styles.reminderKindChipText, { color: t.color }]}>
+											{t.label} {t.count}
+										</Text>
+									</View>
+								))}
+							</View>
+						</View>
+					)}
+
 					{/* Reminders List */}
 					<ScrollView style={styles.modalContent}>
 						{scheduledNotifications.length === 0 ? (
@@ -2198,43 +2450,53 @@ export default function SettingsScreen() {
 							</View>
 						) : (
 							<View style={styles.remindersList}>
-								{scheduledNotifications.map((reminder, index) => (
-									<View key={index} style={styles.reminderCard}>
-										<View style={styles.reminderIndex}>
-											<Text style={styles.reminderIndexText}>{index + 1}</Text>
-										</View>
-										<View style={{ flex: 1 }}>
-											<Text style={styles.reminderTitle}>
-												{reminder.content.title}
-											</Text>
-											<Text style={styles.reminderBody}>
-												{reminder.content.body}
-											</Text>
-
-											<View style={styles.reminderDetails}>
-												<View style={styles.detailRow}>
-													<Text style={styles.detailLabel}>ID:</Text>
-													<Text style={styles.detailValue}>
-														{reminder.identifier}
+								{reminderGroups.map((group) => (
+									<View key={group.key} style={styles.reminderCard}>
+										<View style={styles.reminderCardHeader}>
+											<View
+												style={[
+													styles.reminderKindIcon,
+													{ backgroundColor: group.color + "22" },
+												]}
+											>
+												<Ionicons
+													name={group.icon as any}
+													size={18}
+													color={group.color}
+												/>
+											</View>
+											<View style={{ flex: 1 }}>
+												<Text style={styles.reminderTitle} numberOfLines={1}>
+													{group.title}
+												</Text>
+												<Text style={styles.reminderBody} numberOfLines={2}>
+													{group.body}
+												</Text>
+											</View>
+											<View style={{ alignItems: "flex-end" }}>
+												<Text style={styles.reminderNext}>
+													{relativeTime(group.nextAt)}
+												</Text>
+												{group.times.length > 1 && (
+													<Text style={styles.reminderCount}>
+														{group.times.length}×/day
 													</Text>
-												</View>
-
-												{reminder.trigger && (
-													<View style={styles.detailRow}>
-														<Text style={styles.detailLabel}>Trigger:</Text>
-														<Text style={styles.detailValue}>
-															{reminder.trigger.type === "daily" ||
-															reminder.trigger.type === 0
-																? `Daily at ${String(
-																		reminder.trigger.hour
-																  ).padStart(2, "0")}:${String(
-																		reminder.trigger.minute
-																  ).padStart(2, "0")}`
-																: "One-time trigger"}
-														</Text>
-													</View>
 												)}
 											</View>
+										</View>
+
+										{/* Every trigger this source owns, as compact chips. */}
+										<View style={styles.reminderTimeRow}>
+											{group.times.map((t, i) => (
+												<View
+													key={`${group.key}-${i}`}
+													style={styles.reminderTimeChip}
+												>
+													<Text style={styles.reminderTimeChipText}>
+														{t.label}
+													</Text>
+												</View>
+											))}
 										</View>
 									</View>
 								))}
@@ -2592,27 +2854,75 @@ const createStyles = (theme: Theme) =>
 			gap: 12,
 		},
 		reminderCard: {
-			flexDirection: "row",
 			backgroundColor: theme.surface,
 			borderRadius: 12,
 			padding: 12,
-			gap: 12,
-			marginBottom: 12,
-			borderLeftWidth: 4,
-			borderLeftColor: "#8B5CF6",
+			gap: 10,
+			marginBottom: 10,
 		},
-		reminderIndex: {
-			width: 32,
-			height: 32,
-			borderRadius: 16,
-			backgroundColor: "#8B5CF6" + "20",
+		reminderCardHeader: {
+			flexDirection: "row",
+			alignItems: "center",
+			gap: 12,
+		},
+		reminderKindIcon: {
+			width: 36,
+			height: 36,
+			borderRadius: 10,
 			justifyContent: "center",
 			alignItems: "center",
 		},
-		reminderIndexText: {
-			fontSize: 14,
+		reminderNext: {
+			fontSize: 12,
 			fontWeight: "700",
-			color: "#8B5CF6",
+			color: theme.primary,
+		},
+		reminderCount: {
+			fontSize: 11,
+			color: theme.textMuted,
+			marginTop: 2,
+		},
+		reminderTimeRow: {
+			flexDirection: "row",
+			flexWrap: "wrap",
+			gap: 6,
+		},
+		reminderTimeChip: {
+			paddingHorizontal: 8,
+			paddingVertical: 4,
+			borderRadius: 6,
+			backgroundColor: theme.surfaceLight,
+		},
+		reminderTimeChipText: {
+			fontSize: 12,
+			fontWeight: "600",
+			color: theme.textSecondary,
+			fontVariant: ["tabular-nums"],
+		},
+		reminderSummary: {
+			paddingHorizontal: 16,
+			paddingBottom: 12,
+			gap: 8,
+		},
+		reminderSummaryCount: {
+			fontSize: 13,
+			fontWeight: "700",
+			color: theme.textSecondary,
+		},
+		reminderChipRow: {
+			flexDirection: "row",
+			flexWrap: "wrap",
+			gap: 6,
+		},
+		reminderKindChip: {
+			paddingHorizontal: 8,
+			paddingVertical: 3,
+			borderRadius: 20,
+			borderWidth: 1,
+		},
+		reminderKindChipText: {
+			fontSize: 11,
+			fontWeight: "700",
 		},
 		reminderTitle: {
 			fontSize: 14,
@@ -2624,12 +2934,6 @@ const createStyles = (theme: Theme) =>
 			fontSize: 13,
 			color: theme.textSecondary,
 			marginBottom: 8,
-		},
-		reminderDetails: {
-			backgroundColor: theme.background,
-			borderRadius: 8,
-			padding: 8,
-			gap: 6,
 		},
 		modalOverlay: {
 			position: "absolute",
@@ -2674,21 +2978,5 @@ const createStyles = (theme: Theme) =>
 			justifyContent: "center",
 			alignItems: "center",
 			backgroundColor: theme.background,
-		},
-		detailRow: {
-			flexDirection: "row",
-			alignItems: "flex-start",
-			gap: 8,
-		},
-		detailLabel: {
-			fontSize: 11,
-			fontWeight: "600",
-			color: theme.textMuted,
-			minWidth: 40,
-		},
-		detailValue: {
-			fontSize: 11,
-			color: theme.text,
-			flex: 1,
 		},
 	});

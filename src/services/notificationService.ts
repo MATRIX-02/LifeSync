@@ -1,9 +1,22 @@
 import Constants from "expo-constants";
+import {
+	activeWeekdays,
+	expandDayTimes,
+	MAX_REMINDERS_PER_HABIT,
+	normalizeFrequency,
+} from "../utils/frequency";
 import * as Device from "expo-device";
 import * as Notifications from "expo-notifications";
-import { Platform } from "react-native";
+import { Linking, Platform } from "react-native";
 import { supabase } from "../config/supabase";
-import { FrequencyConfig } from "../types";
+import { FrequencyConfig, Frequency } from "../types";
+
+/**
+ * Bump this suffix whenever the alarm channel's settings must change: Android
+ * freezes a channel after first creation, so the only way to change one is to
+ * publish a new id and delete the old.
+ */
+const ALARM_CHANNEL_ID = "alarms-v2";
 
 export class NotificationService {
 	// Get and register the Expo Push Token for the current user
@@ -164,13 +177,34 @@ export class NotificationService {
 				showBadge: true,
 			});
 
-			// Alarm channel. Android decides sound/vibration/DND behaviour from the
-			// channel, and channel settings are FROZEN after first creation - to
-			// change them you must use a new channel id, not edit this one.
-			await Notifications.setNotificationChannelAsync("alarms", {
+			// Alarm channel.
+			//
+			// The important part is audioAttributes.usage = ALARM: it plays on the
+			// ALARM audio stream, so it follows alarm volume and is NOT silenced by
+			// ring/vibrate mode. enforceAudibility pushes that further. Without
+			// these an "alarm" is just a notification with a longer buzz, which is
+			// exactly how the previous version behaved.
+			//
+			// NOTE THE ID. Android FREEZES a channel's settings after first
+			// creation - editing them is silently ignored forever. The original
+			// "alarms" channel is therefore unfixable and has to be replaced by a
+			// new id, and deleted so it stops showing in system settings.
+			await Notifications.deleteNotificationChannelAsync("alarms").catch(
+				() => undefined
+			);
+
+			await Notifications.setNotificationChannelAsync(ALARM_CHANNEL_ID, {
 				name: "Alarms",
 				importance: Notifications.AndroidImportance.MAX,
 				sound: "default",
+				audioAttributes: {
+					usage: Notifications.AndroidAudioUsage.ALARM,
+					contentType: Notifications.AndroidAudioContentType.SONIFICATION,
+					flags: {
+						enforceAudibility: true,
+						requestHardwareAudioVideoSynchronization: false,
+					},
+				},
 				enableVibrate: true,
 				vibrationPattern: [0, 1000, 500, 1000, 500, 1000],
 				lightColor: "#F87171",
@@ -291,13 +325,12 @@ export class NotificationService {
 		id: string;
 		name: string;
 		notificationTime?: string;
-		frequency?: FrequencyConfig;
+		// Accepts either shape; normalizeFrequency() converts.
+		frequency?: Frequency | FrequencyConfig;
 		/** Shown as the reminder body when set, e.g. "Did you read today?". */
 		question?: string;
 		/** Route through the louder "alarms" channel (MAX importance, bypasses DND). */
 		alarmEnabled?: boolean;
-		/** false = deliver silently (vibration only). */
-		ringtoneEnabled?: boolean;
 	}): Promise<string[]> {
 		// Always start from a clean slate so edits never leave orphans behind.
 		await this.cancelHabitNotifications(habit.id);
@@ -308,11 +341,12 @@ export class NotificationService {
 
 		// Android takes importance, vibration and do-not-disturb behaviour from
 		// the CHANNEL, so an alarm habit has to be delivered on a different one.
-		const channelId = habit.alarmEnabled ? "alarms" : "habit-reminders";
-		// `false` is how expo-notifications expresses "silent"; null is not a
-		// valid value for this field.
-		const sound: string | boolean =
-			habit.ringtoneEnabled === false ? false : "default";
+		const channelId = habit.alarmEnabled
+			? ALARM_CHANNEL_ID
+			: "habit-reminders";
+		// Always audible. A reminder you asked for should make a sound; there is
+		// no separate "sound" switch to contradict the reminder switch.
+		const sound: string | boolean = "default";
 		const title = habit.alarmEnabled ? "⏰ Habit Alarm" : "🎯 Habit Reminder";
 
 		// A habit's own question is the whole point of the field - asking "Did you
@@ -321,43 +355,58 @@ export class NotificationService {
 		const question = habit.question?.trim();
 		const body = question || `Time to complete: ${habit.name}`;
 
-		const scheduleDaily = async (timeString: string, label?: string) => {
-			const [hour, minute] = timeString.split(":").map(Number);
-			const id = await this.scheduleNotification(
-				title,
-				label ? `${body} ${label}` : body,
-				{
-					type: Notifications.SchedulableTriggerInputTypes.DAILY,
-					hour,
-					minute,
-				},
-				{ habitId: habit.id, type: "habit_reminder" },
-				channelId,
-				sound
-			);
-			ids.push(id);
-		};
+		// Days x times. The two axes are independent now, so a habit can be
+		// "3 times a day on Mon/Wed/Fri" - which the old single-enum model could
+		// not express at all.
+		const normalized = normalizeFrequency(frequency, baseTime);
+		const times = expandDayTimes(normalized.perDay, baseTime);
+		const weekdays = activeWeekdays(normalized.schedule);
 
-		if (frequency?.type === "times_per_day") {
-			const slots = this.expandDailyWindow(
-				frequency.startTime || baseTime,
-				frequency.endTime || "21:00",
-				frequency.intervalMinutes,
-				frequency.value || 1
+		const total = times.length * (weekdays ? weekdays.length : 1);
+		if (total > MAX_REMINDERS_PER_HABIT) {
+			// Android caps pending alarms per app. Refusing loudly beats letting
+			// the OS silently drop whichever ones it feels like.
+			console.warn(
+				`Habit "${habit.name}" would schedule ${total} reminders; capping at ${MAX_REMINDERS_PER_HABIT}.`
 			);
-			for (let i = 0; i < slots.length; i++) {
-				await scheduleDaily(slots[i], `(${i + 1}/${slots.length})`);
-			}
-		} else if (frequency?.type === "specific_days" && frequency.days?.length) {
-			const [hour, minute] = baseTime.split(":").map(Number);
-			for (const day of frequency.days) {
+		}
+
+		const label = (i: number) =>
+			times.length > 1 ? `(${i + 1}/${times.length})` : undefined;
+
+		outer: for (let i = 0; i < times.length; i++) {
+			const [hour, minute] = times[i].split(":").map(Number);
+			const suffix = label(i);
+			const text = suffix ? `${body} ${suffix}` : body;
+
+			if (weekdays) {
+				// Day-restricted: one WEEKLY trigger per (day, time) pair.
+				for (const day of weekdays) {
+					if (ids.length >= MAX_REMINDERS_PER_HABIT) break outer;
+					const id = await this.scheduleNotification(
+						title,
+						text,
+						{
+							type: Notifications.SchedulableTriggerInputTypes.WEEKLY,
+							// expo-notifications weekday is 1-7 with 1 = Sunday
+							weekday: day + 1,
+							hour,
+							minute,
+						},
+						{ habitId: habit.id, type: "habit_reminder" },
+						channelId,
+						sound
+					);
+					ids.push(id);
+				}
+			} else {
+				// Every day (or a flexible schedule, which has no fixed days).
+				if (ids.length >= MAX_REMINDERS_PER_HABIT) break outer;
 				const id = await this.scheduleNotification(
 					title,
-					body,
+					text,
 					{
-						type: Notifications.SchedulableTriggerInputTypes.WEEKLY,
-						// expo-notifications weekday is 1-7 with 1 = Sunday
-						weekday: day + 1,
+						type: Notifications.SchedulableTriggerInputTypes.DAILY,
 						hour,
 						minute,
 					},
@@ -367,8 +416,6 @@ export class NotificationService {
 				);
 				ids.push(id);
 			}
-		} else {
-			await scheduleDaily(baseTime);
 		}
 
 		return ids;
@@ -450,6 +497,58 @@ export class NotificationService {
 		);
 	}
 
+	/**
+	 * Open Android's own per-channel notification settings.
+	 *
+	 * This is how a user picks ANY sound on their device - system ringtones and
+	 * alarm tones, or their own audio files. The app cannot do it directly:
+	 * expo-notifications only accepts a sound bundled into res/raw at build time,
+	 * and Android freezes a channel's settings after creation so the app cannot
+	 * change one later anyway.
+	 *
+	 * The user CAN change it, though - user edits to a channel take precedence
+	 * and persist - so sending them to the right screen is the supported route,
+	 * not a workaround.
+	 */
+	static async openChannelSettings(
+		channel: "alarm" | "reminder"
+	): Promise<boolean> {
+		if (Platform.OS !== "android") return false;
+
+		const channelId =
+			channel === "alarm" ? ALARM_CHANNEL_ID : "habit-reminders";
+		const packageName =
+			Constants.expoConfig?.android?.package ||
+			(Constants as any).expoConfig?.slug;
+
+		if (!packageName) {
+			console.warn("openChannelSettings: package name unavailable");
+			return false;
+		}
+
+		try {
+			// Make sure the channel exists, or the screen opens empty.
+			await this.requestPermissions();
+			await Linking.sendIntent(
+				"android.settings.CHANNEL_NOTIFICATION_SETTINGS",
+				[
+					{ key: "android.provider.extra.APP_PACKAGE", value: packageName },
+					{ key: "android.provider.extra.CHANNEL_ID", value: channelId },
+				]
+			);
+			return true;
+		} catch (error) {
+			console.error("Failed to open channel settings:", error);
+			// Fall back to the app's notification settings page.
+			try {
+				await Linking.openSettings();
+				return true;
+			} catch {
+				return false;
+			}
+		}
+	}
+
 	// ============ ALARMS ============
 
 	/**
@@ -470,7 +569,7 @@ export class NotificationService {
 				repeats: false,
 			},
 			{ type: "alarm_test" },
-			"alarms"
+			ALARM_CHANNEL_ID
 		);
 	}
 
@@ -491,7 +590,9 @@ export class NotificationService {
 		const perms = await Notifications.getPermissionsAsync();
 		let channel = null;
 		if (Platform.OS === "android") {
-			channel = await Notifications.getNotificationChannelAsync("alarms");
+			channel = await Notifications.getNotificationChannelAsync(
+				ALARM_CHANNEL_ID
+			);
 		}
 		return {
 			permission: perms.status,

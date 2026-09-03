@@ -64,6 +64,8 @@ const objectToSnakeCase = (obj: any): any => {
 };
 
 // Helper: Validate UUID format
+const _freq = require("../utils/frequency") as typeof import("../utils/frequency");
+
 const isValidUUID = (id: string): boolean => {
 	if (!id || typeof id !== "string") return false;
 	const uuidRegex =
@@ -308,19 +310,26 @@ export const syncHabitsToCloud = async (
 				// duplicated habits. New habits are created as UUIDs at source
 				// (utils/uuid.ts); legacy ids are migrated by
 				// supabase/migrations/20260829_habit_uuid_ids.sql.
-				// Flatten frequency object to match database columns
+				// Frequency: the jsonb column is the source of truth; the flat
+				// columns are a mirror kept for older builds. See the frequency
+				// jsonb migration before removing either.
 				const { frequency, ...restHabit } = habit;
+				const normalizedFreq = _freq.normalizeFrequency(
+					frequency,
+					(habit as any).notificationTime
+				);
+				const legacyFreq = _freq.toLegacyFrequency(normalizedFreq);
 				const flattenedHabit = {
 					id: habit.id,
 					...restHabit,
-					frequency_type: frequency?.type || "daily",
-					frequency_value: frequency?.value || 1,
-					frequency_second_value: frequency?.secondValue,
-					frequency_days: frequency?.days || [],
-					// "times_per_day" window
-					frequency_start_time: frequency?.startTime ?? null,
-					frequency_end_time: frequency?.endTime ?? null,
-					frequency_interval_minutes: frequency?.intervalMinutes ?? null,
+					frequency: normalizedFreq,
+					frequency_type: legacyFreq.type || "daily",
+					frequency_value: legacyFreq.value || 1,
+					frequency_second_value: legacyFreq.secondValue ?? null,
+					frequency_days: legacyFreq.days || [],
+					frequency_start_time: legacyFreq.startTime ?? null,
+					frequency_end_time: legacyFreq.endTime ?? null,
+					frequency_interval_minutes: legacyFreq.intervalMinutes ?? null,
 					user_id: userId,
 					synced_at: new Date().toISOString(),
 					// Map isArchived to archived
@@ -415,17 +424,20 @@ export const fetchHabitsFromCloud = async (
 		// Convert snake_case to camelCase and reconstruct frequency object
 		const habitsConverted = (habits || []).map((habit: any) => {
 			const converted = objectToCamelCase(habit);
-			// Reconstruct frequency object from flat columns
-			converted.frequency = {
-				type: converted.frequencyType || "daily",
-				value: converted.frequencyValue || 1,
-				secondValue: converted.frequencySecondValue,
-				days: converted.frequencyDays || [],
-				// "times_per_day" window
-				startTime: converted.frequencyStartTime ?? undefined,
-				endTime: converted.frequencyEndTime ?? undefined,
-				intervalMinutes: converted.frequencyIntervalMinutes ?? undefined,
-			};
+			// Prefer the jsonb column, falling back to the legacy flat columns for
+			// rows last written by an older build.
+			converted.frequency = _freq.normalizeFrequency(
+				converted.frequency ?? {
+					type: converted.frequencyType || "daily",
+					value: converted.frequencyValue || 1,
+					secondValue: converted.frequencySecondValue,
+					days: converted.frequencyDays || [],
+					startTime: converted.frequencyStartTime ?? undefined,
+					endTime: converted.frequencyEndTime ?? undefined,
+					intervalMinutes: converted.frequencyIntervalMinutes ?? undefined,
+				},
+				converted.notificationTime
+			);
 			// Map archived back to isArchived
 			converted.isArchived = converted.archived || false;
 			// Clean up flat frequency fields

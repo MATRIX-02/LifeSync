@@ -6,9 +6,16 @@ import {
 	FrequencyConfig,
 	Habit,
 	HabitLog,
+	DayProgress,
 	HabitStats,
 	UserProfile,
 } from "../types";
+import {
+	expandDayTimes,
+	isActiveOn,
+	normalizeFrequency,
+	toLegacyFrequency,
+} from "../utils/frequency";
 import { generateUUID } from "../utils/uuid";
 
 /**
@@ -24,6 +31,14 @@ import { generateUUID } from "../utils/uuid";
  */
 let logIndexCache: { source: HabitLog[]; index: Map<string, HabitLog[]> } | null =
 	null;
+
+// Local calendar date as "YYYY-MM-DD". toISOString() would shift the day for
+// anyone east or west of UTC, which silently moved logs a day in either
+// direction depending on the hour they were made.
+const toDateKey = (date: Date): string =>
+	`${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(
+		date.getDate()
+	).padStart(2, "0")}`;
 
 const dayKey = (habitId: string, date: Date): string =>
 	`${habitId}|${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
@@ -91,17 +106,21 @@ const objectToCamelCase = (obj: any): any => {
 // Convert DB habit to app habit
 const dbHabitToHabit = (dbHabit: any): Habit => {
 	const habit = objectToCamelCase(dbHabit);
-	// Reconstruct frequency object
-	habit.frequency = {
-		type: habit.frequencyType || "daily",
-		value: habit.frequencyValue || 1,
-		secondValue: habit.frequencySecondValue,
-		days: habit.frequencyDays || [],
-		// "times_per_day" window
-		startTime: habit.frequencyStartTime ?? undefined,
-		endTime: habit.frequencyEndTime ?? undefined,
-		intervalMinutes: habit.frequencyIntervalMinutes ?? undefined,
-	} as FrequencyConfig;
+
+	// Prefer the `frequency` jsonb column; fall back to the legacy flat columns
+	// for rows written by an older build. normalizeFrequency accepts either.
+	habit.frequency = normalizeFrequency(
+		habit.frequency ?? {
+			type: habit.frequencyType || "daily",
+			value: habit.frequencyValue || 1,
+			secondValue: habit.frequencySecondValue,
+			days: habit.frequencyDays || [],
+			startTime: habit.frequencyStartTime ?? undefined,
+			endTime: habit.frequencyEndTime ?? undefined,
+			intervalMinutes: habit.frequencyIntervalMinutes ?? undefined,
+		},
+		habit.notificationTime
+	) as unknown as FrequencyConfig;
 	// Map archived to isArchived
 	habit.isArchived = habit.archived || false;
 	// Parse dates
@@ -114,16 +133,22 @@ const dbHabitToHabit = (dbHabit: any): Habit => {
 // Convert app habit to DB habit
 const habitToDbHabit = (habit: Habit, userId: string): any => {
 	const { frequency, isArchived, ...rest } = habit;
+	const normalized = normalizeFrequency(frequency, habit.notificationTime);
+	// Dual write: the jsonb column is the source of truth, the flat columns are
+	// a mirror so an older build still reads this row correctly. Drop the mirror
+	// only after every device is updated - see the frequency jsonb migration.
+	const legacy = toLegacyFrequency(normalized);
+
 	return objectToSnakeCase({
 		...rest,
-		frequencyType: frequency?.type || "daily",
-		frequencyValue: frequency?.value || 1,
-		frequencySecondValue: frequency?.secondValue,
-		frequencyDays: frequency?.days || [],
-		// "times_per_day" window
-		frequencyStartTime: frequency?.startTime ?? null,
-		frequencyEndTime: frequency?.endTime ?? null,
-		frequencyIntervalMinutes: frequency?.intervalMinutes ?? null,
+		frequency: normalized,
+		frequencyType: legacy.type || "daily",
+		frequencyValue: legacy.value || 1,
+		frequencySecondValue: legacy.secondValue ?? null,
+		frequencyDays: legacy.days || [],
+		frequencyStartTime: legacy.startTime ?? null,
+		frequencyEndTime: legacy.endTime ?? null,
+		frequencyIntervalMinutes: legacy.intervalMinutes ?? null,
 		archived: isArchived || false,
 		userId: userId,
 		syncedAt: new Date().toISOString(),
@@ -158,6 +183,12 @@ interface HabitStoreDB {
 	profile: UserProfile | null;
 	settings: AppSettings;
 	isLoading: boolean;
+	/**
+	 * True once initialize() has successfully loaded from the database. An empty
+	 * `habits` array means nothing until this flips - before it, the store is
+	 * simply not populated yet.
+	 */
+	hasLoaded: boolean;
 	error: string | null;
 	userId: string | null;
 
@@ -197,6 +228,8 @@ interface HabitStoreDB {
 		habitId: string,
 		date: Date
 	) => { done: number; target: number };
+	/** False on days a day-restricted habit does not run. */
+	isHabitActiveOnDate: (habitId: string, date: Date) => boolean;
 	/** Remove a single completion, rather than clearing the whole day. */
 	removeOneLogForDate: (habitId: string, date: Date) => Promise<void>;
 
@@ -257,6 +290,7 @@ export const useHabitStore = create<HabitStoreDB>()((set, get) => ({
 	profile: null,
 	settings: defaultSettings,
 	isLoading: false,
+	hasLoaded: false,
 	error: null,
 	userId: null,
 
@@ -298,6 +332,7 @@ export const useHabitStore = create<HabitStoreDB>()((set, get) => ({
 				habits,
 				logs,
 				isLoading: false,
+				hasLoaded: true,
 			});
 
 			// Calculate stats for all habits
@@ -631,83 +666,133 @@ export const useHabitStore = create<HabitStoreDB>()((set, get) => ({
 		// Straight to the index: this runs once per calendar cell.
 		const done =
 			getLogIndex(get().logs).get(dayKey(habitId, date))?.length ?? 0;
-		const target =
-			habit?.frequency?.type === "times_per_day"
-				? Math.max(1, Number(habit.frequency.value) || 1)
-				: 1;
+
+		if (!habit) return { done, target: 1 };
+
+		const freq = normalizeFrequency(habit.frequency, habit.notificationTime);
+		// A day the habit does not run on has no target - it is not a miss.
+		if (!isActiveOn(freq, date)) return { done, target: 0 };
+
+		const target = Math.max(
+			1,
+			freq.perDay.times?.length || freq.perDay.target || 1
+		);
 		return { done, target };
+	},
+
+	// Does this habit run on this date at all? Mon/Wed/Fri habits should not be
+	// counted as missed on a Tuesday.
+	isHabitActiveOnDate: (habitId: string, date: Date) => {
+		const habit = get().getHabit(habitId);
+		if (!habit) return false;
+		return isActiveOn(
+			normalizeFrequency(habit.frequency, habit.notificationTime),
+			date
+		);
 	},
 
 	isHabitCompletedOnDate: (habitId: string, date: Date) => {
 		const { done, target } = get().getProgressForDate(habitId, date);
+		// target 0 means the habit does not run today; only an actual log counts.
+		if (target === 0) return done > 0;
 		return done >= target;
 	},
 
 	// Stats calculation (runs locally on fetched data)
+	//
+	// Everything here is per CALENDAR DAY, not per log, and every day is judged
+	// against that day's own target:
+	//
+	//   - A 3x/day habit is "done" for the day at 3 completions, not 1.
+	//   - A day the habit does not run on (Mon/Wed/Fri habit on a Tuesday) is
+	//     not scheduled at all: it neither counts as a miss nor breaks a streak.
+	//
+	// The previous version counted raw logs and treated any single log as a
+	// completed day, which made a 3x/day habit read 300% and gave every
+	// specific-days habit a permanent streak of 1 - a Tuesday always broke it.
 	calculateStats: (habitId: string) => {
 		const logs = get().getHabitLogs(habitId);
 		const habit = get().getHabit(habitId);
-		const totalCompleted = logs.length;
 
 		const today = new Date();
 		today.setHours(0, 0, 0, 0);
 
-		// Get unique completion dates
-		const completionDates = new Set(
-			logs.map((l) => {
-				const d = new Date(l.completedAt);
-				d.setHours(0, 0, 0, 0);
-				return d.getTime();
-			})
-		);
+		// Walk back to the habit's creation, capped at a year of history.
+		const created = habit?.createdAt ? new Date(habit.createdAt) : today;
+		created.setHours(0, 0, 0, 0);
+		const earliest = new Date(today);
+		earliest.setDate(earliest.getDate() - 364);
+		const start = created > earliest ? created : earliest;
 
-		// Calculate current streak
-		let currentStreak = 0;
-		let checkDate = new Date(today);
-
-		while (completionDates.has(checkDate.getTime())) {
-			currentStreak++;
-			checkDate.setDate(checkDate.getDate() - 1);
+		const days: DayProgress[] = [];
+		const cursor = new Date(start);
+		while (cursor <= today) {
+			const date = new Date(cursor);
+			const { done, target } = get().getProgressForDate(habitId, date);
+			const dayLogs = get().getLogsForDate(habitId, date);
+			days.push({
+				date: toDateKey(date),
+				active: target > 0,
+				done,
+				target,
+				// An inactive day with a log is still a win, just not a required one.
+				completed: target > 0 ? done >= target : done > 0,
+				value: dayLogs.length ? dayLogs[0].value : undefined,
+			});
+			cursor.setDate(cursor.getDate() + 1);
 		}
 
-		// Calculate longest streak
-		let longestStreak = 0;
-		let tempStreak = 0;
-		const sortedDates = Array.from(completionDates).sort((a, b) => a - b);
+		// --- Streaks. Only scheduled days are considered; inactive days are
+		// skipped over rather than breaking the run.
+		const scheduled = days.filter((d) => d.active);
 
-		for (let i = 0; i < sortedDates.length; i++) {
-			if (i === 0) {
-				tempStreak = 1;
+		let longestStreak = 0;
+		let run = 0;
+		for (const day of scheduled) {
+			if (day.completed) {
+				run++;
+				if (run > longestStreak) longestStreak = run;
 			} else {
-				const diff =
-					(sortedDates[i] - sortedDates[i - 1]) / (1000 * 60 * 60 * 24);
-				if (diff === 1) {
-					tempStreak++;
-				} else {
-					longestStreak = Math.max(longestStreak, tempStreak);
-					tempStreak = 1;
-				}
+				run = 0;
 			}
 		}
-		longestStreak = Math.max(longestStreak, tempStreak);
 
-		// Calculate weekly and monthly completions
-		const oneWeekAgo = new Date(today);
-		oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
-		const oneMonthAgo = new Date(today);
-		oneMonthAgo.setDate(oneMonthAgo.getDate() - 30);
+		// Today is still in progress, so an incomplete today does not end the
+		// streak - it just does not extend it yet.
+		let currentStreak = 0;
+		for (let i = scheduled.length - 1; i >= 0; i--) {
+			const day = scheduled[i];
+			if (day.completed) currentStreak++;
+			else if (i === scheduled.length - 1) continue;
+			else break;
+		}
 
-		const weeklyCompletions = logs.filter(
-			(l) => new Date(l.completedAt) >= oneWeekAgo
-		).length;
+		// --- Windows. `slice` on a chronological array, so "last 7" really is
+		// the last 7 calendar days including today.
+		const last30Days = days.slice(-30);
+		const last7Days = days.slice(-7);
 
-		const monthlyCompletions = logs.filter(
-			(l) => new Date(l.completedAt) >= oneMonthAgo
-		).length;
+		const scheduledIn = (window: DayProgress[]) =>
+			window.filter((d) => d.active).length;
+		const completedIn = (window: DayProgress[]) =>
+			window.filter((d) => d.active && d.completed).length;
 
-		const completionRate = Math.round((monthlyCompletions / 30) * 100);
+		const scheduledDays30 = scheduledIn(last30Days);
+		const completedDays30 = completedIn(last30Days);
+		const scheduledDays7 = scheduledIn(last7Days);
+		const completedDays7 = completedIn(last7Days);
 
-		// Measurable stats
+		// Rate over days the habit was actually DUE. A weekend-only habit at 2/2
+		// is 100%, not 29%.
+		const completionRate = scheduledDays30
+			? Math.round((completedDays30 / scheduledDays30) * 100)
+			: 0;
+
+		const totalScheduled = scheduled.length;
+		const totalCompleted = scheduled.filter((d) => d.completed).length;
+
+		// --- Measurable habits are still summarised over raw logs: the value is
+		// the point, not the day boundary.
 		let totalValue: number | undefined;
 		let averageValue: number | undefined;
 		let bestValue: number | undefined;
@@ -726,40 +811,25 @@ export const useHabitStore = create<HabitStoreDB>()((set, get) => ({
 			}
 		}
 
-		// Build history
-		const last7Days: { date: string; completed: boolean; value?: number }[] =
-			[];
-		const last30Days: { date: string; completed: boolean; value?: number }[] =
-			[];
-
-		for (let i = 0; i < 30; i++) {
-			const date = new Date(today);
-			date.setDate(date.getDate() - i);
-			const dateStr = date.toISOString().split("T")[0];
-			const dayLogs = get().getLogsForDate(habitId, date);
-			const completed = dayLogs.length > 0;
-			const value = dayLogs.length > 0 ? dayLogs[0].value : undefined;
-
-			const dayData = { date: dateStr, completed, value };
-			last30Days.push(dayData);
-			if (i < 7) {
-				last7Days.push(dayData);
-			}
-		}
-
 		const stats: HabitStats = {
 			habitId,
 			totalCompleted,
+			totalScheduled,
+			totalLogs: logs.length,
 			currentStreak,
 			longestStreak,
 			completionRate,
 			totalValue,
 			averageValue,
 			bestValue,
-			weeklyCompletions,
-			monthlyCompletions,
+			weeklyCompletions: completedDays7,
+			monthlyCompletions: completedDays30,
+			scheduledDays7,
+			scheduledDays30,
+			completedDays30,
 			last7Days,
 			last30Days,
+			days,
 		};
 
 		set((state) => {

@@ -13,7 +13,7 @@ import {
 	useSegments,
 } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
 	ActivityIndicator,
 	StatusBar,
@@ -66,58 +66,75 @@ export default function RootLayout() {
 		}
 	}, [loaded]);
 
-	// Initialize notification service and reschedule notifications for existing habits
+	const [notificationsPermitted, setNotificationsPermitted] = useState(false);
+	const hasRescheduledRef = useRef(false);
+	// Subscribed, not read via getState(), so the reschedule effect re-runs the
+	// moment the store finishes loading.
+	const habitsHasLoaded = useHabitStore((state) => state.hasLoaded);
+
+	// Permissions and handlers only. The rescheduling below deliberately does
+	// NOT live here - see the next effect.
 	useEffect(() => {
 		NotificationService.setNotificationHandler();
 		AudioService.setAudioMode();
 
-		// Request notification permissions and reschedule habit reminders
 		(async () => {
 			const permitted = await NotificationService.requestPermissions();
-			if (permitted) {
-				console.log("✅ Notification permissions granted");
-
-				// Clear only habit reminders before rescheduling them. Cancelling
-				// *all* notifications here would also wipe bill, water, study and
-				// timer reminders, which nothing reschedules.
-				try {
-					await NotificationService.cancelAllHabitNotifications();
-					console.log("🗑️  Cleared previously scheduled habit reminders");
-				} catch (error) {
-					console.error("Failed to clear old habit reminders:", error);
-				}
-
-				// Reschedule notifications for all habits with notifications enabled
-				const { habits } = useHabitStore.getState();
-				const activeHabits = habits.filter(
-					(h) => !h.isArchived && h.notificationEnabled && h.notificationTime
-				);
-
-				console.log(
-					`📱 Found ${activeHabits.length} habits with notifications enabled`
-				);
-
-				for (const habit of activeHabits) {
-					try {
-						// No id is persisted: reminders are cancelled by matching the
-						// notification's `data.habitId`, so this avoids a DB write per
-						// habit on every app launch.
-						await NotificationService.scheduleHabitReminders(habit);
-					} catch (error) {
-						console.error(
-							`Failed to reschedule notification for ${habit.name}:`,
-							error
-						);
-					}
-				}
-
-				// Debug: show all scheduled notifications
-				await NotificationService.debugListScheduledNotifications();
-			} else {
-				console.log("❌ Notification permissions denied");
-			}
+			setNotificationsPermitted(permitted);
+			console.log(
+				permitted
+					? "✅ Notification permissions granted"
+					: "❌ Notification permissions denied"
+			);
 		})();
 	}, []);
+
+	// Reschedule habit reminders ONCE PER LAUNCH, but only after the habit store
+	// has actually loaded.
+	//
+	// This used to run on mount with an empty dependency array. At that point
+	// `habits` is still [] - the store is not populated until initialize(), which
+	// runs later, behind auth, the offline-queue flush and two migrations. So the
+	// effect cancelled every scheduled habit reminder, found zero habits, and
+	// scheduled nothing. Reminders worked until the next app launch and then
+	// stopped for good, with "View Scheduled Reminders" showing an empty list.
+	//
+	// The blanket cancelAllHabitNotifications() is gone too: scheduleHabitReminders
+	// already cancels that habit's own reminders first, and delete/archive cancel
+	// theirs. Cancelling everything up front only created a window where a failure
+	// left the user with no reminders at all.
+	useEffect(() => {
+		if (!notificationsPermitted || !habitsHasLoaded) return;
+		if (hasRescheduledRef.current) return;
+		hasRescheduledRef.current = true;
+
+		(async () => {
+			const { habits } = useHabitStore.getState();
+			const activeHabits = habits.filter(
+				(h) => !h.isArchived && h.notificationEnabled && h.notificationTime
+			);
+
+			console.log(
+				`📱 Rescheduling reminders for ${activeHabits.length} habit(s)`
+			);
+
+			for (const habit of activeHabits) {
+				try {
+					// No id is persisted: reminders are cancelled by matching the
+					// notification's `data.habitId`, so this avoids a DB write per
+					// habit on every app launch.
+					await NotificationService.scheduleHabitReminders(habit);
+				} catch (error) {
+					console.error(
+						`Failed to reschedule notification for ${habit.name}:`,
+						error
+					);
+				}
+			}
+
+			await NotificationService.debugListScheduledNotifications();
+		})();
+	}, [notificationsPermitted, habitsHasLoaded]);
 
 	if (!loaded) {
 		return null;

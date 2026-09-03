@@ -2,7 +2,21 @@ import { Alert } from "@/src/components/CustomAlert";
 import { useHabitStore } from "@/src/context/habitStoreDB";
 import { Theme, useColors, useTheme } from "@/src/context/themeContext";
 import { NotificationService } from "@/src/services/notificationService";
-import { FrequencyType, HabitType, TargetType } from "@/src/types";
+import { PerDaySection } from "@/src/components/habits/PerDaySection";
+import {
+	Frequency,
+	PerDay,
+	Schedule,
+	describeFrequency,
+	expandDayTimes,
+	normalizeFrequency,
+} from "@/src/utils/frequency";
+import {
+	DayProgress,
+	FrequencyType,
+	HabitType,
+	TargetType,
+} from "@/src/types";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -24,6 +38,14 @@ import {
 	View,
 } from "react-native";
 import Svg, { Circle } from "react-native-svg";
+
+// Local calendar date as "YYYY-MM-DD", matching DayProgress.date. toISOString()
+// would shift the day for anyone not on UTC.
+const toDateKey = (date: Date): string =>
+	`${date.getFullYear()}-${String(date.getMonth() + 1).padStart(
+		2,
+		"0"
+	)}-${String(date.getDate()).padStart(2, "0")}`;
 
 const { width } = Dimensions.get("window");
 
@@ -199,8 +221,6 @@ export default function StatisticsScreen() {
 	const [editQuestion, setEditQuestion] = useState("");
 	const [editFrequencyType, setEditFrequencyType] =
 		useState<FrequencyType>("daily");
-	const [editFrequencyValue, setEditFrequencyValue] = useState(1);
-	const [editFrequencySecondValue, setEditFrequencySecondValue] = useState(14);
 	const [editSelectedDays, setEditSelectedDays] = useState<number[]>([
 		0, 1, 2, 3, 4, 5, 6,
 	]);
@@ -208,28 +228,31 @@ export default function StatisticsScreen() {
 	const [editSelectedTime, setEditSelectedTime] = useState(new Date());
 	const [editReminderEnabled, setEditReminderEnabled] = useState(true);
 	const [editAlarmEnabled, setEditAlarmEnabled] = useState(false);
-	const [editRingtoneEnabled, setEditRingtoneEnabled] = useState(true);
 	const [editNotes, setEditNotes] = useState("");
 	const [showFrequencyPicker, setShowFrequencyPicker] = useState(false);
 	const [showTimePicker, setShowTimePicker] = useState(false);
 
-	// "times_per_day" window: from/to and the gap between occurrences
-	const [editWindowStart, setEditWindowStart] = useState("09:00");
-	const [editWindowEnd, setEditWindowEnd] = useState("21:00");
-	const [editWindowInterval, setEditWindowInterval] = useState(120);
-	const [showWindowPicker, setShowWindowPicker] = useState<
-		"start" | "end" | null
-	>(null);
+	// HOW MANY times on an active day, and when - independent of the schedule.
+	const [editPerDay, setEditPerDay] = useState<PerDay>({ target: 1 });
 
-	const editWindowSlots = useMemo(
-		() =>
-			NotificationService.expandDailyWindow(
-				editWindowStart,
-				editWindowEnd,
-				editWindowInterval,
-				editFrequencyValue
-			),
-		[editWindowStart, editWindowEnd, editWindowInterval, editFrequencyValue]
+	// Only two schedules are offered: every day, or a fixed set of weekdays.
+	const editSchedule = useMemo(
+		(): Schedule =>
+			editFrequencyType === "specific_days"
+				? { kind: "weekdays", days: editSelectedDays }
+				: { kind: "daily" },
+		[editFrequencyType, editSelectedDays]
+	);
+
+	const editFrequency = useMemo(
+		(): Frequency =>
+			normalizeFrequency({ schedule: editSchedule, perDay: editPerDay }),
+		[editSchedule, editPerDay]
+	);
+
+	const editDayTimes = useMemo(
+		() => expandDayTimes(editPerDay, editReminderTime),
+		[editPerDay, editReminderTime]
 	);
 
 	// Habit type fields
@@ -306,12 +329,23 @@ export default function StatisticsScreen() {
 			setEditColor(selectedHabit.color);
 			setEditIcon(selectedHabit.icon || "checkmark-circle-outline");
 			setEditQuestion(selectedHabit.question || "");
-			setEditFrequencyType(selectedHabit.frequency?.type || "daily");
-			setEditFrequencyValue(selectedHabit.frequency?.value || 1);
-			setEditFrequencySecondValue(selectedHabit.frequency?.secondValue || 14);
-			setEditSelectedDays(
-				selectedHabit.frequency?.days || [0, 1, 2, 3, 4, 5, 6]
+			const freq = normalizeFrequency(
+				selectedHabit.frequency,
+				selectedHabit.notificationTime
 			);
+			const sch = freq.schedule;
+			// Kinds that are no longer offered (times per week/month, every N days,
+			// N in X days) collapse to "every day" so the picker always has a
+			// selection. Saving then rewrites the habit into the supported shape.
+			setEditFrequencyType(
+				sch.kind === "weekdays" ? "specific_days" : "daily"
+			);
+			setEditSelectedDays(
+				sch.kind === "weekdays" && sch.days.length
+					? sch.days
+					: [0, 1, 2, 3, 4, 5, 6]
+			);
+			setEditPerDay(freq.perDay);
 			const reminderTimeStr =
 				selectedHabit.reminderTime || selectedHabit.notificationTime || "09:00";
 			setEditReminderTime(reminderTimeStr);
@@ -326,21 +360,16 @@ export default function StatisticsScreen() {
 					true
 			);
 			setEditAlarmEnabled(selectedHabit.alarmEnabled ?? false);
-			setEditRingtoneEnabled(selectedHabit.ringtoneEnabled ?? true);
 			setEditNotes(selectedHabit.notes || "");
 			// Habit type fields
 			setEditHabitType(selectedHabit.type || "yesno");
 			setEditUnit(selectedHabit.unit || "");
 			setEditTarget(selectedHabit.target?.toString() || "");
 			setEditTargetType(selectedHabit.targetType || "at_least");
-			setEditWindowStart(selectedHabit.frequency?.startTime || reminderTimeStr);
-			setEditWindowEnd(selectedHabit.frequency?.endTime || "21:00");
-			setEditWindowInterval(selectedHabit.frequency?.intervalMinutes || 120);
 			// Reset pickers
 			setShowIconPicker(false);
 			setShowFrequencyPicker(false);
 			setShowTimePicker(false);
-			setShowWindowPicker(null);
 			editModalTranslateY.setValue(0);
 		}
 	}, [showEditModal, selectedHabit]);
@@ -353,83 +382,120 @@ export default function StatisticsScreen() {
 		return logs.filter((log) => log.habitId === selectedHabit.id);
 	}, [selectedHabit?.id, logs]);
 
-	// Calculate score percentage based on period
-	const getScoreForPeriod = () => {
-		if (!habitStats) return 0;
-		switch (selectedPeriod) {
-			case "Week":
-				const weekData = habitStats.last7Days || [];
-				if (weekData.length === 0) return 0;
-				return Math.round(
-					(weekData.filter((d) => d.completed).length / weekData.length) * 100
-				);
-			case "Month":
-				const monthData = habitStats.last30Days || [];
-				if (monthData.length === 0) return 0;
-				return Math.round(
-					(monthData.filter((d) => d.completed).length / monthData.length) * 100
-				);
-			case "Year":
-				if (habitStats.totalCompleted === 0) return 0;
-				return Math.round((habitStats.totalCompleted / 365) * 100);
-			default:
-				return 0;
-		}
+	// ---------------------------------------------------------------------
+	// Everything below is derived from habitStats.days - one entry per calendar
+	// day, carrying `done`, `target` and `active`. Two rules apply throughout:
+	//
+	//   1. A day is complete when done >= target, not when a single log exists.
+	//      A 3x/day habit tapped once is 1/3, not done.
+	//   2. A day the habit is not scheduled on (a Mon/Wed/Fri habit on a
+	//      Tuesday) is excluded from every rate and skipped by streaks. It is
+	//      not a miss.
+	// ---------------------------------------------------------------------
+
+	const days: DayProgress[] = habitStats?.days || [];
+
+	const dayByDate = useMemo(() => {
+		const map = new Map<string, DayProgress>();
+		for (const d of days) map.set(d.date, d);
+		return map;
+	}, [days]);
+
+	// Days that fall inside the selected period, oldest first.
+	const daysForPeriod = (period: "Week" | "Month" | "Year"): DayProgress[] =>
+		period === "Week"
+			? days.slice(-7)
+			: period === "Month"
+			? days.slice(-30)
+			: days;
+
+	/** Completed / scheduled, as a percentage. Unscheduled days do not count. */
+	const rateOf = (window: DayProgress[]): number => {
+		const due = window.filter((d) => d.active);
+		if (due.length === 0) return 0;
+		return Math.round(
+			(due.filter((d) => d.completed).length / due.length) * 100
+		);
 	};
 
-	// Calculate month change percentage
-	const getMonthChange = () => {
-		if (!habitStats) return "0%";
-		return habitStats.monthlyCompletions > 0
-			? `+${Math.min(habitStats.monthlyCompletions, 99)}%`
-			: "0%";
+	const getScoreForPeriod = () => rateOf(daysForPeriod(selectedPeriod));
+
+	// How many days the score above is actually based on. Shown under the ring
+	// so a 100% built on two days is not mistaken for a 100% built on thirty.
+	const getScoreBasis = () => {
+		const due = daysForPeriod(selectedPeriod).filter((d) => d.active);
+		const done = due.filter((d) => d.completed).length;
+		return `${done} of ${due.length} scheduled day${
+			due.length === 1 ? "" : "s"
+		}`;
 	};
 
-	// Calculate year change percentage
-	const getYearChange = () => {
-		if (!habitStats) return "0%";
-		return habitStats.totalCompleted > 0
-			? `+${Math.min(habitStats.totalCompleted, 99)}%`
-			: "0%";
-	};
-
-	// Get chart data points for score chart
+	// Score per day, as a fraction of that day's own target. Partial progress on
+	// a multi-target habit shows as a partial point rather than a flat miss.
 	const getScoreChartData = () => {
-		if (!habitStats) return [];
-		const data =
-			selectedPeriod === "Week"
-				? habitStats.last7Days || []
-				: habitStats.last30Days || [];
+		const window = daysForPeriod(selectedPeriod);
 
-		return data.map((day, index) => ({
-			date: new Date(day.date),
-			value: day.completed ? 20 : 10,
-			completed: day.completed,
+		if (selectedPeriod === "Year") {
+			// A year of daily points is unreadable; aggregate into months.
+			const buckets = new Map<string, { due: number; done: number }>();
+			for (const d of window) {
+				if (!d.active) continue;
+				const key = d.date.slice(0, 7);
+				const b = buckets.get(key) || { due: 0, done: 0 };
+				b.due++;
+				if (d.completed) b.done++;
+				buckets.set(key, b);
+			}
+			return Array.from(buckets.entries()).map(([key, b]) => ({
+				date: new Date(`${key}-01T00:00:00`),
+				percent: b.due ? Math.round((b.done / b.due) * 100) : 0,
+				completed: b.due > 0 && b.done === b.due,
+				active: true,
+			}));
+		}
+
+		return window.map((d) => ({
+			date: new Date(`${d.date}T00:00:00`),
+			percent: d.active
+				? Math.min(100, Math.round((d.done / Math.max(1, d.target)) * 100))
+				: 0,
+			completed: d.completed,
+			active: d.active,
 		}));
 	};
 
-	// Get history chart data
+	// Completed days per bucket: weeks for Week/Month, months for Year.
 	const getHistoryChartData = () => {
-		if (!habitStats) return [];
-		const data =
-			historyPeriod === "Week"
-				? habitStats.last7Days || []
-				: habitStats.last30Days || [];
+		const window = daysForPeriod(historyPeriod);
+		const buckets: { label: string; count: number }[] = [];
 
-		const weeklyData: { week: string; count: number }[] = [];
-		let currentWeek = 0;
-		let weekCount = 0;
-
-		data.forEach((day, index) => {
-			if (day.completed) weekCount++;
-			if ((index + 1) % 7 === 0 || index === data.length - 1) {
-				weeklyData.push({ week: `W${currentWeek + 1}`, count: weekCount });
-				weekCount = 0;
-				currentWeek++;
+		if (historyPeriod === "Year") {
+			const byMonth = new Map<string, number>();
+			for (const d of window) {
+				const key = d.date.slice(0, 7);
+				byMonth.set(key, (byMonth.get(key) || 0) + (d.completed ? 1 : 0));
 			}
-		});
+			for (const [key, count] of byMonth) {
+				buckets.push({
+					label: new Date(`${key}-01T00:00:00`).toLocaleDateString("en-US", {
+						month: "short",
+					}),
+					count,
+				});
+			}
+			return buckets;
+		}
 
-		return weeklyData;
+		// Chunk into weeks from the OLDEST day, so the final bar is the current
+		// (possibly partial) week rather than an arbitrary offset.
+		for (let i = 0; i < window.length; i += 7) {
+			const chunk = window.slice(i, i + 7);
+			buckets.push({
+				label: `W${Math.floor(i / 7) + 1}`,
+				count: chunk.filter((d) => d.completed).length,
+			});
+		}
+		return buckets;
 	};
 
 	// Generate calendar data for 4 months
@@ -437,7 +503,11 @@ export default function StatisticsScreen() {
 		const months: {
 			name: string;
 			year: number;
-			days: { date: Date; completed: boolean; isCurrentMonth: boolean }[][];
+			days: {
+				date: Date;
+				day: DayProgress | undefined;
+				isCurrentMonth: boolean;
+			}[][];
 		}[] = [];
 		const today = new Date();
 
@@ -450,7 +520,7 @@ export default function StatisticsScreen() {
 
 			const weeks: {
 				date: Date;
-				completed: boolean;
+				day: DayProgress | undefined;
 				isCurrentMonth: boolean;
 			}[][] = [];
 			const firstDay = new Date(
@@ -469,23 +539,19 @@ export default function StatisticsScreen() {
 
 			let currentWeek: {
 				date: Date;
-				completed: boolean;
+				day: DayProgress | undefined;
 				isCurrentMonth: boolean;
 			}[] = [];
 			let currentDate = new Date(startDate);
 
 			while (currentDate <= lastDay || currentWeek.length > 0) {
 				const isCurrentMonth = currentDate.getMonth() === monthDate.getMonth();
-				const isCompleted = selectedHabit
-					? habitLogs.some((log) => {
-							const logDate = new Date(log.completedAt);
-							return logDate.toDateString() === currentDate.toDateString();
-					  })
-					: false;
 
 				currentWeek.push({
 					date: new Date(currentDate),
-					completed: isCompleted && isCurrentMonth,
+					day: isCurrentMonth
+						? dayByDate.get(toDateKey(currentDate))
+						: undefined,
 					isCurrentMonth,
 				});
 
@@ -504,78 +570,66 @@ export default function StatisticsScreen() {
 		return months;
 	};
 
-	// Get best streaks
+	// Best streaks: runs of consecutive SCHEDULED days completed. Unscheduled
+	// days are stepped over, so a Mon/Wed/Fri habit can build a streak at all -
+	// the old version counted raw log dates, and every Tuesday reset it to 1.
 	const getBestStreaks = () => {
-		if (!habitLogs.length) return [];
+		const scheduled = days.filter((d) => d.active);
+		const runs: { startDate: Date; endDate: Date; count: number }[] = [];
+		let run: DayProgress[] = [];
 
-		const sortedLogs = [...habitLogs].sort(
-			(a, b) =>
-				new Date(b.completedAt).getTime() - new Date(a.completedAt).getTime()
-		);
-
-		const streaks: { startDate: Date; endDate: Date; count: number }[] = [];
-		let currentStreak = {
-			startDate: new Date(),
-			endDate: new Date(),
-			count: 0,
+		const flush = () => {
+			if (run.length === 0) return;
+			runs.push({
+				startDate: new Date(`${run[0].date}T00:00:00`),
+				endDate: new Date(`${run[run.length - 1].date}T00:00:00`),
+				count: run.length,
+			});
+			run = [];
 		};
-		let lastDate: Date | null = null;
 
-		sortedLogs.forEach((log) => {
-			const logDate = new Date(log.completedAt);
-			logDate.setHours(0, 0, 0, 0);
-
-			if (!lastDate) {
-				currentStreak = { startDate: logDate, endDate: logDate, count: 1 };
-			} else {
-				const dayDiff = Math.round(
-					(lastDate.getTime() - logDate.getTime()) / (1000 * 60 * 60 * 24)
-				);
-				if (dayDiff === 1) {
-					currentStreak.startDate = logDate;
-					currentStreak.count++;
-				} else {
-					if (currentStreak.count > 0) {
-						streaks.push({ ...currentStreak });
-					}
-					currentStreak = { startDate: logDate, endDate: logDate, count: 1 };
-				}
-			}
-			lastDate = logDate;
-		});
-
-		if (currentStreak.count > 0) {
-			streaks.push(currentStreak);
+		for (const day of scheduled) {
+			if (day.completed) run.push(day);
+			else flush();
 		}
+		flush();
 
-		return streaks.sort((a, b) => b.count - a.count).slice(0, 5);
+		return runs.sort((a, b) => b.count - a.count).slice(0, 5);
 	};
 
-	// Get frequency data
+	// Which weekdays this habit actually gets done on, over the last 12 months.
+	// Each cell is a ratio, so a faint cell means "often missed" rather than
+	// "never attempted" - the old grid was a boolean and lit up on one log.
 	const getFrequencyData = () => {
 		const dayNames = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 		const today = new Date();
 		const monthNames: string[] = [];
+		const monthKeys: string[] = [];
 
 		for (let i = 11; i >= 0; i--) {
 			const d = new Date(today.getFullYear(), today.getMonth() - i, 1);
 			monthNames.push(d.toLocaleDateString("en-US", { month: "short" }));
+			monthKeys.push(
+				`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`
+			);
 		}
 
-		const frequencyGrid: {
-			month: string;
-			dayOfWeek: number;
-			completed: boolean;
-		}[] = [];
-
-		habitLogs.forEach((log) => {
-			const date = new Date(log.completedAt);
-			const month = date.toLocaleDateString("en-US", { month: "short" });
+		// key: "<monthIdx>|<dayOfWeek 0=Mon>" -> completed / scheduled
+		const cells = new Map<string, { due: number; done: number }>();
+		for (const d of days) {
+			if (!d.active) continue;
+			const monthIdx = monthKeys.indexOf(d.date.slice(0, 7));
+			if (monthIdx === -1) continue;
+			const date = new Date(`${d.date}T00:00:00`);
 			const dayOfWeek = date.getDay() === 0 ? 6 : date.getDay() - 1;
-			frequencyGrid.push({ month, dayOfWeek, completed: true });
-		});
+			const key = `${monthIdx}|${dayOfWeek}`;
+			const cell = cells.get(key) || { due: 0, done: 0 };
+			cell.due++;
+			if (d.completed) cell.done++;
+			cells.set(key, cell);
+		}
 
-		return { dayNames, monthNames, frequencyGrid };
+		return { dayNames, monthNames, cells };
 	};
 
 	// Handle delete
@@ -646,30 +700,12 @@ export default function StatisticsScreen() {
 			return;
 		}
 
-		const updatedFrequency = {
-			type: editFrequencyType,
-			value:
-				editFrequencyType === "times_per_day"
-					? editWindowSlots.length
-					: editFrequencyValue,
-			secondValue:
-				editFrequencyType === "times_in_x_days"
-					? editFrequencySecondValue
-					: undefined,
-			days:
-				editFrequencyType === "specific_days" ? editSelectedDays : undefined,
-			startTime:
-				editFrequencyType === "times_per_day" ? editWindowStart : undefined,
-			endTime:
-				editFrequencyType === "times_per_day" ? editWindowEnd : undefined,
-			intervalMinutes:
-				editFrequencyType === "times_per_day" ? editWindowInterval : undefined,
-		};
+		const updatedFrequency = editFrequency;
 
+		// The first reminder of the day. With several times a day the list itself
+		// drives the schedule and this is only the anchor.
 		const notificationTime =
-			editFrequencyType === "times_per_day"
-				? editWindowStart
-				: editReminderTime;
+			editPerDay.target > 1 ? editDayTimes[0] : editReminderTime;
 
 		// Reminders are rescheduled from scratch so time/frequency edits take
 		// effect immediately instead of waiting for the next app launch.
@@ -683,7 +719,6 @@ export default function StatisticsScreen() {
 					frequency: updatedFrequency,
 					question: editQuestion.trim() || undefined,
 					alarmEnabled: editAlarmEnabled,
-					ringtoneEnabled: editRingtoneEnabled,
 				});
 			}
 		} catch (error) {
@@ -708,7 +743,6 @@ export default function StatisticsScreen() {
 			reminderEnabled: editReminderEnabled,
 			notificationEnabled: editReminderEnabled,
 			alarmEnabled: editAlarmEnabled,
-			ringtoneEnabled: editRingtoneEnabled,
 			notes: editNotes.trim() || undefined,
 		});
 
@@ -798,11 +832,13 @@ export default function StatisticsScreen() {
 								color={theme.textMuted}
 							/>
 							<Text style={styles.metaText}>
-								{selectedHabit.frequency?.type === "daily"
-									? "Every day"
-									: selectedHabit.frequency?.type === "times_per_week"
-									? `${selectedHabit.frequency.value}x per week`
-									: "Custom"}
+								{describeFrequency(
+									normalizeFrequency(
+										selectedHabit.frequency,
+										selectedHabit.notificationTime
+									),
+									selectedHabit.notificationTime
+								)}
 							</Text>
 						</View>
 						<View style={styles.metaItem}>
@@ -841,6 +877,7 @@ export default function StatisticsScreen() {
 								</Text>
 							</View>
 						</View>
+						<Text style={styles.scoreBasis}>{getScoreBasis()}</Text>
 
 						<View style={styles.overviewStats}>
 							<View style={styles.overviewStat}>
@@ -855,17 +892,17 @@ export default function StatisticsScreen() {
 								<Text
 									style={[styles.overviewValue, { color: selectedHabit.color }]}
 								>
-									{getMonthChange()}
+									{habitStats?.currentStreak || 0}
 								</Text>
-								<Text style={styles.overviewLabel}>Month</Text>
+								<Text style={styles.overviewLabel}>Streak</Text>
 							</View>
 							<View style={styles.overviewStat}>
 								<Text
 									style={[styles.overviewValue, { color: selectedHabit.color }]}
 								>
-									{getYearChange()}
+									{habitStats?.longestStreak || 0}
 								</Text>
-								<Text style={styles.overviewLabel}>Year</Text>
+								<Text style={styles.overviewLabel}>Best</Text>
 							</View>
 							<View style={styles.overviewStat}>
 								<Text
@@ -873,7 +910,7 @@ export default function StatisticsScreen() {
 								>
 									{habitStats?.totalCompleted || 0}
 								</Text>
-								<Text style={styles.overviewLabel}>Total</Text>
+								<Text style={styles.overviewLabel}>Days done</Text>
 							</View>
 						</View>
 					</View>
@@ -942,10 +979,14 @@ export default function StatisticsScreen() {
 										style={[
 											styles.dataPoint,
 											{
-												backgroundColor: point.completed
+												backgroundColor: !point.active
+													? theme.border
+													: point.completed
 													? selectedHabit.color
+													: point.percent > 0
+													? selectedHabit.color + "70"
 													: theme.textMuted,
-												bottom: `${point.completed ? 20 : 10}%`,
+												bottom: `${point.percent}%`,
 											},
 										]}
 									/>
@@ -1013,19 +1054,27 @@ export default function StatisticsScreen() {
 
 					<View style={styles.historyChart}>
 						<View style={styles.barChartContainer}>
-							{getHistoryChartData().map((item, index) => (
-								<View key={index} style={styles.barWrapper}>
-									<View
-										style={[
-											styles.bar,
-											{
-												height: `${Math.min(item.count * 15, 100)}%`,
-												backgroundColor: selectedHabit.color,
-											},
-										]}
-									/>
-								</View>
-							))}
+							{(() => {
+								const bars = getHistoryChartData();
+								const max = Math.max(1, ...bars.map((b) => b.count));
+								return bars.map((item, index) => (
+									<View key={index} style={styles.barWrapper}>
+										<Text style={styles.barValue}>
+											{item.count > 0 ? item.count : ""}
+										</Text>
+										<View
+											style={[
+												styles.bar,
+												{
+													height: `${(item.count / max) * 100}%`,
+													backgroundColor: selectedHabit.color,
+												},
+											]}
+										/>
+										<Text style={styles.barLabel}>{item.label}</Text>
+									</View>
+								));
+							})()}
 						</View>
 					</View>
 				</View>
@@ -1051,29 +1100,47 @@ export default function StatisticsScreen() {
 											<Text style={styles.dayLabel}>{day}</Text>
 											{calendarData.map((month, monthIdx) => (
 												<View key={monthIdx} style={styles.monthDays}>
-													{month.days.map((week, weekIdx) => (
-														<View
-															key={weekIdx}
-															style={[
-																styles.calendarDay,
-																week[dayIdx]?.completed && {
-																	backgroundColor: selectedHabit.color,
-																},
-																!week[dayIdx]?.isCurrentMonth &&
-																	styles.otherMonthDay,
-															]}
-														>
-															<Text
+													{month.days.map((week, weekIdx) => {
+														const cell = week[dayIdx];
+														const dp = cell?.day;
+														// Partial progress on a multi-target habit gets a
+														// proportional tint; a day the habit does not run
+														// on stays blank rather than reading as a miss.
+														const ratio =
+															dp && dp.target > 0
+																? Math.min(1, dp.done / dp.target)
+																: 0;
+														const fill = dp?.completed
+															? selectedHabit.color
+															: ratio > 0
+															? selectedHabit.color +
+															  Math.round(0x20 + ratio * 0x70)
+																	.toString(16)
+																	.padStart(2, "0")
+															: undefined;
+														return (
+															<View
+																key={weekIdx}
 																style={[
-																	styles.calendarDayText,
-																	week[dayIdx]?.completed &&
-																		styles.calendarDayTextCompleted,
+																	styles.calendarDay,
+																	fill ? { backgroundColor: fill } : null,
+																	dp && !dp.active ? styles.inactiveDay : null,
+																	!cell?.isCurrentMonth &&
+																		styles.otherMonthDay,
 																]}
 															>
-																{week[dayIdx]?.date.getDate()}
-															</Text>
-														</View>
-													))}
+																<Text
+																	style={[
+																		styles.calendarDayText,
+																		dp?.completed &&
+																			styles.calendarDayTextCompleted,
+																	]}
+																>
+																	{cell?.date.getDate()}
+																</Text>
+															</View>
+														);
+													})}
 												</View>
 											))}
 										</View>
@@ -1111,7 +1178,13 @@ export default function StatisticsScreen() {
 											style={[
 												styles.streakFill,
 												{
-													width: `${Math.min(streak.count * 10, 100)}%`,
+													// Relative to the best streak, so the bars compare
+													// against each other rather than a fixed 10-day scale
+													// that pinned everything past 10 to full width.
+													width: `${Math.max(
+														8,
+														(streak.count / bestStreaks[0].count) * 100
+													)}%`,
 													backgroundColor: selectedHabit.color,
 												},
 											]}
@@ -1141,16 +1214,21 @@ export default function StatisticsScreen() {
 							{frequencyData.dayNames.map((day, dayIdx) => (
 								<View key={day} style={styles.frequencyRow}>
 									{frequencyData.monthNames.map((month, monthIdx) => {
-										const hasCompletion = frequencyData.frequencyGrid.some(
-											(g) => g.month === month && g.dayOfWeek === dayIdx
+										const cell = frequencyData.cells.get(
+											`${monthIdx}|${dayIdx}`
 										);
+										const ratio = cell?.due ? cell.done / cell.due : 0;
 										return (
 											<View
-												key={`${day}-${month}`}
+												key={`${day}-${month}-${monthIdx}`}
 												style={[
 													styles.frequencyDot,
-													hasCompletion && {
-														backgroundColor: selectedHabit.color,
+													ratio > 0 && {
+														backgroundColor:
+															selectedHabit.color +
+															Math.round(0x30 + ratio * 0xcf)
+																.toString(16)
+																.padStart(2, "0"),
 													},
 												]}
 											/>
@@ -1548,21 +1626,7 @@ export default function StatisticsScreen() {
 										<Ionicons name="repeat" size={24} color={editColor} />
 									</View>
 									<Text style={styles.iconSelectorText}>
-										{editFrequencyType === "daily"
-											? "Every day"
-											: editFrequencyType === "times_per_day"
-											? `${editWindowSlots.length}x/day ${editWindowStart}-${editWindowEnd}`
-											: editFrequencyType === "specific_days"
-											? `${editSelectedDays.length} days/week`
-											: editFrequencyType === "times_per_week"
-											? `${editFrequencyValue}x per week`
-											: editFrequencyType === "times_per_month"
-											? `${editFrequencyValue}x per month`
-											: editFrequencyType === "every_n_days"
-											? `Every ${editFrequencyValue} days`
-											: editFrequencyType === "times_in_x_days"
-											? `${editFrequencyValue}x in ${editFrequencySecondValue} days`
-											: "Custom"}
+										{describeFrequency(editFrequency, editReminderTime)}
 									</Text>
 									<Ionicons
 										name={showFrequencyPicker ? "chevron-up" : "chevron-down"}
@@ -1583,40 +1647,10 @@ export default function StatisticsScreen() {
 													description: "Complete once every day",
 												},
 												{
-													type: "times_per_day" as FrequencyType,
-													label: "Multiple times/day",
-													icon: "repeat",
-													description: "Complete several times each day",
-												},
-												{
 													type: "specific_days" as FrequencyType,
 													label: "Specific days",
 													icon: "calendar",
 													description: "Choose which days of the week",
-												},
-												{
-													type: "times_per_week" as FrequencyType,
-													label: "Times per week",
-													icon: "calendar-outline",
-													description: "Flexible weekly goal",
-												},
-												{
-													type: "times_per_month" as FrequencyType,
-													label: "Times per month",
-													icon: "calendar-number-outline",
-													description: "Monthly completion goal",
-												},
-												{
-													type: "every_n_days" as FrequencyType,
-													label: "Every N days",
-													icon: "refresh",
-													description: "Custom interval between completions",
-												},
-												{
-													type: "times_in_x_days" as FrequencyType,
-													label: "Times in X days",
-													icon: "timer-outline",
-													description: "Complete N times within X days",
 												},
 											].map((option) => (
 												<TouchableOpacity
@@ -1628,23 +1662,7 @@ export default function StatisticsScreen() {
 															borderColor: editColor,
 														},
 													]}
-													onPress={() => {
-														setEditFrequencyType(option.type);
-														if (option.type === "daily") {
-															setEditFrequencyValue(1);
-														} else if (option.type === "times_per_day") {
-															setEditFrequencyValue(2);
-														} else if (option.type === "times_per_week") {
-															setEditFrequencyValue(3);
-														} else if (option.type === "times_per_month") {
-															setEditFrequencyValue(10);
-														} else if (option.type === "every_n_days") {
-															setEditFrequencyValue(2);
-														} else if (option.type === "times_in_x_days") {
-															setEditFrequencyValue(3);
-															setEditFrequencySecondValue(14);
-														}
-													}}
+													onPress={() => setEditFrequencyType(option.type)}
 												>
 													<View
 														style={[
@@ -1727,369 +1745,24 @@ export default function StatisticsScreen() {
 												</View>
 											</View>
 										)}
-
-										{/* Window Selector for times_per_day */}
-										{editFrequencyType === "times_per_day" && (
-											<View
-												style={[
-													styles.frequencyValueContainer,
-													{ flexDirection: "column", gap: 12 },
-												]}
-											>
-												<View style={{ flexDirection: "row", gap: 12 }}>
-													{(
-														[
-															["start", "From", editWindowStart],
-															["end", "To", editWindowEnd],
-														] as const
-													).map(([key, label, value]) => (
-														<TouchableOpacity
-															key={key}
-															style={{
-																flex: 1,
-																padding: 12,
-																borderRadius: 10,
-																backgroundColor: theme.background,
-																borderWidth: 1,
-																borderColor: theme.border,
-															}}
-															onPress={() =>
-																setShowWindowPicker(
-																	showWindowPicker === key ? null : key
-																)
-															}
-														>
-															<Text
-																style={{
-																	fontSize: 12,
-																	color: theme.textMuted,
-																	marginBottom: 4,
-																}}
-															>
-																{label}
-															</Text>
-															<Text
-																style={{
-																	fontSize: 18,
-																	fontWeight: "700",
-																	color: editColor,
-																}}
-															>
-																{value}
-															</Text>
-														</TouchableOpacity>
-													))}
-												</View>
-
-												{showWindowPicker && (
-													<DateTimePicker
-														value={(() => {
-															const [h, m] = (
-																showWindowPicker === "start"
-																	? editWindowStart
-																	: editWindowEnd
-															)
-																.split(":")
-																.map(Number);
-															const d = new Date();
-															d.setHours(h, m, 0, 0);
-															return d;
-														})()}
-														mode="time"
-														is24Hour
-														display={
-															Platform.OS === "ios" ? "spinner" : "default"
-														}
-														onChange={(_event, date) => {
-															if (Platform.OS === "android") {
-																setShowWindowPicker(null);
-															}
-															if (!date) return;
-															const next = `${date
-																.getHours()
-																.toString()
-																.padStart(2, "0")}:${date
-																.getMinutes()
-																.toString()
-																.padStart(2, "0")}`;
-															if (showWindowPicker === "start") {
-																setEditWindowStart(next);
-															} else {
-																setEditWindowEnd(next);
-															}
-														}}
-													/>
-												)}
-
-												<View
-													style={{
-														flexDirection: "row",
-														alignItems: "center",
-														justifyContent: "space-between",
-													}}
-												>
-													<Text style={styles.frequencyValueLabel}>Every</Text>
-													<View style={styles.frequencyValueSelector}>
-														<TouchableOpacity
-															style={[
-																styles.frequencyValueButton,
-																{ backgroundColor: editColor + "20" },
-															]}
-															onPress={() =>
-																setEditWindowInterval((v) =>
-																	Math.max(15, v - 15)
-																)
-															}
-														>
-															<Ionicons
-																name="remove"
-																size={20}
-																color={editColor}
-															/>
-														</TouchableOpacity>
-														<Text
-															style={[
-																styles.frequencyValueText,
-																{
-																	color: editColor,
-																	fontSize: 16,
-																	minWidth: 76,
-																},
-															]}
-														>
-															{editWindowInterval >= 60
-																? `${Math.floor(editWindowInterval / 60)}h${
-																		editWindowInterval % 60
-																			? ` ${editWindowInterval % 60}m`
-																			: ""
-																  }`
-																: `${editWindowInterval}m`}
-														</Text>
-														<TouchableOpacity
-															style={[
-																styles.frequencyValueButton,
-																{ backgroundColor: editColor + "20" },
-															]}
-															onPress={() =>
-																setEditWindowInterval((v) =>
-																	Math.min(12 * 60, v + 15)
-																)
-															}
-														>
-															<Ionicons
-																name="add"
-																size={20}
-																color={editColor}
-															/>
-														</TouchableOpacity>
-													</View>
-												</View>
-
-												<View>
-													<Text
-														style={{
-															fontSize: 12,
-															color: theme.textMuted,
-															marginBottom: 8,
-														}}
-													>
-														{editWindowSlots.length} reminder
-														{editWindowSlots.length === 1 ? "" : "s"} per day
-													</Text>
-													<View
-														style={{
-															flexDirection: "row",
-															flexWrap: "wrap",
-															gap: 6,
-														}}
-													>
-														{editWindowSlots.map((slot) => (
-															<View
-																key={slot}
-																style={{
-																	paddingHorizontal: 10,
-																	paddingVertical: 5,
-																	borderRadius: 8,
-																	backgroundColor: editColor + "20",
-																}}
-															>
-																<Text
-																	style={{
-																		fontSize: 12,
-																		fontWeight: "600",
-																		color: editColor,
-																	}}
-																>
-																	{slot}
-																</Text>
-															</View>
-														))}
-													</View>
-												</View>
-											</View>
-										)}
-
-										{/* Value Selector for non-daily frequencies */}
-										{editFrequencyType !== "daily" &&
-											editFrequencyType !== "specific_days" &&
-											editFrequencyType !== "times_per_day" &&
-											editFrequencyType !== "times_in_x_days" && (
-												<View style={styles.frequencyValueContainer}>
-													<Text style={styles.frequencyValueLabel}>
-														{editFrequencyType === "times_per_week"
-															? "Times per week:"
-															: editFrequencyType === "times_per_month"
-															? "Times per month:"
-															: "Every N days:"}
-													</Text>
-													<View style={styles.frequencyValueSelector}>
-														<TouchableOpacity
-															style={[
-																styles.frequencyValueButton,
-																{ backgroundColor: editColor + "20" },
-															]}
-															onPress={() =>
-																setEditFrequencyValue(
-																	Math.max(1, editFrequencyValue - 1)
-																)
-															}
-														>
-															<Ionicons
-																name="remove"
-																size={20}
-																color={editColor}
-															/>
-														</TouchableOpacity>
-														<Text
-															style={[
-																styles.frequencyValueText,
-																{ color: editColor },
-															]}
-														>
-															{editFrequencyValue}
-														</Text>
-														<TouchableOpacity
-															style={[
-																styles.frequencyValueButton,
-																{ backgroundColor: editColor + "20" },
-															]}
-															onPress={() =>
-																setEditFrequencyValue(editFrequencyValue + 1)
-															}
-														>
-															<Ionicons
-																name="add"
-																size={20}
-																color={editColor}
-															/>
-														</TouchableOpacity>
-													</View>
-												</View>
-											)}
-
-										{/* Times in X Days - Two Value Selectors */}
-										{editFrequencyType === "times_in_x_days" && (
-											<View style={{ gap: 16 }}>
-												<View style={styles.frequencyValueContainer}>
-													<Text style={styles.frequencyValueLabel}>
-														Complete N times:
-													</Text>
-													<View style={styles.frequencyValueSelector}>
-														<TouchableOpacity
-															style={[
-																styles.frequencyValueButton,
-																{ backgroundColor: editColor + "20" },
-															]}
-															onPress={() =>
-																setEditFrequencyValue(
-																	Math.max(1, editFrequencyValue - 1)
-																)
-															}
-														>
-															<Ionicons
-																name="remove"
-																size={20}
-																color={editColor}
-															/>
-														</TouchableOpacity>
-														<Text
-															style={[
-																styles.frequencyValueText,
-																{ color: editColor },
-															]}
-														>
-															{editFrequencyValue}
-														</Text>
-														<TouchableOpacity
-															style={[
-																styles.frequencyValueButton,
-																{ backgroundColor: editColor + "20" },
-															]}
-															onPress={() =>
-																setEditFrequencyValue(editFrequencyValue + 1)
-															}
-														>
-															<Ionicons
-																name="add"
-																size={20}
-																color={editColor}
-															/>
-														</TouchableOpacity>
-													</View>
-												</View>
-												<View style={styles.frequencyValueContainer}>
-													<Text style={styles.frequencyValueLabel}>
-														Within X days:
-													</Text>
-													<View style={styles.frequencyValueSelector}>
-														<TouchableOpacity
-															style={[
-																styles.frequencyValueButton,
-																{ backgroundColor: editColor + "20" },
-															]}
-															onPress={() =>
-																setEditFrequencySecondValue(
-																	Math.max(2, editFrequencySecondValue - 1)
-																)
-															}
-														>
-															<Ionicons
-																name="remove"
-																size={20}
-																color={editColor}
-															/>
-														</TouchableOpacity>
-														<Text
-															style={[
-																styles.frequencyValueText,
-																{ color: editColor },
-															]}
-														>
-															{editFrequencySecondValue}
-														</Text>
-														<TouchableOpacity
-															style={[
-																styles.frequencyValueButton,
-																{ backgroundColor: editColor + "20" },
-															]}
-															onPress={() =>
-																setEditFrequencySecondValue(
-																	editFrequencySecondValue + 1
-																)
-															}
-														>
-															<Ionicons
-																name="add"
-																size={20}
-																color={editColor}
-															/>
-														</TouchableOpacity>
-													</View>
-												</View>
-											</View>
-										)}
 									</View>
 								)}
+							</View>
+							{/* HOW MANY TIMES a day - independent of the schedule above,
+							    so any combination is reachable. */}
+							<View style={styles.inputGroup}>
+								<Text style={styles.inputLabel}>Times per day</Text>
+								<PerDaySection
+									value={editPerDay}
+									onChange={setEditPerDay}
+									accent={editColor}
+									activeDayCount={
+										editFrequencyType === "specific_days"
+											? editSelectedDays.length
+											: 7
+									}
+									fallbackTime={editReminderTime}
+								/>
 							</View>
 
 							{/* Reminder Section */}
@@ -2142,7 +1815,7 @@ export default function StatisticsScreen() {
 									<View style={styles.switchTextContainer}>
 										<Text style={styles.switchTitle}>Alarm</Text>
 										<Text style={styles.switchSubtitle}>
-											Max priority, bypasses Do Not Disturb
+											Alarm volume, ignores silent mode and DND
 										</Text>
 									</View>
 								</View>
@@ -2157,48 +1830,9 @@ export default function StatisticsScreen() {
 								/>
 							</View>
 
-							{/* Sound Toggle */}
-							<View style={styles.switchRow}>
-								<View style={styles.switchInfo}>
-									<View
-										style={[
-											styles.selectedIcon,
-											{ backgroundColor: editColor + "20" },
-										]}
-									>
-										<Ionicons
-											name={
-												editRingtoneEnabled
-													? "volume-high"
-													: "volume-mute"
-											}
-											size={24}
-											color={editColor}
-										/>
-									</View>
-									<View style={styles.switchTextContainer}>
-										<Text style={styles.switchTitle}>Sound</Text>
-										<Text style={styles.switchSubtitle}>
-											{editRingtoneEnabled
-												? "Play a sound"
-												: "Vibrate only"}
-										</Text>
-									</View>
-								</View>
-								<Switch
-									value={editRingtoneEnabled}
-									onValueChange={setEditRingtoneEnabled}
-									trackColor={{
-										false: theme.border,
-										true: editColor + "60",
-									}}
-									thumbColor={editRingtoneEnabled ? editColor : theme.textMuted}
-								/>
-							</View>
-
-							{/* Reminder Time — a times_per_day habit derives its reminders
-							    from the From/To window, so a single time would be ignored. */}
-							{editReminderEnabled && editFrequencyType !== "times_per_day" && (
+							{/* Reminder Time — with several times a day the reminders come
+							    from Times per day, so a single time would be ignored. */}
+							{editReminderEnabled && editPerDay.target <= 1 && (
 								<View style={styles.inputGroup}>
 									<Text style={styles.inputLabel}>Reminder Time</Text>
 									<TouchableOpacity
@@ -2311,21 +1945,7 @@ export default function StatisticsScreen() {
 											{editHabitType === "measurable"
 												? `${editTarget || "?"} ${editUnit || "units"} • `
 												: ""}
-											{editFrequencyType === "daily"
-												? "Every day"
-												: editFrequencyType === "times_per_day"
-												? `${editWindowSlots.length}x/day ${editWindowStart}-${editWindowEnd}`
-												: editFrequencyType === "specific_days"
-												? `${editSelectedDays.length} days/week`
-												: editFrequencyType === "times_per_week"
-												? `${editFrequencyValue}x per week`
-												: editFrequencyType === "times_per_month"
-												? `${editFrequencyValue}x per month`
-												: editFrequencyType === "every_n_days"
-												? `Every ${editFrequencyValue} days`
-												: editFrequencyType === "times_in_x_days"
-												? `${editFrequencyValue}x in ${editFrequencySecondValue} days`
-												: "Custom"}
+											{describeFrequency(editFrequency, editReminderTime)}
 											{editReminderEnabled
 												? ` • ${editReminderTime}`
 												: " • No reminder"}
@@ -2477,6 +2097,12 @@ const createStyles = (theme: Theme) =>
 			color: theme.textMuted,
 			marginTop: 2,
 		},
+		scoreBasis: {
+			fontSize: 11,
+			color: theme.textMuted,
+			marginTop: 10,
+			textAlign: "center",
+		},
 
 		periodDropdown: {
 			flexDirection: "row",
@@ -2579,6 +2205,17 @@ const createStyles = (theme: Theme) =>
 			alignItems: "center",
 			marginHorizontal: 2,
 		},
+		barValue: {
+			fontSize: 10,
+			fontWeight: "600",
+			color: theme.textSecondary,
+			marginBottom: 2,
+		},
+		barLabel: {
+			fontSize: 9,
+			color: theme.textMuted,
+			marginTop: 4,
+		},
 		bar: {
 			width: "80%",
 			borderRadius: 4,
@@ -2635,6 +2272,10 @@ const createStyles = (theme: Theme) =>
 		},
 		otherMonthDay: {
 			opacity: 0.3,
+		},
+		// A day the habit is not scheduled on. Deliberately not styled as a miss.
+		inactiveDay: {
+			opacity: 0.25,
 		},
 		editButton: {
 			alignItems: "center",

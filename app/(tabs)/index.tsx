@@ -42,6 +42,15 @@ import { NotificationService } from "@/src/services/notificationService";
 import { LoadingState } from "@/src/components/LoadingState";
 import { useModuleRefresh } from "@/src/hooks/useModuleRefresh";
 import { generateUUID } from "@/src/utils/uuid";
+import { PerDaySection } from "@/src/components/habits/PerDaySection";
+import {
+	Frequency,
+	PerDay,
+	Schedule,
+	describeFrequency,
+	expandDayTimes,
+	normalizeFrequency,
+} from "@/src/utils/frequency";
 import {
 	FrequencyType,
 	Habit,
@@ -54,6 +63,14 @@ import { useRouter } from "expo-router";
 const { width, height } = Dimensions.get("window");
 
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+// Module scope on purpose: a `const` inside the component would be in its
+// temporal dead zone when the useMemos above it run during the first render.
+const formatTimeForStorage = (date: Date) => {
+	const hours = date.getHours().toString().padStart(2, "0");
+	const minutes = date.getMinutes().toString().padStart(2, "0");
+	return `${hours}:${minutes}`;
+};
 
 // Progress Ring Component for habit icons
 const ProgressRing = ({
@@ -1466,7 +1483,6 @@ const CreateHabitModal: React.FC<CreateHabitModalProps> = ({
 	const [showIconPicker, setShowIconPicker] = useState(false);
 	const [notificationEnabled, setNotificationEnabled] = useState(true);
 	const [alarmEnabled, setAlarmEnabled] = useState(false);
-	const [ringtoneEnabled, setRingtoneEnabled] = useState(true);
 	const [showFrequencyPicker, setShowFrequencyPicker] = useState(false);
 
 	// New habit type states
@@ -1477,30 +1493,33 @@ const CreateHabitModal: React.FC<CreateHabitModalProps> = ({
 
 	// Frequency states
 	const [frequencyType, setFrequencyType] = useState<FrequencyType>("daily");
-	const [frequencyValue, setFrequencyValue] = useState("3");
-	const [frequencySecondValue, setFrequencySecondValue] = useState("14");
-	const [frequencyDays, setFrequencyDays] = useState<number[]>([]);
 	const [selectedDays, setSelectedDays] = useState<number[]>([
 		0, 1, 2, 3, 4, 5, 6,
 	]);
 
-	// "times_per_day" window: from/to and the gap between occurrences
-	const [windowStart, setWindowStart] = useState("09:00");
-	const [windowEnd, setWindowEnd] = useState("21:00");
-	const [windowInterval, setWindowInterval] = useState(120); // minutes
-	const [showWindowPicker, setShowWindowPicker] = useState<
-		"start" | "end" | null
-	>(null);
+	// HOW MANY times on an active day, and when. Independent of the schedule
+	// above, so "3x a day on Mon/Wed/Fri" is expressible - see utils/frequency.
+	const [perDay, setPerDay] = useState<PerDay>({ target: 1 });
 
-	const windowSlots = useMemo(
-		() =>
-			NotificationService.expandDailyWindow(
-				windowStart,
-				windowEnd,
-				windowInterval,
-				parseInt(frequencyValue) || 1
-			),
-		[windowStart, windowEnd, windowInterval, frequencyValue]
+	// The schedule half of the frequency. Only two kinds are offered: every day,
+	// or a fixed set of weekdays. The other kinds normalizeFrequency() knows
+	// about are still parsed on read, for habits created by an older build.
+	const schedule = useMemo(
+		(): Schedule =>
+			frequencyType === "specific_days"
+				? { kind: "weekdays", days: selectedDays }
+				: { kind: "daily" },
+		[frequencyType, selectedDays]
+	);
+
+	const frequency = useMemo(
+		(): Frequency => normalizeFrequency({ schedule, perDay }),
+		[schedule, perDay]
+	);
+
+	const dayTimes = useMemo(
+		() => expandDayTimes(perDay, formatTimeForStorage(selectedTime)),
+		[perDay, selectedTime]
 	);
 
 	// Slide to dismiss animation
@@ -1547,26 +1566,8 @@ const CreateHabitModal: React.FC<CreateHabitModalProps> = ({
 		}
 	};
 
-	const getFrequencyLabel = () => {
-		switch (frequencyType) {
-			case "daily":
-				return "Every day";
-			case "times_per_day":
-				return `${windowSlots.length}x per day · ${windowStart}–${windowEnd}`;
-			case "specific_days":
-				return `${selectedDays.length} days/week`;
-			case "times_per_week":
-				return `${frequencyValue}x per week`;
-			case "times_per_month":
-				return `${frequencyValue}x per month`;
-			case "every_n_days":
-				return `Every ${frequencyValue} days`;
-			case "times_in_x_days":
-				return `${frequencyValue}x in ${frequencySecondValue} days`;
-			default:
-				return "Custom";
-		}
-	};
+	const getFrequencyLabel = () =>
+		describeFrequency(frequency, formatTimeForStorage(selectedTime));
 
 	// Icon options
 	const habitIcons = [
@@ -1674,40 +1675,10 @@ const CreateHabitModal: React.FC<CreateHabitModalProps> = ({
 			description: "Complete once daily",
 		},
 		{
-			value: "times_per_day",
-			label: "Multiple Times/Day",
-			icon: "repeat",
-			description: "Complete several times each day",
-		},
-		{
 			value: "specific_days",
 			label: "Specific Days",
 			icon: "calendar",
 			description: "Choose which days of the week",
-		},
-		{
-			value: "times_per_week",
-			label: "Times Per Week",
-			icon: "calendar-outline",
-			description: "Flexible weekly goal",
-		},
-		{
-			value: "times_per_month",
-			label: "Times Per Month",
-			icon: "calendar-number-outline",
-			description: "Monthly completion goal",
-		},
-		{
-			value: "every_n_days",
-			label: "Every N Days",
-			icon: "refresh",
-			description: "Custom interval between completions",
-		},
-		{
-			value: "times_in_x_days",
-			label: "Times In X Days",
-			icon: "timer-outline",
-			description: "Complete N times within X days",
 		},
 	];
 
@@ -1717,12 +1688,6 @@ const CreateHabitModal: React.FC<CreateHabitModalProps> = ({
 			minute: "2-digit",
 			hour12: true,
 		});
-	};
-
-	const formatTimeForStorage = (date: Date) => {
-		const hours = date.getHours().toString().padStart(2, "0");
-		const minutes = date.getMinutes().toString().padStart(2, "0");
-		return `${hours}:${minutes}`;
 	};
 
 	const handleTimeChange = (event: any, date?: Date) => {
@@ -1745,20 +1710,13 @@ const CreateHabitModal: React.FC<CreateHabitModalProps> = ({
 		setShowFrequencyPicker(false);
 		setNotificationEnabled(true);
 		setAlarmEnabled(false);
-		setRingtoneEnabled(true);
 		setHabitType("yesno");
 		setUnit("");
 		setTarget("");
 		setTargetType("at_least");
 		setFrequencyType("daily");
-		setFrequencyValue("3");
-		setFrequencySecondValue("14");
-		setFrequencyDays([]);
 		setSelectedDays([0, 1, 2, 3, 4, 5, 6]);
-		setWindowStart("09:00");
-		setWindowEnd("21:00");
-		setWindowInterval(120);
-		setShowWindowPicker(null);
+		setPerDay({ target: 1 });
 	};
 
 	// Reset translateY when modal opens
@@ -1801,34 +1759,14 @@ const CreateHabitModal: React.FC<CreateHabitModalProps> = ({
 			unit: habitType === "measurable" ? unit.trim() : undefined,
 			target: habitType === "measurable" ? parseFloat(target) : undefined,
 			targetType: habitType === "measurable" ? targetType : undefined,
-			frequency: {
-				type: frequencyType,
-				value:
-					frequencyType === "times_per_day"
-						? windowSlots.length
-						: parseInt(frequencyValue) || 1,
-				secondValue:
-					frequencyType === "times_in_x_days"
-						? parseInt(frequencySecondValue) || 14
-						: undefined,
-				days:
-					frequencyType === "specific_days"
-						? selectedDays
-						: frequencyDays.length > 0
-						? frequencyDays
-						: undefined,
-				startTime: frequencyType === "times_per_day" ? windowStart : undefined,
-				endTime: frequencyType === "times_per_day" ? windowEnd : undefined,
-				intervalMinutes:
-					frequencyType === "times_per_day" ? windowInterval : undefined,
-			},
+			frequency,
+			// The first reminder of the day. With several times a day the list
+			// itself drives the schedule and this is only the anchor.
 			notificationTime:
-				frequencyType === "times_per_day"
-					? windowStart
-					: formatTimeForStorage(selectedTime),
+				perDay.target > 1 ? dayTimes[0] : formatTimeForStorage(selectedTime),
 			notificationEnabled,
 			alarmEnabled,
-			ringtoneEnabled,
+			ringtoneEnabled: true,
 			isArchived: false,
 			createdAt: new Date(),
 			updatedAt: new Date(),
@@ -2297,22 +2235,9 @@ const CreateHabitModal: React.FC<CreateHabitModalProps> = ({
 														? selectedColor + "15"
 														: "transparent",
 											}}
-											onPress={() => {
-												setFrequencyType(option.value as FrequencyType);
-												if (option.value === "daily") setFrequencyValue("1");
-												else if (option.value === "times_per_day")
-													setFrequencyValue("2");
-												else if (option.value === "times_per_week")
-													setFrequencyValue("3");
-												else if (option.value === "times_per_month")
-													setFrequencyValue("10");
-												else if (option.value === "every_n_days")
-													setFrequencyValue("2");
-												else if (option.value === "times_in_x_days") {
-													setFrequencyValue("3");
-													setFrequencySecondValue("14");
-												}
-											}}
+											onPress={() =>
+												setFrequencyType(option.value as FrequencyType)
+											}
 										>
 											<View
 												style={{
@@ -2432,668 +2357,6 @@ const CreateHabitModal: React.FC<CreateHabitModalProps> = ({
 											</View>
 										</View>
 									)}
-
-									{/* Window Selector for times_per_day */}
-									{frequencyType === "times_per_day" && (
-										<View
-											style={{
-												marginTop: 12,
-												padding: 12,
-												backgroundColor: theme.background,
-												borderRadius: 10,
-												gap: 12,
-											}}
-										>
-											{/* From / To */}
-											<View style={{ flexDirection: "row", gap: 12 }}>
-												{(
-													[
-														["start", "From", windowStart],
-														["end", "To", windowEnd],
-													] as const
-												).map(([key, label, value]) => (
-													<TouchableOpacity
-														key={key}
-														style={{
-															flex: 1,
-															padding: 12,
-															borderRadius: 10,
-															backgroundColor: theme.surfaceLight,
-															borderWidth: 1,
-															borderColor: theme.border,
-														}}
-														onPress={() =>
-															setShowWindowPicker(
-																showWindowPicker === key ? null : key
-															)
-														}
-													>
-														<Text
-															style={{
-																fontSize: 12,
-																color: theme.textMuted,
-																marginBottom: 4,
-															}}
-														>
-															{label}
-														</Text>
-														<Text
-															style={{
-																fontSize: 18,
-																fontWeight: "700",
-																color: selectedColor,
-															}}
-														>
-															{value}
-														</Text>
-													</TouchableOpacity>
-												))}
-											</View>
-
-											{showWindowPicker && (
-												<DateTimePicker
-													value={(() => {
-														const [h, m] = (
-															showWindowPicker === "start"
-																? windowStart
-																: windowEnd
-														)
-															.split(":")
-															.map(Number);
-														const d = new Date();
-														d.setHours(h, m, 0, 0);
-														return d;
-													})()}
-													mode="time"
-													is24Hour
-													display={
-														Platform.OS === "ios" ? "spinner" : "default"
-													}
-													onChange={(_event, date) => {
-														if (Platform.OS === "android") {
-															setShowWindowPicker(null);
-														}
-														if (!date) return;
-														const next = `${date
-															.getHours()
-															.toString()
-															.padStart(2, "0")}:${date
-															.getMinutes()
-															.toString()
-															.padStart(2, "0")}`;
-														if (showWindowPicker === "start") {
-															setWindowStart(next);
-														} else {
-															setWindowEnd(next);
-														}
-													}}
-												/>
-											)}
-
-											{/* Interval between occurrences */}
-											<View
-												style={{
-													flexDirection: "row",
-													alignItems: "center",
-													justifyContent: "space-between",
-												}}
-											>
-												<Text
-													style={{
-														fontSize: 14,
-														fontWeight: "600",
-														color: theme.text,
-													}}
-												>
-													Every
-												</Text>
-												<View
-													style={{
-														flexDirection: "row",
-														alignItems: "center",
-														gap: 12,
-													}}
-												>
-													<TouchableOpacity
-														style={{
-															width: 36,
-															height: 36,
-															borderRadius: 18,
-															backgroundColor: selectedColor + "20",
-															justifyContent: "center",
-															alignItems: "center",
-														}}
-														onPress={() =>
-															setWindowInterval((v) => Math.max(15, v - 15))
-														}
-													>
-														<Ionicons
-															name="remove"
-															size={20}
-															color={selectedColor}
-														/>
-													</TouchableOpacity>
-													<Text
-														style={{
-															fontSize: 16,
-															fontWeight: "bold",
-															color: selectedColor,
-															minWidth: 76,
-															textAlign: "center",
-														}}
-													>
-														{windowInterval >= 60
-															? `${Math.floor(windowInterval / 60)}h${
-																	windowInterval % 60
-																		? ` ${windowInterval % 60}m`
-																		: ""
-															  }`
-															: `${windowInterval}m`}
-													</Text>
-													<TouchableOpacity
-														style={{
-															width: 36,
-															height: 36,
-															borderRadius: 18,
-															backgroundColor: selectedColor + "20",
-															justifyContent: "center",
-															alignItems: "center",
-														}}
-														onPress={() =>
-															setWindowInterval((v) =>
-																Math.min(12 * 60, v + 15)
-															)
-														}
-													>
-														<Ionicons
-															name="add"
-															size={20}
-															color={selectedColor}
-														/>
-													</TouchableOpacity>
-												</View>
-											</View>
-
-											{/* Resulting reminder times */}
-											<View>
-												<Text
-													style={{
-														fontSize: 12,
-														color: theme.textMuted,
-														marginBottom: 8,
-													}}
-												>
-													{windowSlots.length} reminder
-													{windowSlots.length === 1 ? "" : "s"} per day
-												</Text>
-												<View
-													style={{
-														flexDirection: "row",
-														flexWrap: "wrap",
-														gap: 6,
-													}}
-												>
-													{windowSlots.map((slot) => (
-														<View
-															key={slot}
-															style={{
-																paddingHorizontal: 10,
-																paddingVertical: 5,
-																borderRadius: 8,
-																backgroundColor: selectedColor + "20",
-															}}
-														>
-															<Text
-																style={{
-																	fontSize: 12,
-																	fontWeight: "600",
-																	color: selectedColor,
-																}}
-															>
-																{slot}
-															</Text>
-														</View>
-													))}
-												</View>
-											</View>
-										</View>
-									)}
-
-									{/* Value Selector for every_n_days */}
-									{frequencyType === "every_n_days" && (
-										<View
-											style={{
-												marginTop: 12,
-												padding: 12,
-												backgroundColor: theme.background,
-												borderRadius: 10,
-												flexDirection: "row",
-												alignItems: "center",
-												justifyContent: "space-between",
-											}}
-										>
-											<Text
-												style={{
-													fontSize: 14,
-													fontWeight: "600",
-													color: theme.text,
-												}}
-											>
-												Every N days:
-											</Text>
-											<View
-												style={{
-													flexDirection: "row",
-													alignItems: "center",
-													gap: 12,
-												}}
-											>
-												<TouchableOpacity
-													style={{
-														width: 36,
-														height: 36,
-														borderRadius: 18,
-														backgroundColor: selectedColor + "20",
-														justifyContent: "center",
-														alignItems: "center",
-													}}
-													onPress={() =>
-														setFrequencyValue(
-															String(Math.max(2, parseInt(frequencyValue) - 1))
-														)
-													}
-												>
-													<Ionicons
-														name="remove"
-														size={20}
-														color={selectedColor}
-													/>
-												</TouchableOpacity>
-												<Text
-													style={{
-														fontSize: 20,
-														fontWeight: "bold",
-														color: selectedColor,
-														minWidth: 30,
-														textAlign: "center",
-													}}
-												>
-													{frequencyValue}
-												</Text>
-												<TouchableOpacity
-													style={{
-														width: 36,
-														height: 36,
-														borderRadius: 18,
-														backgroundColor: selectedColor + "20",
-														justifyContent: "center",
-														alignItems: "center",
-													}}
-													onPress={() =>
-														setFrequencyValue(
-															String(parseInt(frequencyValue) + 1)
-														)
-													}
-												>
-													<Ionicons
-														name="add"
-														size={20}
-														color={selectedColor}
-													/>
-												</TouchableOpacity>
-											</View>
-										</View>
-									)}
-
-									{/* Value Selector for times_per_week */}
-									{frequencyType === "times_per_week" && (
-										<View
-											style={{
-												marginTop: 12,
-												padding: 12,
-												backgroundColor: theme.background,
-												borderRadius: 10,
-												flexDirection: "row",
-												alignItems: "center",
-												justifyContent: "space-between",
-											}}
-										>
-											<Text
-												style={{
-													fontSize: 14,
-													fontWeight: "600",
-													color: theme.text,
-												}}
-											>
-												Times per week:
-											</Text>
-											<View
-												style={{
-													flexDirection: "row",
-													alignItems: "center",
-													gap: 12,
-												}}
-											>
-												<TouchableOpacity
-													style={{
-														width: 36,
-														height: 36,
-														borderRadius: 18,
-														backgroundColor: selectedColor + "20",
-														justifyContent: "center",
-														alignItems: "center",
-													}}
-													onPress={() =>
-														setFrequencyValue(
-															String(Math.max(1, parseInt(frequencyValue) - 1))
-														)
-													}
-												>
-													<Ionicons
-														name="remove"
-														size={20}
-														color={selectedColor}
-													/>
-												</TouchableOpacity>
-												<Text
-													style={{
-														fontSize: 20,
-														fontWeight: "bold",
-														color: selectedColor,
-														minWidth: 30,
-														textAlign: "center",
-													}}
-												>
-													{frequencyValue}
-												</Text>
-												<TouchableOpacity
-													style={{
-														width: 36,
-														height: 36,
-														borderRadius: 18,
-														backgroundColor: selectedColor + "20",
-														justifyContent: "center",
-														alignItems: "center",
-													}}
-													onPress={() =>
-														setFrequencyValue(
-															String(parseInt(frequencyValue) + 1)
-														)
-													}
-												>
-													<Ionicons
-														name="add"
-														size={20}
-														color={selectedColor}
-													/>
-												</TouchableOpacity>
-											</View>
-										</View>
-									)}
-
-									{/* Value Selector for times_per_month */}
-									{frequencyType === "times_per_month" && (
-										<View
-											style={{
-												marginTop: 12,
-												padding: 12,
-												backgroundColor: theme.background,
-												borderRadius: 10,
-												flexDirection: "row",
-												alignItems: "center",
-												justifyContent: "space-between",
-											}}
-										>
-											<Text
-												style={{
-													fontSize: 14,
-													fontWeight: "600",
-													color: theme.text,
-												}}
-											>
-												Times per month:
-											</Text>
-											<View
-												style={{
-													flexDirection: "row",
-													alignItems: "center",
-													gap: 12,
-												}}
-											>
-												<TouchableOpacity
-													style={{
-														width: 36,
-														height: 36,
-														borderRadius: 18,
-														backgroundColor: selectedColor + "20",
-														justifyContent: "center",
-														alignItems: "center",
-													}}
-													onPress={() =>
-														setFrequencyValue(
-															String(Math.max(1, parseInt(frequencyValue) - 1))
-														)
-													}
-												>
-													<Ionicons
-														name="remove"
-														size={20}
-														color={selectedColor}
-													/>
-												</TouchableOpacity>
-												<Text
-													style={{
-														fontSize: 20,
-														fontWeight: "bold",
-														color: selectedColor,
-														minWidth: 30,
-														textAlign: "center",
-													}}
-												>
-													{frequencyValue}
-												</Text>
-												<TouchableOpacity
-													style={{
-														width: 36,
-														height: 36,
-														borderRadius: 18,
-														backgroundColor: selectedColor + "20",
-														justifyContent: "center",
-														alignItems: "center",
-													}}
-													onPress={() =>
-														setFrequencyValue(
-															String(parseInt(frequencyValue) + 1)
-														)
-													}
-												>
-													<Ionicons
-														name="add"
-														size={20}
-														color={selectedColor}
-													/>
-												</TouchableOpacity>
-											</View>
-										</View>
-									)}
-
-									{/* Value Selector for times_in_x_days */}
-									{frequencyType === "times_in_x_days" && (
-										<View
-											style={{
-												marginTop: 12,
-												padding: 12,
-												backgroundColor: theme.background,
-												borderRadius: 10,
-											}}
-										>
-											<View
-												style={{
-													flexDirection: "row",
-													alignItems: "center",
-													justifyContent: "space-between",
-													marginBottom: 12,
-												}}
-											>
-												<Text
-													style={{
-														fontSize: 14,
-														fontWeight: "600",
-														color: theme.text,
-													}}
-												>
-													Times:
-												</Text>
-												<View
-													style={{
-														flexDirection: "row",
-														alignItems: "center",
-														gap: 12,
-													}}
-												>
-													<TouchableOpacity
-														style={{
-															width: 36,
-															height: 36,
-															borderRadius: 18,
-															backgroundColor: selectedColor + "20",
-															justifyContent: "center",
-															alignItems: "center",
-														}}
-														onPress={() =>
-															setFrequencyValue(
-																String(
-																	Math.max(1, parseInt(frequencyValue) - 1)
-																)
-															)
-														}
-													>
-														<Ionicons
-															name="remove"
-															size={20}
-															color={selectedColor}
-														/>
-													</TouchableOpacity>
-													<Text
-														style={{
-															fontSize: 20,
-															fontWeight: "bold",
-															color: selectedColor,
-															minWidth: 30,
-															textAlign: "center",
-														}}
-													>
-														{frequencyValue}
-													</Text>
-													<TouchableOpacity
-														style={{
-															width: 36,
-															height: 36,
-															borderRadius: 18,
-															backgroundColor: selectedColor + "20",
-															justifyContent: "center",
-															alignItems: "center",
-														}}
-														onPress={() =>
-															setFrequencyValue(
-																String(parseInt(frequencyValue) + 1)
-															)
-														}
-													>
-														<Ionicons
-															name="add"
-															size={20}
-															color={selectedColor}
-														/>
-													</TouchableOpacity>
-												</View>
-											</View>
-											<View
-												style={{
-													flexDirection: "row",
-													alignItems: "center",
-													justifyContent: "space-between",
-												}}
-											>
-												<Text
-													style={{
-														fontSize: 14,
-														fontWeight: "600",
-														color: theme.text,
-													}}
-												>
-													In days:
-												</Text>
-												<View
-													style={{
-														flexDirection: "row",
-														alignItems: "center",
-														gap: 12,
-													}}
-												>
-													<TouchableOpacity
-														style={{
-															width: 36,
-															height: 36,
-															borderRadius: 18,
-															backgroundColor: selectedColor + "20",
-															justifyContent: "center",
-															alignItems: "center",
-														}}
-														onPress={() =>
-															setFrequencySecondValue(
-																String(
-																	Math.max(
-																		1,
-																		parseInt(frequencySecondValue) - 1
-																	)
-																)
-															)
-														}
-													>
-														<Ionicons
-															name="remove"
-															size={20}
-															color={selectedColor}
-														/>
-													</TouchableOpacity>
-													<Text
-														style={{
-															fontSize: 20,
-															fontWeight: "bold",
-															color: selectedColor,
-															minWidth: 30,
-															textAlign: "center",
-														}}
-													>
-														{frequencySecondValue}
-													</Text>
-													<TouchableOpacity
-														style={{
-															width: 36,
-															height: 36,
-															borderRadius: 18,
-															backgroundColor: selectedColor + "20",
-															justifyContent: "center",
-															alignItems: "center",
-														}}
-														onPress={() =>
-															setFrequencySecondValue(
-																String(parseInt(frequencySecondValue) + 1)
-															)
-														}
-													>
-														<Ionicons
-															name="add"
-															size={20}
-															color={selectedColor}
-														/>
-													</TouchableOpacity>
-												</View>
-											</View>
-										</View>
-									)}
-
 									{/* Done Button */}
 									<TouchableOpacity
 										style={{
@@ -3117,9 +2380,32 @@ const CreateHabitModal: React.FC<CreateHabitModalProps> = ({
 									</TouchableOpacity>
 								</View>
 							)}
-							{/* A times_per_day habit derives its reminders from the From/To
-							window, so a single reminder time would be ignored. */}
-							{frequencyType !== "times_per_day" && (
+						{/* HOW MANY TIMES a day - the second, independent axis. Any
+						    schedule above can be combined with any of these. */}
+						<Text
+							style={{
+								fontSize: 14,
+								fontWeight: "600",
+								color: theme.textSecondary,
+								marginBottom: 8,
+							}}
+						>
+							Times per day
+						</Text>
+						<View style={{ marginBottom: 20 }}>
+							<PerDaySection
+								value={perDay}
+								onChange={setPerDay}
+								accent={selectedColor}
+								activeDayCount={
+									frequencyType === "specific_days" ? selectedDays.length : 7
+								}
+								fallbackTime={formatTimeForStorage(selectedTime)}
+							/>
+						</View>
+							{/* With more than one time a day the reminders come from the
+							    Times per day section, so a single time would be ignored. */}
+							{perDay.target <= 1 && (
 								<>
 									{/* Time Picker Section */}
 									<Text
@@ -3340,7 +2626,7 @@ const CreateHabitModal: React.FC<CreateHabitModalProps> = ({
 											Alarm
 										</Text>
 										<Text style={{ fontSize: 13, color: theme.textMuted }}>
-											Max priority, bypasses Do Not Disturb
+											Alarm volume, ignores silent mode and DND
 										</Text>
 									</View>
 								</View>
@@ -3368,78 +2654,6 @@ const CreateHabitModal: React.FC<CreateHabitModalProps> = ({
 									/>
 								</TouchableOpacity>
 							</View>
-							{/* Sound Toggle */}
-							<View
-								style={{
-									flexDirection: "row",
-									justifyContent: "space-between",
-									alignItems: "center",
-									backgroundColor: theme.surfaceLight,
-									borderRadius: 14,
-									padding: 16,
-									marginBottom: 20,
-									borderWidth: 1,
-									borderColor: theme.border,
-								}}
-							>
-								<View style={{ flexDirection: "row", alignItems: "center" }}>
-									<View
-										style={{
-											width: 44,
-											height: 44,
-											borderRadius: 12,
-											backgroundColor: selectedColor + "20",
-											justifyContent: "center",
-											alignItems: "center",
-											marginRight: 12,
-										}}
-									>
-										<Ionicons
-											name={ringtoneEnabled ? "volume-high" : "volume-mute"}
-											size={22}
-											color={selectedColor}
-										/>
-									</View>
-									<View>
-										<Text
-											style={{
-												fontSize: 16,
-												fontWeight: "600",
-												color: theme.text,
-											}}
-										>
-											Sound
-										</Text>
-										<Text style={{ fontSize: 13, color: theme.textMuted }}>
-											{ringtoneEnabled ? "Play a sound" : "Vibrate only"}
-										</Text>
-									</View>
-								</View>
-								<TouchableOpacity
-									style={{
-										width: 52,
-										height: 30,
-										borderRadius: 15,
-										backgroundColor: ringtoneEnabled
-											? selectedColor
-											: theme.border,
-										padding: 2,
-										justifyContent: "center",
-									}}
-									onPress={() => setRingtoneEnabled(!ringtoneEnabled)}
-								>
-									<View
-										style={{
-											width: 26,
-											height: 26,
-											borderRadius: 13,
-											backgroundColor: "#FFFFFF",
-											alignSelf: ringtoneEnabled ? "flex-end" : "flex-start",
-										}}
-									/>
-								</TouchableOpacity>
-							</View>
-
 							{/* Color Picker */}
 							<Text
 								style={{

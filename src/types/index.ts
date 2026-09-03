@@ -1,6 +1,9 @@
 // Habit Types
 export type HabitType = "yesno" | "measurable";
 
+import type { Frequency } from "../utils/frequency";
+export type { Frequency, PerDay, Schedule, ScheduleKind } from "../utils/frequency";
+
 // Frequency Types
 export type FrequencyType =
 	| "daily" // Every day
@@ -43,8 +46,10 @@ export interface Habit {
 	target?: number; // e.g., 8 (glasses of water)
 	targetType?: TargetType; // at_least, at_most, exactly
 
-	// Frequency
-	frequency: FrequencyConfig;
+	// Frequency. Two orthogonal axes - which days, and how many times on an
+	// active day - see src/utils/frequency.ts. Reads normalize the legacy flat
+	// shape into this, so anything holding a Habit sees the new form.
+	frequency: Frequency;
 
 	// Reminders
 	notificationTime?: string; // HH:mm format (legacy support)
@@ -84,25 +89,59 @@ export interface HabitLog {
 	notes?: string;
 }
 
+/**
+ * One calendar day of a habit's history.
+ *
+ * `active` is what makes the rest meaningful: a Mon/Wed/Fri habit is simply not
+ * scheduled on a Tuesday, so that day is neither a hit nor a miss and must be
+ * excluded from rates and skipped over by streaks.
+ */
+export interface DayProgress {
+	/** Local date, "YYYY-MM-DD". Not an ISO timestamp - no timezone shifting. */
+	date: string;
+	/** Is the habit due on this day at all? */
+	active: boolean;
+	/** Completions logged. */
+	done: number;
+	/** Completions needed. 0 on an inactive day. */
+	target: number;
+	/** done >= target on an active day; any log at all on an inactive one. */
+	completed: boolean;
+	/** First logged value, for measurable habits. */
+	value?: number;
+}
+
 export interface HabitStats {
 	habitId: string;
+	/** Days fully completed. NOT the number of logs - see totalLogs. */
 	totalCompleted: number;
+	/** Days the habit was due. The denominator for totalCompleted. */
+	totalScheduled: number;
+	/** Raw completions. A 3x/day habit logs three of these a day. */
+	totalLogs: number;
 	currentStreak: number;
 	longestStreak: number;
-	completionRate: number; // percentage
+	/** Percentage of DUE days completed in the last 30. */
+	completionRate: number;
 
 	// For measurable habits
 	totalValue?: number;
 	averageValue?: number;
 	bestValue?: number;
 
-	// Weekly/Monthly stats
+	// Weekly/Monthly stats, in completed days
 	weeklyCompletions: number;
 	monthlyCompletions: number;
+	/** Due days in the same windows, so a rate can be shown as "5 / 8 days". */
+	scheduledDays7: number;
+	scheduledDays30: number;
+	completedDays30: number;
 
-	// History
-	last7Days: { date: string; completed: boolean; value?: number }[];
-	last30Days: { date: string; completed: boolean; value?: number }[];
+	// History, oldest first
+	last7Days: DayProgress[];
+	last30Days: DayProgress[];
+	/** Up to a year, from the habit's creation date. Oldest first. */
+	days: DayProgress[];
 }
 
 // User Profile
