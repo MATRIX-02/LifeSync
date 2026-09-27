@@ -15,9 +15,16 @@ interface ModuleStore {
 	toggleModule: (module: ModuleType, enabled: boolean) => Promise<void>;
 	reorderModules: (modules: ModuleType[]) => void;
 	getFirstEnabledModule: () => ModuleType;
+	getDefaultModuleRoute: () => string;
 }
 
 const defaultModules: ModuleType[] = ["habits", "workout", "finance", "study"];
+const moduleRoutes: Record<ModuleType, string> = {
+	habits: "/(tabs)",
+	workout: "/(tabs)/workout",
+	finance: "/(tabs)/finance",
+	study: "/(tabs)/study",
+};
 
 // Create store with persist
 const useModuleStoreBase = create<ModuleStore>()(
@@ -130,6 +137,8 @@ const useModuleStoreBase = create<ModuleStore>()(
 					"habits"
 				);
 			},
+
+			getDefaultModuleRoute: () => moduleRoutes[get().getFirstEnabledModule()],
 		}),
 		{
 			name: "module-store",

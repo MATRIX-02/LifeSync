@@ -1,6 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { usePathname, useRouter } from "expo-router";
+import { usePathname, useRootNavigationState, useRouter } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useModuleStore } from "../context/moduleContext";
 
 const NAVIGATION_STATE_KEY = "lifesync_last_route";
 const TAB_STATE_KEY = "lifesync_tab_states";
@@ -19,42 +20,41 @@ const PERSISTABLE_ROUTES = [
 const IGNORED_ROUTES = ["/modal", "/auth", "/admin", "/subscription"];
 
 /**
- * Hook to persist and restore the last visited route
- * Call this in your root layout
+ * Hook to open the first enabled module at startup and persist current routes.
+ * Call this in your root layout.
  */
-export function useNavigationPersistence() {
+export function useNavigationPersistence(readyForStartupRoute = true) {
 	const pathname = usePathname();
 	const router = useRouter();
+	const rootNavigationState = useRootNavigationState();
+	const modulesHydrated = useModuleStore((state) => state._hasHydrated);
+	const getDefaultModuleRoute = useModuleStore(
+		(state) => state.getDefaultModuleRoute,
+	);
 	const hasRestored = useRef(false);
 	const isInitialMount = useRef(true);
 
-	// Restore last route on app start
+	// Wait for persisted module order before choosing the startup route.
 	useEffect(() => {
-		const restoreRoute = async () => {
-			if (hasRestored.current) return;
-
-			try {
-				const lastRoute = await AsyncStorage.getItem(NAVIGATION_STATE_KEY);
-
-				if (
-					lastRoute &&
-					PERSISTABLE_ROUTES.some((r) => lastRoute.startsWith(r))
-				) {
-					hasRestored.current = true;
-					// Small delay to ensure navigation is ready
-					setTimeout(() => {
-						router.replace(lastRoute as any);
-					}, 100);
-				}
-			} catch (error) {
-				console.log("Error restoring navigation state:", error);
-			}
-
-			hasRestored.current = true;
-		};
-
-		restoreRoute();
-	}, []);
+		if (
+			!readyForStartupRoute ||
+			!modulesHydrated ||
+			!rootNavigationState?.key ||
+			hasRestored.current
+		) {
+			return;
+		}
+		hasRestored.current = true;
+		const route = getDefaultModuleRoute();
+		const timeout = setTimeout(() => router.replace(route as any), 100);
+		return () => clearTimeout(timeout);
+	}, [
+		getDefaultModuleRoute,
+		modulesHydrated,
+		readyForStartupRoute,
+		rootNavigationState?.key,
+		router,
+	]);
 
 	// Save current route when it changes
 	useEffect(() => {
@@ -67,7 +67,7 @@ export function useNavigationPersistence() {
 		const saveRoute = async () => {
 			// Only save persistable routes
 			const shouldPersist = PERSISTABLE_ROUTES.some((r) =>
-				pathname.startsWith(r)
+				pathname.startsWith(r),
 			);
 			const shouldIgnore = IGNORED_ROUTES.some((r) => pathname.startsWith(r));
 
@@ -113,7 +113,7 @@ export async function clearPersistedRoute(): Promise<void> {
  */
 export function useTabPersistence<T extends string>(
 	moduleKey: string,
-	defaultTab: T
+	defaultTab: T,
 ): [T, (tab: T) => void, boolean] {
 	const [activeTab, setActiveTab] = useState<T>(defaultTab);
 	const [isLoaded, setIsLoaded] = useState(false);
@@ -150,7 +150,7 @@ export function useTabPersistence<T extends string>(
 				console.log("Error saving tab state:", error);
 			}
 		},
-		[moduleKey]
+		[moduleKey],
 	);
 
 	return [activeTab, setAndPersistTab, isLoaded];
@@ -160,7 +160,7 @@ export function useTabPersistence<T extends string>(
  * Get persisted tab for a module (for use outside of hooks)
  */
 export async function getPersistedTab(
-	moduleKey: string
+	moduleKey: string,
 ): Promise<string | null> {
 	try {
 		const tabStates = await AsyncStorage.getItem(TAB_STATE_KEY);

@@ -14,12 +14,7 @@ import {
 } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import { useEffect, useRef, useState } from "react";
-import {
-	ActivityIndicator,
-	StatusBar,
-	StyleSheet,
-	View,
-} from "react-native";
+import { ActivityIndicator, StatusBar, StyleSheet, View } from "react-native";
 import "react-native-reanimated";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
@@ -84,7 +79,7 @@ export default function RootLayout() {
 			console.log(
 				permitted
 					? "✅ Notification permissions granted"
-					: "❌ Notification permissions denied"
+					: "❌ Notification permissions denied",
 			);
 		})();
 	}, []);
@@ -111,11 +106,11 @@ export default function RootLayout() {
 		(async () => {
 			const { habits } = useHabitStore.getState();
 			const activeHabits = habits.filter(
-				(h) => !h.isArchived && h.notificationEnabled && h.notificationTime
+				(h) => !h.isArchived && h.notificationEnabled && h.notificationTime,
 			);
 
 			console.log(
-				`📱 Rescheduling reminders for ${activeHabits.length} habit(s)`
+				`📱 Rescheduling reminders for ${activeHabits.length} habit(s)`,
 			);
 
 			for (const habit of activeHabits) {
@@ -127,7 +122,7 @@ export default function RootLayout() {
 				} catch (error) {
 					console.error(
 						`Failed to reschedule notification for ${habit.name}:`,
-						error
+						error,
 					);
 				}
 			}
@@ -178,7 +173,9 @@ function RootLayoutNav() {
 	const [isInitialized, setIsInitialized] = useState(false);
 
 	// Persist and restore navigation state
-	useNavigationPersistence();
+	useNavigationPersistence(
+		isInitialized && (!isSupabaseConfigured() || (!!user && !!profile)),
+	);
 
 	// Initialize sync manager - handles fetching/syncing data with Supabase
 	const { syncState, isFetching } = useSyncManager();
@@ -208,7 +205,7 @@ function RootLayoutNav() {
 						params: { showInvitations: "true" },
 					});
 				}
-			}
+			},
 		);
 
 		return () => {
@@ -235,7 +232,7 @@ function RootLayoutNav() {
 		} else if (user && profile && inAuthGroup) {
 			// Redirect to home if authenticated WITH profile loaded and trying to access auth screens
 			// Wait for profile to be loaded before navigating away from auth screens
-			router.replace("/(tabs)");
+			router.replace(useModuleStore.getState().getDefaultModuleRoute() as any);
 		}
 	}, [user, profile, segments, isInitialized, authLoading, navigatorReady]);
 
