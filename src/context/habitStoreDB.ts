@@ -1,17 +1,17 @@
 // Database-first Habit Store - All operations go through Supabase
 import { create } from "zustand";
 import { supabase } from "../config/supabase";
+import { NotificationService } from "../services/notificationService";
 import {
 	AppSettings,
+	DayProgress,
 	FrequencyConfig,
 	Habit,
 	HabitLog,
-	DayProgress,
 	HabitStats,
 	UserProfile,
 } from "../types";
 import {
-	expandDayTimes,
 	isActiveOn,
 	normalizeFrequency,
 	toLegacyFrequency,
@@ -29,22 +29,37 @@ import { generateUUID } from "../utils/uuid";
  * Keyed on the array reference: zustand replaces `logs` on every mutation, so
  * an unchanged reference means an unchanged index.
  */
-let logIndexCache: { source: HabitLog[]; index: Map<string, HabitLog[]> } | null =
-	null;
+let logIndexCache: {
+	source: HabitLog[];
+	index: Map<string, HabitLog[]>;
+} | null = null;
 
 // Local calendar date as "YYYY-MM-DD". toISOString() would shift the day for
 // anyone east or west of UTC, which silently moved logs a day in either
 // direction depending on the hour they were made.
 const toDateKey = (date: Date): string =>
 	`${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(
-		date.getDate()
+		date.getDate(),
 	).padStart(2, "0")}`;
 
 const dayKey = (habitId: string, date: Date): string =>
 	`${habitId}|${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
 
+const syncHabitReminder = async (habit: Habit): Promise<void> => {
+	try {
+		if (!habit.notificationEnabled || habit.isArchived) {
+			await NotificationService.cancelHabitNotifications(habit.id);
+			return;
+		}
+		await NotificationService.scheduleHabitReminders(habit);
+	} catch (error) {
+		console.error(`Failed to sync reminder for habit ${habit.id}:`, error);
+	}
+};
+
 const getLogIndex = (logs: HabitLog[]): Map<string, HabitLog[]> => {
-	if (logIndexCache && logIndexCache.source === logs) return logIndexCache.index;
+	if (logIndexCache && logIndexCache.source === logs)
+		return logIndexCache.index;
 
 	const index = new Map<string, HabitLog[]>();
 	for (const log of logs) {
@@ -119,7 +134,7 @@ const dbHabitToHabit = (dbHabit: any): Habit => {
 			endTime: habit.frequencyEndTime ?? undefined,
 			intervalMinutes: habit.frequencyIntervalMinutes ?? undefined,
 		},
-		habit.notificationTime
+		habit.notificationTime,
 	) as unknown as FrequencyConfig;
 	// Map archived to isArchived
 	habit.isArchived = habit.archived || false;
@@ -210,13 +225,13 @@ interface HabitStoreDB {
 	logHabitCompletion: (
 		habitId: string,
 		value?: number,
-		notes?: string
+		notes?: string,
 	) => Promise<void>;
 	logHabitForDate: (
 		habitId: string,
 		date: Date,
 		value?: number,
-		notes?: string
+		notes?: string,
 	) => Promise<void>;
 	removeLogForDate: (habitId: string, date: Date) => Promise<void>;
 	toggleHabitForDate: (habitId: string, date: Date) => Promise<void>;
@@ -226,7 +241,7 @@ interface HabitStoreDB {
 	/** How many completions a habit needs on a given day, and how many it has. */
 	getProgressForDate: (
 		habitId: string,
-		date: Date
+		date: Date,
 	) => { done: number; target: number };
 	/** False on days a day-restricted habit does not run. */
 	isHabitActiveOnDate: (habitId: string, date: Date) => boolean;
@@ -370,6 +385,7 @@ export const useHabitStore = create<HabitStoreDB>()((set, get) => ({
 			set((state) => ({
 				habits: [habit, ...state.habits],
 			}));
+			await syncHabitReminder(habit);
 
 			console.log("✅ Habit added to database:", habit.name);
 		} catch (error: any) {
@@ -405,6 +421,7 @@ export const useHabitStore = create<HabitStoreDB>()((set, get) => ({
 			set((state) => ({
 				habits: state.habits.map((h) => (h.id === id ? updatedHabit : h)),
 			}));
+			await syncHabitReminder(updatedHabit);
 
 			console.log("✅ Habit updated in database:", id);
 		} catch (error: any) {
@@ -440,6 +457,7 @@ export const useHabitStore = create<HabitStoreDB>()((set, get) => ({
 				habits: state.habits.filter((h) => h.id !== id),
 				logs: state.logs.filter((l) => l.habitId !== id),
 			}));
+			await NotificationService.cancelHabitNotifications(id);
 
 			console.log("✅ Habit deleted from database:", id);
 		} catch (error: any) {
@@ -480,7 +498,7 @@ export const useHabitStore = create<HabitStoreDB>()((set, get) => ({
 	logHabitCompletion: async (
 		habitId: string,
 		value?: number,
-		notes?: string
+		notes?: string,
 	) => {
 		const userId = get().userId;
 		if (!userId) return;
@@ -520,7 +538,7 @@ export const useHabitStore = create<HabitStoreDB>()((set, get) => ({
 		habitId: string,
 		date: Date,
 		value?: number,
-		notes?: string
+		notes?: string,
 	) => {
 		const userId = get().userId;
 		if (!userId) return;
@@ -565,7 +583,7 @@ export const useHabitStore = create<HabitStoreDB>()((set, get) => ({
 			.getLogsForDate(habitId, date)
 			.sort(
 				(a, b) =>
-					new Date(b.completedAt).getTime() - new Date(a.completedAt).getTime()
+					new Date(b.completedAt).getTime() - new Date(a.completedAt).getTime(),
 			);
 		const log = logs[0];
 		if (!log) return;
@@ -600,7 +618,7 @@ export const useHabitStore = create<HabitStoreDB>()((set, get) => ({
 			(l) =>
 				l.habitId === habitId &&
 				new Date(l.completedAt) >= startOfDay &&
-				new Date(l.completedAt) <= endOfDay
+				new Date(l.completedAt) <= endOfDay,
 		);
 
 		if (logsToDelete.length === 0) return;
@@ -623,7 +641,7 @@ export const useHabitStore = create<HabitStoreDB>()((set, get) => ({
 							l.habitId === habitId &&
 							new Date(l.completedAt) >= startOfDay &&
 							new Date(l.completedAt) <= endOfDay
-						)
+						),
 				),
 			}));
 
@@ -675,7 +693,7 @@ export const useHabitStore = create<HabitStoreDB>()((set, get) => ({
 
 		const target = Math.max(
 			1,
-			freq.perDay.times?.length || freq.perDay.target || 1
+			freq.perDay.times?.length || freq.perDay.target || 1,
 		);
 		return { done, target };
 	},
@@ -687,7 +705,7 @@ export const useHabitStore = create<HabitStoreDB>()((set, get) => ({
 		if (!habit) return false;
 		return isActiveOn(
 			normalizeFrequency(habit.frequency, habit.notificationTime),
-			date
+			date,
 		);
 	},
 
@@ -910,7 +928,7 @@ export const useHabitStore = create<HabitStoreDB>()((set, get) => ({
 			(h) =>
 				h.name.toLowerCase().includes(lowerQuery) ||
 				h.description?.toLowerCase().includes(lowerQuery) ||
-				h.notes?.toLowerCase().includes(lowerQuery)
+				h.notes?.toLowerCase().includes(lowerQuery),
 		);
 	},
 

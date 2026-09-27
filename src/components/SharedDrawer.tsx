@@ -77,7 +77,7 @@ export const SharedDrawer: React.FC<SharedDrawerProps> = ({
 }) => {
 	const router = useRouter();
 	const { profile: authProfile, user } = useAuthStore();
-	const { enabledModules } = useModuleStore();
+	const { enabledModules, moduleOrder } = useModuleStore();
 	// In landscape the drawer is only a few hundred dp tall, so the tall profile
 	// header would push the module list off-screen.
 	const { width: winWidth, height: winHeight } = useWindowDimensions();
@@ -98,7 +98,11 @@ export const SharedDrawer: React.FC<SharedDrawerProps> = ({
 			return null;
 		}
 
-		return enabledModules.map((module) => {
+		const orderedEnabledModules = moduleOrder.filter((module) =>
+			enabledModules.includes(module),
+		);
+
+		return orderedEnabledModules.map((module) => {
 			const config = moduleConfig[module];
 			const colorKey = config.color as keyof Theme;
 

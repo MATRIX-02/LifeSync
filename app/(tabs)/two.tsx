@@ -1,5 +1,4 @@
 import { Alert } from "@/src/components/CustomAlert";
-import { SafeAreaView } from "react-native-safe-area-context";
 import { useAuthStore } from "@/src/context/authStore";
 import { useFinanceStore } from "@/src/context/financeStoreDB";
 import { useHabitStore } from "@/src/context/habitStoreDB";
@@ -8,6 +7,7 @@ import { useStudyStore } from "@/src/context/studyStoreDB/index";
 import { Theme, useColors, useTheme } from "@/src/context/themeContext";
 import { useWorkoutStore } from "@/src/context/workoutStoreDB";
 import { NotificationService } from "@/src/services/notificationService";
+import { buildSyncPayload } from "@/src/services/syncPayload";
 import {
 	deleteAllCloudData,
 	getAutoSyncInterval,
@@ -23,7 +23,6 @@ import {
 	syncStudyToCloud,
 	syncWorkoutsToCloud,
 } from "@/src/services/syncService";
-import { buildSyncPayload } from "@/src/services/syncPayload";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system/legacy";
@@ -44,14 +43,13 @@ import {
 	TouchableOpacity,
 	View,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 
-// ---------------------------------------------------------------------------
 // Scheduled-reminders view model
 //
 // The raw list is one entry per trigger, so a single "8 times a day" habit
 // produces eight identical-looking cards and a handful of habits fills the
 // screen with noise. These helpers fold that list into one row per source, with
-// the individual times shown as chips.
 // ---------------------------------------------------------------------------
 
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -68,7 +66,11 @@ const describeTrigger = (trigger: any): TriggerInfo => {
 	const pad = (n: number) => String(n).padStart(2, "0");
 
 	if (!trigger) {
-		return { label: "Unknown", timeOfDay: null, nextAt: Number.MAX_SAFE_INTEGER };
+		return {
+			label: "Unknown",
+			timeOfDay: null,
+			nextAt: Number.MAX_SAFE_INTEGER,
+		};
 	}
 
 	const hour = Number(trigger.hour ?? 0);
@@ -80,7 +82,11 @@ const describeTrigger = (trigger: any): TriggerInfo => {
 		const next = new Date();
 		next.setHours(hour, minute, 0, 0);
 		if (next.getTime() <= now) next.setDate(next.getDate() + 1);
-		return { label: clock, timeOfDay: hour * 60 + minute, nextAt: next.getTime() };
+		return {
+			label: clock,
+			timeOfDay: hour * 60 + minute,
+			nextAt: next.getTime(),
+		};
 	}
 
 	// Weekly - what "specific days" habits produce. The old UI called these
@@ -144,10 +150,18 @@ const REMINDER_KINDS: Record<
 	string,
 	{ label: string; icon: string; color: string }
 > = {
-	habit_reminder: { label: "Habits", icon: "checkmark-circle", color: "#A78BFA" },
+	habit_reminder: {
+		label: "Habits",
+		icon: "checkmark-circle",
+		color: "#A78BFA",
+	},
 	bill_reminder: { label: "Bills", icon: "receipt", color: "#FBBF24" },
 	water_reminder: { label: "Hydration", icon: "water", color: "#60A5FA" },
-	water_reminder_single: { label: "Hydration", icon: "water", color: "#60A5FA" },
+	water_reminder_single: {
+		label: "Hydration",
+		icon: "water",
+		color: "#60A5FA",
+	},
 	study_reminder: { label: "Study", icon: "school", color: "#06B6D4" },
 	revision_reminder: { label: "Revision", icon: "repeat", color: "#06B6D4" },
 	flashcard_review: { label: "Flashcards", icon: "albums", color: "#06B6D4" },
@@ -168,6 +182,113 @@ const kindFor = (type?: string) =>
 		color: "#94A3B8",
 	};
 
+const MODULE_OPTIONS: Record<
+	ModuleType,
+	{ label: string; description: string; icon: string; color: keyof Theme }
+> = {
+	habits: {
+		label: "Daily Rituals",
+		description: "Track and manage your habits",
+		icon: "checkmark-circle",
+		color: "primary",
+	},
+	workout: {
+		label: "FitZone",
+		description: "Track your workouts and fitness",
+		icon: "barbell",
+		color: "success",
+	},
+	finance: {
+		label: "Money Hub",
+		description: "Manage your finances and budgets",
+		icon: "wallet",
+		color: "warning",
+	},
+	study: {
+		label: "Study Hub",
+		description: "Track your study sessions and goals",
+		icon: "book",
+		color: "accent",
+	},
+};
+
+interface ModuleSettingRowProps {
+	index: number;
+	count: number;
+	config: (typeof MODULE_OPTIONS)[ModuleType];
+	enabled: boolean;
+	theme: Theme;
+	onToggle: (enabled: boolean) => void;
+	onMove: (index: number, offset: number) => void;
+}
+
+const ModuleSettingRow: React.FC<ModuleSettingRowProps> = ({
+	index,
+	count,
+	config,
+	enabled,
+	theme,
+	onToggle,
+	onMove,
+}) => {
+	const styles = createStyles(theme);
+	const color = theme[config.color] as string;
+
+	return (
+		<View style={styles.moduleRowContainer}>
+			<SettingRow
+				icon={config.icon}
+				iconColor={color}
+				iconBg={color + "20"}
+				label={config.label}
+				description={config.description}
+				theme={theme}
+				rightElement={
+					<View style={styles.moduleRowControls}>
+						<View style={styles.moduleMoveButtons}>
+							<TouchableOpacity
+								style={[
+									styles.moduleMoveButton,
+									index === 0 && styles.moduleMoveButtonDisabled,
+								]}
+								disabled={index === 0}
+								onPress={() => onMove(index, -1)}
+								accessibilityRole="button"
+								accessibilityLabel={`Move ${config.label} up`}
+							>
+								<Ionicons name="chevron-up" size={16} color={theme.textMuted} />
+							</TouchableOpacity>
+							<TouchableOpacity
+								style={[
+									styles.moduleMoveButton,
+									index === count - 1 && styles.moduleMoveButtonDisabled,
+								]}
+								disabled={index === count - 1}
+								onPress={() => onMove(index, 1)}
+								accessibilityRole="button"
+								accessibilityLabel={`Move ${config.label} down`}
+							>
+								<Ionicons
+									name="chevron-down"
+									size={16}
+									color={theme.textMuted}
+								/>
+							</TouchableOpacity>
+						</View>
+						<Switch
+							value={enabled}
+							onValueChange={onToggle}
+							trackColor={{ false: theme.border, true: theme.primary }}
+							thumbColor="#FFFFFF"
+						/>
+					</View>
+				}
+			/>
+			{index < count - 1 && <View style={styles.divider} />}
+		</View>
+	);
+};
+
 export default function SettingsScreen() {
 	const router = useRouter();
 	const { from } = useLocalSearchParams<{ from?: string }>();
@@ -187,7 +308,7 @@ export default function SettingsScreen() {
 	const [isImporting, setIsImporting] = useState<ModuleType | null>(null);
 	const [showDeveloper, setShowDeveloper] = useState(false);
 	const [scheduledNotifications, setScheduledNotifications] = useState<any[]>(
-		[]
+		[],
 	);
 
 	// Cloud sync states
@@ -202,6 +323,17 @@ export default function SettingsScreen() {
 
 	const styles = createStyles(theme);
 
+	const moveModule = React.useCallback((index: number, offset: number) => {
+		const { moduleOrder: order, reorderModules } = useModuleStore.getState();
+		const destination = Math.max(0, Math.min(order.length - 1, index + offset));
+		if (destination === index) return;
+
+		const nextOrder = [...order];
+		const [movedModule] = nextOrder.splice(index, 1);
+		nextOrder.splice(destination, 0, movedModule);
+		reorderModules(nextOrder);
+	}, []);
+
 	// Fetch sync status on mount
 	useEffect(() => {
 		if (user?.id) {
@@ -211,7 +343,7 @@ export default function SettingsScreen() {
 
 	// Auto-sync state
 	const [autoSyncInterval, setAutoSyncIntervalState] = useState<number | null>(
-		null
+		null,
 	);
 	const [autoSyncRunning, setAutoSyncRunning] = useState(false);
 	const [showAutoSyncModal, setShowAutoSyncModal] = useState(false);
@@ -307,7 +439,7 @@ export default function SettingsScreen() {
 		if (!user?.id) {
 			Alert.alert(
 				"Sign In Required",
-				"Please sign in to sync your data to the cloud."
+				"Please sign in to sync your data to the cloud.",
 			);
 			return;
 		}
@@ -323,7 +455,7 @@ export default function SettingsScreen() {
 						"Partial Sync",
 						`Some modules failed to sync:\n\n${failed
 							.map((f) => `• ${f.module}: ${f.error || "unknown error"}`)
-							.join("\n")}`
+							.join("\n")}`,
 					);
 				} else {
 					Alert.alert("Success", "All data synced to cloud!");
@@ -384,7 +516,7 @@ export default function SettingsScreen() {
 		} catch (error: any) {
 			Alert.alert(
 				"Sync Failed",
-				error.message || "Failed to sync data to cloud."
+				error.message || "Failed to sync data to cloud.",
 			);
 		} finally {
 			setIsSyncing(null);
@@ -395,7 +527,7 @@ export default function SettingsScreen() {
 		if (!user?.id) {
 			Alert.alert(
 				"Sign In Required",
-				"Please sign in to restore your data from the cloud."
+				"Please sign in to restore your data from the cloud.",
 			);
 			return;
 		}
@@ -423,14 +555,14 @@ export default function SettingsScreen() {
 							} catch (error: any) {
 								Alert.alert(
 									"Refresh Failed",
-									error.message || "Failed to refresh data."
+									error.message || "Failed to refresh data.",
 								);
 							} finally {
 								setIsRestoring(null);
 							}
 						},
 					},
-				]
+				],
 			);
 			return;
 		}
@@ -459,14 +591,14 @@ export default function SettingsScreen() {
 						} catch (error: any) {
 							Alert.alert(
 								"Refresh Failed",
-								error.message || "Failed to refresh data."
+								error.message || "Failed to refresh data.",
 							);
 						} finally {
 							setIsRestoring(null);
 						}
 					},
 				},
-			]
+			],
 		);
 		return;
 	};
@@ -500,12 +632,12 @@ export default function SettingsScreen() {
 						} catch (error: any) {
 							Alert.alert(
 								"Delete Failed",
-								error.message || "Failed to delete cloud data."
+								error.message || "Failed to delete cloud data.",
 							);
 						}
 					},
 				},
-			]
+			],
 		);
 	};
 
@@ -541,7 +673,9 @@ export default function SettingsScreen() {
 			const data = notif?.content?.data || {};
 			const kind = kindFor(data.type);
 			// Habits group per habit; everything else groups per feature.
-			const key = data.habitId ? `habit:${data.habitId}` : `type:${data.type || "other"}`;
+			const key = data.habitId
+				? `habit:${data.habitId}`
+				: `type:${data.type || "other"}`;
 			const habitName = data.habitId
 				? habitStore.habits.find((h) => h.id === data.habitId)?.name
 				: undefined;
@@ -571,7 +705,8 @@ export default function SettingsScreen() {
 			.map((g) => ({
 				...g,
 				times: g.times.sort(
-					(a, b) => (a.timeOfDay ?? 0) - (b.timeOfDay ?? 0) || a.nextAt - b.nextAt
+					(a, b) =>
+						(a.timeOfDay ?? 0) - (b.timeOfDay ?? 0) || a.nextAt - b.nextAt,
 				),
 			}))
 			.sort((a, b) => a.nextAt - b.nextAt);
@@ -579,12 +714,20 @@ export default function SettingsScreen() {
 
 	// Counts per feature, for the summary strip.
 	const reminderTotals = useMemo(() => {
-		const totals = new Map<string, { label: string; color: string; count: number }>();
+		const totals = new Map<
+			string,
+			{ label: string; color: string; count: number }
+		>();
 		for (const notif of scheduledNotifications as any[]) {
 			const kind = kindFor(notif?.content?.data?.type);
 			const entry = totals.get(kind.label);
 			if (entry) entry.count += 1;
-			else totals.set(kind.label, { label: kind.label, color: kind.color, count: 1 });
+			else
+				totals.set(kind.label, {
+					label: kind.label,
+					color: kind.color,
+					count: 1,
+				});
 		}
 		return Array.from(totals.values()).sort((a, b) => b.count - a.count);
 	}, [scheduledNotifications]);
@@ -599,7 +742,7 @@ export default function SettingsScreen() {
 					[
 						{ text: "Cancel", style: "cancel" },
 						{ text: "Open Settings", onPress: () => Linking.openSettings() },
-					]
+					],
 				);
 				return;
 			}
@@ -720,7 +863,7 @@ export default function SettingsScreen() {
 							) {
 								Alert.alert(
 									"Invalid File",
-									`This doesn't appear to be a valid ${module} backup file.`
+									`This doesn't appear to be a valid ${module} backup file.`,
 								);
 								setIsImporting(null);
 								return;
@@ -745,7 +888,7 @@ export default function SettingsScreen() {
 						}
 					},
 				},
-			]
+			],
 		);
 	};
 
@@ -760,10 +903,10 @@ export default function SettingsScreen() {
 			module === "habits"
 				? "Habits"
 				: module === "workout"
-				? "Workout"
-				: module === "finance"
-				? "Finance"
-				: "Study";
+					? "Workout"
+					: module === "finance"
+						? "Finance"
+						: "Study";
 
 		Alert.alert(
 			`Clear ${moduleName} Data`,
@@ -786,14 +929,14 @@ export default function SettingsScreen() {
 							}
 							Alert.alert(
 								"Success",
-								`All ${moduleName} data has been cleared.`
+								`All ${moduleName} data has been cleared.`,
 							);
 						} catch (error: any) {
 							Alert.alert("Error", `Failed to clear ${moduleName} data.`);
 						}
 					},
 				},
-			]
+			],
 		);
 	};
 
@@ -903,7 +1046,7 @@ export default function SettingsScreen() {
 							if (!importData.appName || importData.appName !== "LifeSync") {
 								Alert.alert(
 									"Invalid File",
-									"This doesn't appear to be a valid LifeSync backup file."
+									"This doesn't appear to be a valid LifeSync backup file.",
 								);
 								setIsImporting(null);
 								return;
@@ -934,14 +1077,14 @@ export default function SettingsScreen() {
 							console.error("Import error:", error);
 							Alert.alert(
 								"Import Failed",
-								"An error occurred while importing data. Please check the file format."
+								"An error occurred while importing data. Please check the file format.",
 							);
 						} finally {
 							setIsImporting(null);
 						}
 					},
 				},
-			]
+			],
 		);
 	};
 
@@ -974,12 +1117,12 @@ export default function SettingsScreen() {
 						} catch (error: any) {
 							Alert.alert(
 								"Error",
-								"Failed to clear some data. Please try again."
+								"Failed to clear some data. Please try again.",
 							);
 						}
 					},
 				},
-			]
+			],
 		);
 	};
 
@@ -1050,87 +1193,20 @@ export default function SettingsScreen() {
 					<Text style={styles.sectionTitle}>MODULES</Text>
 
 					<View style={styles.settingCard}>
-						<SettingRow
-							icon="checkmark-circle"
-							iconColor={theme.primary}
-							iconBg={theme.primary + "20"}
-							label="Daily Rituals"
-							description="Track and manage your habits"
-							theme={theme}
-							rightElement={
-								<Switch
-									value={moduleStore.isModuleEnabled("habits")}
-									onValueChange={(enabled) =>
-										moduleStore.toggleModule("habits", enabled)
-									}
-									trackColor={{ false: theme.border, true: theme.primary }}
-									thumbColor="#FFFFFF"
-								/>
-							}
-						/>
-
-						<View style={styles.divider} />
-
-						<SettingRow
-							icon="barbell"
-							iconColor={theme.success}
-							iconBg={theme.success + "20"}
-							label="FitZone"
-							description="Track your workouts and fitness"
-							theme={theme}
-							rightElement={
-								<Switch
-									value={moduleStore.isModuleEnabled("workout")}
-									onValueChange={(enabled) =>
-										moduleStore.toggleModule("workout", enabled)
-									}
-									trackColor={{ false: theme.border, true: theme.primary }}
-									thumbColor="#FFFFFF"
-								/>
-							}
-						/>
-
-						<View style={styles.divider} />
-
-						<SettingRow
-							icon="wallet"
-							iconColor={theme.warning}
-							iconBg={theme.warning + "20"}
-							label="Money Hub"
-							description="Manage your finances and budgets"
-							theme={theme}
-							rightElement={
-								<Switch
-									value={moduleStore.isModuleEnabled("finance")}
-									onValueChange={(enabled) =>
-										moduleStore.toggleModule("finance", enabled)
-									}
-									trackColor={{ false: theme.border, true: theme.primary }}
-									thumbColor="#FFFFFF"
-								/>
-							}
-						/>
-
-						<View style={styles.divider} />
-
-						<SettingRow
-							icon="book"
-							iconColor="#06B6D4"
-							iconBg="#06B6D420"
-							label="Study Hub"
-							description="Track your study sessions and goals"
-							theme={theme}
-							rightElement={
-								<Switch
-									value={moduleStore.isModuleEnabled("study")}
-									onValueChange={(enabled) =>
-										moduleStore.toggleModule("study", enabled)
-									}
-									trackColor={{ false: theme.border, true: theme.primary }}
-									thumbColor="#FFFFFF"
-								/>
-							}
-						/>
+						{moduleStore.moduleOrder.map((module, index) => (
+							<ModuleSettingRow
+								key={module}
+								index={index}
+								count={moduleStore.moduleOrder.length}
+								config={MODULE_OPTIONS[module]}
+								enabled={moduleStore.isModuleEnabled(module)}
+								theme={theme}
+								onToggle={(enabled) => {
+									void moduleStore.toggleModule(module, enabled);
+								}}
+								onMove={moveModule}
+							/>
+						))}
 					</View>
 				</View>
 
@@ -2064,23 +2140,23 @@ export default function SettingsScreen() {
 										if (!granted) {
 											Alert.alert(
 												"Permission Denied",
-												"Please enable notifications in your device settings."
+												"Please enable notifications in your device settings.",
 											);
 											return;
 										}
 										await NotificationService.scheduleInstantNotification(
 											"🔔 Test Notification",
 											"Notifications are working! Your habit reminders will appear like this.",
-											{ type: "test" }
+											{ type: "test" },
 										);
 										Alert.alert(
 											"Success!",
-											"A test notification has been sent. Check your notification tray!"
+											"A test notification has been sent. Check your notification tray!",
 										);
 									} catch (error) {
 										Alert.alert(
 											"Error",
-											"Failed to send notification. Make sure you're on a real device, not Expo Go."
+											"Failed to send notification. Make sure you're on a real device, not Expo Go.",
 										);
 									}
 								}}
@@ -2118,7 +2194,7 @@ export default function SettingsScreen() {
 										if (!granted) {
 											Alert.alert(
 												"Permission Denied",
-												"Enable notifications for LifeSync in your device settings, then try again."
+												"Enable notifications for LifeSync in your device settings, then try again.",
 											);
 											return;
 										}
@@ -2149,12 +2225,12 @@ export default function SettingsScreen() {
 
 ` +
 												`If it is silent, check Android Settings > Apps > LifeSync > ` +
-												`Notifications > Alarms, and Special app access > Alarms & reminders.`
+												`Notifications > Alarms, and Special app access > Alarms & reminders.`,
 										);
 									} catch (error) {
 										Alert.alert(
 											"Error",
-											"Failed to schedule the test alarm. Make sure you're on a real device, not Expo Go."
+											"Failed to schedule the test alarm. Make sure you're on a real device, not Expo Go.",
 										);
 									}
 								}}
@@ -2191,7 +2267,7 @@ export default function SettingsScreen() {
 										if (!granted) {
 											Alert.alert(
 												"Permission Denied",
-												"Please enable notifications in your device settings."
+												"Please enable notifications in your device settings.",
 											);
 											return;
 										}
@@ -2204,16 +2280,16 @@ export default function SettingsScreen() {
 												groupName: "Test Group",
 												invitedByName: "Test User",
 												invitedByUserId: "test-user-id",
-											}
+											},
 										);
 										Alert.alert(
 											"Success!",
-											"A test invite notification has been sent. Tap it to test navigation to invitations!"
+											"A test invite notification has been sent. Tap it to test navigation to invitations!",
 										);
 									} catch (error) {
 										Alert.alert(
 											"Error",
-											"Failed to send notification. Make sure you're on a real device, not Expo Go."
+											"Failed to send notification. Make sure you're on a real device, not Expo Go.",
 										);
 									}
 								}}
@@ -2423,7 +2499,9 @@ export default function SettingsScreen() {
 											{ backgroundColor: t.color + "22", borderColor: t.color },
 										]}
 									>
-										<Text style={[styles.reminderKindChipText, { color: t.color }]}>
+										<Text
+											style={[styles.reminderKindChipText, { color: t.color }]}
+										>
 											{t.label} {t.count}
 										</Text>
 									</View>
@@ -2686,6 +2764,30 @@ const createStyles = (theme: Theme) =>
 			justifyContent: "space-between",
 			paddingHorizontal: 16,
 			paddingVertical: 10,
+		},
+		moduleRowControls: {
+			flexDirection: "row",
+			alignItems: "center",
+			gap: 10,
+		},
+		moduleRowContainer: {
+			backgroundColor: theme.surface,
+		},
+		moduleMoveButtons: {
+			flexDirection: "column",
+			alignItems: "center",
+			justifyContent: "center",
+			gap: 0,
+		},
+		moduleMoveButton: {
+			width: 32,
+			height: 20,
+			alignItems: "center",
+			justifyContent: "center",
+			borderRadius: 6,
+		},
+		moduleMoveButtonDisabled: {
+			opacity: 0.35,
 		},
 		moduleInfo: {
 			flexDirection: "row",

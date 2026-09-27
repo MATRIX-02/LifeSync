@@ -8,10 +8,12 @@ export type ModuleType = "habits" | "workout" | "finance" | "study";
 interface ModuleStore {
 	// Module states
 	enabledModules: ModuleType[];
+	moduleOrder: ModuleType[];
 	_hasHydrated: boolean;
 	setHasHydrated: (state: boolean) => void;
 	isModuleEnabled: (module: ModuleType) => boolean;
 	toggleModule: (module: ModuleType, enabled: boolean) => Promise<void>;
+	reorderModules: (modules: ModuleType[]) => void;
 	getFirstEnabledModule: () => ModuleType;
 }
 
@@ -22,6 +24,7 @@ const useModuleStoreBase = create<ModuleStore>()(
 	persist(
 		(set, get) => ({
 			enabledModules: defaultModules,
+			moduleOrder: defaultModules,
 			_hasHydrated: false,
 
 			setHasHydrated: (state: boolean) => {
@@ -45,26 +48,28 @@ const useModuleStoreBase = create<ModuleStore>()(
 
 					if (enabled) {
 						console.log(
-							"📅 Re-enabling habits module - rescheduling notifications"
+							"📅 Re-enabling habits module - rescheduling notifications",
 						);
 						try {
 							const activeHabits = useHabitStore
 								.getState()
 								.habits.filter(
 									(h) =>
-										!h.isArchived && h.notificationEnabled && h.notificationTime
+										!h.isArchived &&
+										h.notificationEnabled &&
+										h.notificationTime,
 								);
 
 							for (const habit of activeHabits) {
 								try {
 									await NotificationService.scheduleHabitReminders(habit);
 									console.log(
-										`✅ Rescheduled reminders for habit: ${habit.name}`
+										`✅ Rescheduled reminders for habit: ${habit.name}`,
 									);
 								} catch (error) {
 									console.error(
 										`Failed to reschedule notification for ${habit.name}:`,
-										error
+										error,
 									);
 								}
 							}
@@ -73,7 +78,7 @@ const useModuleStoreBase = create<ModuleStore>()(
 						}
 					} else {
 						console.log(
-							"🗑️  Disabling habits module - canceling all notifications"
+							"🗑️  Disabling habits module - canceling all notifications",
 						);
 						try {
 							// Cancels by matching data.habitId, so it catches every
@@ -106,10 +111,24 @@ const useModuleStoreBase = create<ModuleStore>()(
 				});
 			},
 
+			reorderModules: (modules) => {
+				const ordered = Array.from(new Set(modules)).filter((module) =>
+					defaultModules.includes(module),
+				);
+				set({
+					moduleOrder: [
+						...ordered,
+						...defaultModules.filter((module) => !ordered.includes(module)),
+					],
+				});
+			},
+
 			getFirstEnabledModule: () => {
-				const modules = get().enabledModules;
-				if (!modules || modules.length === 0) return "habits"; // Fallback
-				return modules[0];
+				const { enabledModules, moduleOrder } = get();
+				return (
+					moduleOrder.find((module) => enabledModules.includes(module)) ||
+					"habits"
+				);
 			},
 		}),
 		{
@@ -125,15 +144,29 @@ const useModuleStoreBase = create<ModuleStore>()(
 				} else if (state && state.enabledModules) {
 					// Merge in any new default modules that were added
 					const newModules = defaultModules.filter(
-						(m) => !state.enabledModules.includes(m)
+						(m) => !state.enabledModules.includes(m),
 					);
 					if (newModules.length > 0) {
 						state.enabledModules = [...state.enabledModules, ...newModules];
 					}
 				}
+				if (state) {
+					const savedOrder = Array.isArray(state.moduleOrder)
+						? state.moduleOrder
+						: state.enabledModules;
+					const orderedModules = Array.from(new Set(savedOrder)).filter(
+						(module): module is ModuleType => defaultModules.includes(module),
+					);
+					state.moduleOrder = [
+						...orderedModules,
+						...defaultModules.filter(
+							(module) => !orderedModules.includes(module),
+						),
+					];
+				}
 			},
-		}
-	)
+		},
+	),
 );
 
 // Export with hydration listener

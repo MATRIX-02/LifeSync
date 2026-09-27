@@ -1,20 +1,16 @@
 // Sync Manager Hook - Manages data synchronization between local stores and Supabase
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AppState, AppStateStatus } from "react-native";
+import { supabaseDirect } from "../config/supabase";
 import { useAuthStore } from "../context/authStore";
 import { useFinanceStore } from "../context/financeStoreDB";
 import { useHabitStore } from "../context/habitStoreDB";
+import { useModuleStore } from "../context/moduleContext";
 import { useStudyStore } from "../context/studyStoreDB/index";
 import { useWorkoutStore } from "../context/workoutStoreDB";
 import { migrateLocalFinanceToCloud } from "../services/financeLocalMigration";
-import { migrateLocalWorkoutToCloud } from "../services/workoutLocalMigration";
+import { NotificationService } from "../services/notificationService";
 import { buildSyncPayload } from "../services/syncPayload";
-import {
-	flushQueue,
-	getQueueState,
-	hydrateQueueState,
-} from "../services/writeQueue";
-import { supabaseDirect } from "../config/supabase";
 import {
 	getAutoSyncEnabled,
 	isAutoSyncRunning,
@@ -22,6 +18,12 @@ import {
 	stopAutoSync,
 	SyncStatus,
 } from "../services/syncService";
+import { migrateLocalWorkoutToCloud } from "../services/workoutLocalMigration";
+import {
+	flushQueue,
+	getQueueState,
+	hydrateQueueState,
+} from "../services/writeQueue";
 
 interface SyncState {
 	status: SyncStatus;
@@ -35,6 +37,10 @@ export const useSyncManager = () => {
 	const habitStore = useHabitStore();
 	const workoutStore = useWorkoutStore();
 	const financeStore = useFinanceStore();
+	const modulesHydrated = useModuleStore((state) => state._hasHydrated);
+	const habitsEnabled = useModuleStore((state) =>
+		state.isModuleEnabled("habits"),
+	);
 
 	const [syncState, setSyncState] = useState<SyncState>({
 		status: "idle",
@@ -48,6 +54,8 @@ export const useSyncManager = () => {
 	const appStateRef = useRef<AppStateStatus>(AppState.currentState);
 	const syncTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 	const isInitialFetch = useRef(true);
+	const remindersReconciledForUserRef = useRef<string | null>(null);
+	const remindersReconcilingForUserRef = useRef<string | null>(null);
 
 	// Fetch all data from cloud
 	const fetchFromCloud = useCallback(async () => {
@@ -174,6 +182,75 @@ export const useSyncManager = () => {
 		useStudyStore.getState().setUserId(id);
 	}, [isInitialized, user?.id]);
 
+	// OS notifications are separate from the habit row in Supabase. Rebuild
+	// them once the signed-in user's habits and module preferences are loaded,
+	// so stale reminder times from older app versions are replaced.
+	useEffect(() => {
+		if (!user?.id) {
+			remindersReconciledForUserRef.current = null;
+			remindersReconcilingForUserRef.current = null;
+			return;
+		}
+		if (
+			!isInitialized ||
+			!modulesHydrated ||
+			!habitsEnabled ||
+			!habitStore.hasLoaded ||
+			habitStore.error ||
+			remindersReconciledForUserRef.current === user.id ||
+			remindersReconcilingForUserRef.current === user.id
+		) {
+			return;
+		}
+
+		remindersReconcilingForUserRef.current = user.id;
+		let cancelled = false;
+		void (async () => {
+			try {
+				await NotificationService.cancelAllHabitNotifications();
+				if (cancelled) return;
+				const activeHabits = useHabitStore
+					.getState()
+					.habits.filter(
+						(habit) => !habit.isArchived && habit.notificationEnabled,
+					);
+				for (const habit of activeHabits) {
+					if (cancelled) return;
+					try {
+						await NotificationService.scheduleHabitReminders(habit);
+					} catch (error) {
+						console.error(
+							`Failed to reconcile reminder for ${habit.name}:`,
+							error,
+						);
+					}
+				}
+				if (!cancelled) {
+					remindersReconciledForUserRef.current = user.id;
+				}
+			} catch (error) {
+				console.error("Failed to reconcile habit reminders:", error);
+			} finally {
+				if (remindersReconcilingForUserRef.current === user.id) {
+					remindersReconcilingForUserRef.current = null;
+				}
+			}
+		})();
+		return () => {
+			cancelled = true;
+			if (remindersReconcilingForUserRef.current === user.id) {
+				remindersReconcilingForUserRef.current = null;
+			}
+		};
+	}, [
+		user?.id,
+		isInitialized,
+		modulesHydrated,
+		habitsEnabled,
+		habitStore.hasLoaded,
+		habitStore.error,
+	]);
+
 	// Initial fetch when user logs in
 	useEffect(() => {
 		if (isInitialized && user?.id && !hasFetchedRef.current) {
@@ -249,14 +326,17 @@ export const useSyncManager = () => {
 	useEffect(() => {
 		if (!isInitialized || !user?.id) return;
 
-		const interval = setInterval(() => {
-			useFinanceStore
-				.getState()
-				.processRecurringTransactions()
-				.catch((error: unknown) =>
-					console.error("Error posting recurring transactions:", error)
-				);
-		}, 60 * 60 * 1000);
+		const interval = setInterval(
+			() => {
+				useFinanceStore
+					.getState()
+					.processRecurringTransactions()
+					.catch((error: unknown) =>
+						console.error("Error posting recurring transactions:", error),
+					);
+			},
+			60 * 60 * 1000,
+		);
 
 		return () => clearInterval(interval);
 	}, [isInitialized, user?.id]);
@@ -286,7 +366,7 @@ export const useSyncManager = () => {
 
 		const subscription = AppState.addEventListener(
 			"change",
-			handleAppStateChange
+			handleAppStateChange,
 		);
 
 		return () => {
