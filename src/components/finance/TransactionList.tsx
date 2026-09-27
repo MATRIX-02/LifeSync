@@ -49,7 +49,7 @@ type DateFilter = "all" | "today" | "week" | "month" | "year";
  */
 const toDateKey = (d: Date): string =>
 	`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
-		d.getDate()
+		d.getDate(),
 	).padStart(2, "0")}`;
 
 const daysAgoKey = (days: number): string => {
@@ -95,13 +95,8 @@ export default function TransactionList({
 	subscriptionCheck,
 	currentMonthTransactionCount = 0,
 }: TransactionListProps) {
-	const {
-		transactions,
-		accounts,
-		deleteTransaction,
-		deleteTransactions,
-		updateTransaction,
-	} = useFinanceStore();
+	const { transactions, accounts, deleteTransaction, deleteTransactions } =
+		useFinanceStore();
 
 	const styles = createStyles(theme);
 	const { refreshing, onRefresh } = useModuleRefresh("finance");
@@ -114,16 +109,11 @@ export default function TransactionList({
 	const [selectedAccount, setSelectedAccount] = useState<string | null>(null);
 	const [selectedTransaction, setSelectedTransaction] =
 		useState<Transaction | null>(null);
-	const [showEditModal, setShowEditModal] = useState(false);
+	const [editingTransaction, setEditingTransaction] =
+		useState<Transaction | null>(null);
 	const [selectionMode, setSelectionMode] = useState(false);
 	const [showAddTransaction, setShowAddTransaction] = useState(false);
 	const [selectedIds, setSelectedIds] = useState<string[]>([]);
-	const [editForm, setEditForm] = useState({
-		amount: "",
-		description: "",
-		category: "" as ExpenseCategory | IncomeCategory,
-		note: "",
-	});
 
 	// Filter and group transactions
 	const groupedTransactions = useMemo(() => {
@@ -242,13 +232,13 @@ export default function TransactionList({
 						setSelectedTransaction(null);
 					},
 				},
-			]
+			],
 		);
 	};
 
 	const visibleTransactionIds = useMemo(
 		() => groupedTransactions.flatMap((g) => g.transactions.map((t) => t.id)),
-		[groupedTransactions]
+		[groupedTransactions],
 	);
 
 	const exitSelectionMode = () => {
@@ -258,7 +248,7 @@ export default function TransactionList({
 
 	const toggleSelection = (id: string) => {
 		setSelectedIds((prev) =>
-			prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+			prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
 		);
 	};
 
@@ -292,39 +282,13 @@ export default function TransactionList({
 						exitSelectionMode();
 					},
 				},
-			]
+			],
 		);
 	};
 
 	const handleEditTransaction = (transaction: Transaction) => {
-		setEditForm({
-			amount: transaction.amount.toString(),
-			description: transaction.description || "",
-			category: transaction.category as ExpenseCategory | IncomeCategory,
-			note: transaction.note || "",
-		});
-		setShowEditModal(true);
-	};
-
-	const handleSaveEdit = () => {
-		if (!selectedTransaction) return;
-
-		const amount = parseFloat(editForm.amount);
-		if (isNaN(amount) || amount <= 0) {
-			Alert.alert("Error", "Please enter a valid amount");
-			return;
-		}
-
-		updateTransaction(selectedTransaction.id, {
-			amount,
-			description: editForm.description || undefined,
-			category: editForm.category,
-			note: editForm.note || undefined,
-		});
-
-		setShowEditModal(false);
 		setSelectedTransaction(null);
-		Alert.alert("Success", "Transaction updated successfully");
+		setEditingTransaction(transaction);
 	};
 
 	const formatAmount = (value: number) => {
@@ -343,7 +307,7 @@ export default function TransactionList({
 	// - account: balance of the transaction's account immediately after the transaction
 	// - total: combined balance across all accounts immediately after the transaction
 	const getClosingBalances = (
-		transaction: Transaction
+		transaction: Transaction,
 	): { account: number; total: number } => {
 		// find the affected account
 		const account = accounts.find((acc) => acc.id === transaction.accountId);
@@ -453,11 +417,11 @@ export default function TransactionList({
 					<Text style={styles.transactionMeta}>
 						{transaction.type === "transfer"
 							? `Transfer • ${getAccountName(
-									transaction.accountId
-							  )} → ${getAccountName(transaction.toAccountId || "")}`
+									transaction.accountId,
+								)} → ${getAccountName(transaction.toAccountId || "")}`
 							: `${catInfo?.name || transaction.category} • ${getAccountName(
-									transaction.accountId
-							  )}`}
+									transaction.accountId,
+								)}`}
 					</Text>
 					<Text style={styles.transactionBalance} numberOfLines={1}>
 						Closing Balance ({getAccountName(transaction.accountId)}):{" "}
@@ -474,8 +438,8 @@ export default function TransactionList({
 									transaction.type === "income"
 										? theme.success
 										: transaction.type === "expense"
-										? theme.error
-										: theme.primary,
+											? theme.error
+											: theme.primary,
 							},
 						]}
 					>
@@ -619,7 +583,7 @@ export default function TransactionList({
 								{type.charAt(0).toUpperCase() + type.slice(1)}
 							</Text>
 						</TouchableOpacity>
-					)
+					),
 				)}
 			</View>
 
@@ -646,7 +610,7 @@ export default function TransactionList({
 									: date.charAt(0).toUpperCase() + date.slice(1)}
 							</Text>
 						</TouchableOpacity>
-					)
+					),
 				)}
 			</View>
 
@@ -798,6 +762,13 @@ export default function TransactionList({
 				subscriptionCheck={subscriptionCheck}
 				currentMonthTransactionCount={currentMonthTransactionCount}
 			/>
+			<AddTransactionModal
+				visible={!!editingTransaction}
+				onClose={() => setEditingTransaction(null)}
+				theme={theme}
+				currency={currency}
+				transaction={editingTransaction}
+			/>
 
 			{/* Transaction Detail Modal */}
 			<Modal
@@ -825,10 +796,10 @@ export default function TransactionList({
 											selectedTransaction.type === "income"
 												? INCOME_CATEGORIES[
 														selectedTransaction.category as IncomeCategory
-												  ]
+													]
 												: EXPENSE_CATEGORIES[
 														selectedTransaction.category as ExpenseCategory
-												  ];
+													];
 										return (
 											<>
 												<View
@@ -879,10 +850,10 @@ export default function TransactionList({
 												{selectedTransaction.type === "income"
 													? INCOME_CATEGORIES[
 															selectedTransaction.category as IncomeCategory
-													  ]?.name
+														]?.name
 													: EXPENSE_CATEGORIES[
 															selectedTransaction.category as ExpenseCategory
-													  ]?.name}
+														]?.name}
 											</Text>
 										</View>
 										<View style={styles.detailRow}>
@@ -901,7 +872,7 @@ export default function TransactionList({
 														year: "numeric",
 														month: "long",
 														day: "numeric",
-													}
+													},
 												)}
 											</Text>
 										</View>
@@ -927,7 +898,7 @@ export default function TransactionList({
 													<View style={styles.detailRow}>
 														<Text style={styles.detailLabel}>
 															{`Closing Balance (${getAccountName(
-																selectedTransaction.accountId
+																selectedTransaction.accountId,
 															)})`}
 														</Text>
 														<Text style={styles.detailValue}>
@@ -980,133 +951,6 @@ export default function TransactionList({
 											color={theme.error}
 										/>
 										<Text style={styles.deleteButtonText}>Delete</Text>
-									</TouchableOpacity>
-								</View>
-							</>
-						)}
-					</View>
-				</View>
-			</Modal>
-
-			{/* Edit Transaction Modal */}
-			<Modal
-				visible={showEditModal}
-				transparent
-				animationType="slide"
-				onRequestClose={() => setShowEditModal(false)}
-			>
-				<View style={styles.modalOverlay}>
-					<View style={styles.modalContent}>
-						<View style={styles.modalHeader}>
-							<Text style={styles.modalTitle}>Edit Transaction</Text>
-							<TouchableOpacity onPress={() => setShowEditModal(false)}>
-								<Ionicons name="close" size={24} color={theme.text} />
-							</TouchableOpacity>
-						</View>
-
-						{selectedTransaction && (
-							<>
-								<View style={styles.editFormContainer}>
-									<Text style={styles.editFormLabel}>Amount</Text>
-									<TextInput
-										style={styles.editFormInput}
-										value={editForm.amount}
-										onChangeText={(text) =>
-											setEditForm({ ...editForm, amount: text })
-										}
-										keyboardType="decimal-pad"
-										placeholder="Enter amount"
-										placeholderTextColor={theme.textSecondary}
-									/>
-
-									<Text style={styles.editFormLabel}>
-										Description (Optional)
-									</Text>
-									<TextInput
-										style={styles.editFormInput}
-										value={editForm.description}
-										onChangeText={(text) =>
-											setEditForm({ ...editForm, description: text })
-										}
-										placeholder="Enter description"
-										placeholderTextColor={theme.textSecondary}
-									/>
-
-									<Text style={styles.editFormLabel}>Category</Text>
-									<View style={styles.categorySelectContainer}>
-										{(selectedTransaction.type === "income"
-											? Object.entries(INCOME_CATEGORIES)
-											: Object.entries(EXPENSE_CATEGORIES)
-										).map(([key, cat]) => (
-											<TouchableOpacity
-												key={key}
-												style={[
-													styles.categorySelectItem,
-													editForm.category === key && {
-														backgroundColor: theme.primary + "20",
-														borderColor: theme.primary,
-													},
-												]}
-												onPress={() =>
-													setEditForm({
-														...editForm,
-														category: key as ExpenseCategory | IncomeCategory,
-													})
-												}
-											>
-												<Ionicons
-													name={cat.icon as any}
-													size={16}
-													color={
-														editForm.category === key
-															? theme.primary
-															: theme.text
-													}
-												/>
-												<Text
-													style={[
-														styles.categorySelectLabel,
-														editForm.category === key && {
-															color: theme.primary,
-														},
-													]}
-												>
-													{cat.name}
-												</Text>
-											</TouchableOpacity>
-										))}
-									</View>
-
-									<Text style={styles.editFormLabel}>Note (Optional)</Text>
-									<TextInput
-										style={[
-											styles.editFormInput,
-											styles.editFormInputMultiline,
-										]}
-										value={editForm.note}
-										onChangeText={(text) =>
-											setEditForm({ ...editForm, note: text })
-										}
-										placeholder="Add a note"
-										placeholderTextColor={theme.textSecondary}
-										multiline
-										numberOfLines={3}
-									/>
-								</View>
-
-								<View style={styles.editFormActions}>
-									<TouchableOpacity
-										style={styles.cancelButton}
-										onPress={() => setShowEditModal(false)}
-									>
-										<Text style={styles.cancelButtonText}>Cancel</Text>
-									</TouchableOpacity>
-									<TouchableOpacity
-										style={styles.saveButton}
-										onPress={handleSaveEdit}
-									>
-										<Ionicons name="checkmark" size={20} color="#fff" />
-										<Text style={styles.saveButtonText}>Save Changes</Text>
 									</TouchableOpacity>
 								</View>
 							</>
@@ -1474,87 +1318,5 @@ const createStyles = (theme: Theme) =>
 			fontSize: 15,
 			fontWeight: "600",
 			color: theme.error,
-		},
-		// Edit Form Styles
-		editFormContainer: {
-			marginBottom: 20,
-		},
-		editFormLabel: {
-			fontSize: 14,
-			fontWeight: "600",
-			color: theme.text,
-			marginBottom: 8,
-			marginTop: 12,
-		},
-		editFormInput: {
-			backgroundColor: theme.surface,
-			borderRadius: 12,
-			paddingHorizontal: 16,
-			paddingVertical: 14,
-			fontSize: 16,
-			color: theme.text,
-			borderWidth: 1,
-			borderColor: theme.border,
-		},
-		editFormInputMultiline: {
-			minHeight: 80,
-			textAlignVertical: "top",
-		},
-		categorySelectContainer: {
-			flexDirection: "row",
-			flexWrap: "wrap",
-			gap: 8,
-		},
-		categorySelectItem: {
-			flexDirection: "row",
-			alignItems: "center",
-			backgroundColor: theme.surface,
-			borderRadius: 20,
-			paddingHorizontal: 12,
-			paddingVertical: 8,
-			borderWidth: 1,
-			borderColor: theme.border,
-			gap: 6,
-		},
-		categorySelectIcon: {
-			fontSize: 16,
-		},
-		categorySelectLabel: {
-			fontSize: 13,
-			color: theme.text,
-		},
-		editFormActions: {
-			flexDirection: "row",
-			gap: 12,
-		},
-		cancelButton: {
-			flex: 1,
-			alignItems: "center",
-			justifyContent: "center",
-			backgroundColor: theme.surface,
-			paddingVertical: 14,
-			borderRadius: 12,
-			borderWidth: 1,
-			borderColor: theme.border,
-		},
-		cancelButtonText: {
-			fontSize: 15,
-			fontWeight: "600",
-			color: theme.textSecondary,
-		},
-		saveButton: {
-			flex: 1,
-			flexDirection: "row",
-			alignItems: "center",
-			justifyContent: "center",
-			gap: 8,
-			backgroundColor: theme.primary,
-			paddingVertical: 14,
-			borderRadius: 12,
-		},
-		saveButtonText: {
-			fontSize: 15,
-			fontWeight: "600",
-			color: "#fff",
 		},
 	});

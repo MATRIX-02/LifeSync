@@ -18,6 +18,7 @@ import {
 	INCOME_CATEGORIES,
 	IncomeCategory,
 	PaymentMethod,
+	Transaction,
 	TransactionType,
 } from "@/src/types/finance";
 import Ionicons from "@expo/vector-icons/Ionicons";
@@ -54,6 +55,8 @@ interface AddTransactionModalProps {
 	subscriptionCheck?: SubscriptionCheckResult;
 	/** Transactions already recorded this month, for the plan limit. */
 	currentMonthTransactionCount?: number;
+	/** When provided, the shared form edits this transaction instead. */
+	transaction?: Transaction | null;
 }
 
 export default function AddTransactionModal({
@@ -65,8 +68,9 @@ export default function AddTransactionModal({
 	onAddAccount,
 	subscriptionCheck,
 	currentMonthTransactionCount = 0,
+	transaction = null,
 }: AddTransactionModalProps) {
-	const { accounts, addTransaction } = useFinanceStore();
+	const { accounts, addTransaction, updateTransaction } = useFinanceStore();
 	const styles = createStyles(theme);
 
 	const [transactionType, setTransactionType] =
@@ -82,20 +86,22 @@ export default function AddTransactionModal({
 	const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("upi");
 	const [submitting, setSubmitting] = useState(false);
 
-	// Reset on each open so a cancelled entry does not bleed into the next one,
-	// and so `initialType` is honoured every time and not just on first mount.
+	// Reset on each open so a cancelled entry does not bleed into the next one.
 	useEffect(() => {
 		if (!visible) return;
-		setTransactionType(initialType);
-		setAmount("");
-		setDescription("");
-		setSelectedCategory(initialType === "income" ? "salary" : "food");
-		setSelectedToAccount("");
-		setPaymentMethod("upi");
+		setTransactionType(transaction?.type ?? initialType);
+		setAmount(transaction ? String(transaction.amount) : "");
+		setDescription(transaction?.description ?? "");
+		setSelectedCategory(
+			transaction?.category ?? (initialType === "income" ? "salary" : "food"),
+		);
+		setSelectedToAccount(transaction?.toAccountId ?? "");
+		setPaymentMethod(transaction?.paymentMethod ?? "upi");
 		setSubmitting(false);
-		// Preselect the only account there is; otherwise leave the choice explicit.
-		setSelectedAccount(accounts.length === 1 ? accounts[0].id : "");
-	}, [visible, initialType]);
+		setSelectedAccount(
+			transaction?.accountId ?? (accounts.length === 1 ? accounts[0].id : ""),
+		);
+	}, [visible, initialType, transaction, accounts]);
 
 	const formatAmount = (value: number) =>
 		value.toLocaleString("en-IN", {
@@ -103,7 +109,7 @@ export default function AddTransactionModal({
 			maximumFractionDigits: 2,
 		});
 
-	const handleAddTransaction = async () => {
+	const handleSubmit = async () => {
 		if (!amount || parseFloat(amount) <= 0) {
 			Alert.alert("Error", "Please enter a valid amount");
 			return;
@@ -130,18 +136,21 @@ export default function AddTransactionModal({
 		// Plan limit. Both entry points pass the same count, so the ceiling is
 		// the same wherever the transaction is added from.
 		if (
+			!transaction &&
 			subscriptionCheck &&
 			!subscriptionCheck.canAddTransaction(currentMonthTransactionCount)
 		) {
 			Alert.alert(
 				"Monthly limit reached",
-				"You have used all the transactions your plan allows this month. Upgrade for more."
+				"You have used all the transactions your plan allows this month. Upgrade for more.",
 			);
 			return;
 		}
 
 		// For credit card expenses, payment method is always credit_card
-		const selectedSourceAccount = accounts.find((a) => a.id === selectedAccount);
+		const selectedSourceAccount = accounts.find(
+			(a) => a.id === selectedAccount,
+		);
 		const finalPaymentMethod =
 			selectedSourceAccount?.type === "credit_card"
 				? "credit_card"
@@ -151,47 +160,71 @@ export default function AddTransactionModal({
 		if (selectedSourceAccount?.type === "credit_card") {
 			const creditLimit = selectedSourceAccount.creditLimit || 0;
 			const currentUsed = selectedSourceAccount.creditUsed || 0;
-			const availableCredit = creditLimit - currentUsed;
+			const restoredCredit =
+				transaction?.accountId === selectedAccount &&
+				transaction.type === "expense"
+					? transaction.amount
+					: 0;
+			const availableCredit = creditLimit - currentUsed + restoredCredit;
 			const transactionAmount = parseFloat(amount);
 
 			if (transactionAmount > availableCredit) {
 				Alert.alert(
 					"Credit Limit Exceeded",
 					`Available credit: ${currency}${formatAmount(
-						availableCredit
+						availableCredit,
 					)}\nTrying to spend: ${currency}${formatAmount(transactionAmount)}`,
-					[{ text: "OK" }]
+					[{ text: "OK" }],
 				);
 				return;
 			}
 		}
 
-		// addTransaction writes to Supabase; awaiting it means a failure surfaces
-		// here instead of closing the sheet on a write that never landed.
+		// Await the database write so a failure surfaces before the sheet closes.
 		setSubmitting(true);
 		try {
-			await addTransaction({
-				type: transactionType,
-				amount: parseFloat(amount),
-				category: selectedCategory,
-				description: description.trim(),
-				date: new Date().toISOString().split("T")[0],
-				time: new Date().toTimeString().split(" ")[0],
-				accountId: selectedAccount,
-				toAccountId:
-					transactionType === "transfer" ? selectedToAccount : undefined,
-				paymentMethod: finalPaymentMethod as any,
-				isRecurring: false,
-			});
+			if (transaction) {
+				await updateTransaction(transaction.id, {
+					type: transactionType,
+					amount: parseFloat(amount),
+					category: selectedCategory,
+					description: description.trim(),
+					accountId: selectedAccount,
+					toAccountId:
+						transactionType === "transfer" ? selectedToAccount : undefined,
+					paymentMethod: finalPaymentMethod as any,
+				});
+			} else {
+				await addTransaction({
+					type: transactionType,
+					amount: parseFloat(amount),
+					category: selectedCategory,
+					description: description.trim(),
+					date: new Date().toISOString().split("T")[0],
+					time: new Date().toTimeString().split(" ")[0],
+					accountId: selectedAccount,
+					toAccountId:
+						transactionType === "transfer" ? selectedToAccount : undefined,
+					paymentMethod: finalPaymentMethod as any,
+					isRecurring: false,
+				});
+			}
 		} catch (error: any) {
 			setSubmitting(false);
-			Alert.alert("Error", error?.message || "Could not add the transaction");
+			Alert.alert(
+				"Error",
+				error?.message ||
+					`Could not ${transaction ? "update" : "add"} the transaction`,
+			);
 			return;
 		}
 
 		setSubmitting(false);
 		onClose();
-		Alert.alert("Success", "Transaction added successfully!");
+		Alert.alert(
+			"Success",
+			`Transaction ${transaction ? "updated" : "added"} successfully!`,
+		);
 	};
 
 	return (
@@ -205,7 +238,7 @@ export default function AddTransactionModal({
 				<View style={styles.modalContent}>
 					<View style={styles.modalHeader}>
 						<Text style={styles.modalTitle}>
-							Add{" "}
+							{transaction ? "Edit" : "Add"}{" "}
 							{transactionType.charAt(0).toUpperCase() +
 								transactionType.slice(1)}
 						</Text>
@@ -249,7 +282,7 @@ export default function AddTransactionModal({
 											{type.charAt(0).toUpperCase() + type.slice(1)}
 										</Text>
 									</TouchableOpacity>
-								)
+								),
 							)}
 						</View>
 
@@ -289,7 +322,7 @@ export default function AddTransactionModal({
 										{Object.entries(
 											transactionType === "income"
 												? INCOME_CATEGORIES
-												: EXPENSE_CATEGORIES
+												: EXPENSE_CATEGORIES,
 										).map(([key, cat]) => (
 											<TouchableOpacity
 												key={`${transactionType}-${key}`}
@@ -431,7 +464,9 @@ export default function AddTransactionModal({
 										style={[styles.paymentOption, styles.paymentOptionActive]}
 										disabled
 									>
-										<Text style={[styles.paymentText, styles.paymentTextActive]}>
+										<Text
+											style={[styles.paymentText, styles.paymentTextActive]}
+										>
 											CREDIT CARD
 										</Text>
 									</TouchableOpacity>
@@ -473,11 +508,17 @@ export default function AddTransactionModal({
 
 						<TouchableOpacity
 							style={[styles.submitButton, submitting && { opacity: 0.6 }]}
-							onPress={handleAddTransaction}
+							onPress={handleSubmit}
 							disabled={submitting}
 						>
 							<Text style={styles.submitButtonText}>
-								{submitting ? "Adding…" : "Add Transaction"}
+								{submitting
+									? transaction
+										? "Saving…"
+										: "Adding…"
+									: transaction
+										? "Save Changes"
+										: "Add Transaction"}
 							</Text>
 						</TouchableOpacity>
 					</ScrollView>

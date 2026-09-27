@@ -2,10 +2,10 @@
 import { Alert } from "@/src/components/CustomAlert";
 import AddTransactionModal from "@/src/components/finance/AddTransactionModal";
 import { LoadingState } from "@/src/components/LoadingState";
-import { useModuleRefresh } from "@/src/hooks/useModuleRefresh";
 import { SubscriptionCheckResult } from "@/src/components/PremiumFeatureGate";
 import { useFinanceStore } from "@/src/context/financeStoreDB";
 import { Theme } from "@/src/context/themeContext";
+import { useModuleRefresh } from "@/src/hooks/useModuleRefresh";
 import {
 	Account,
 	COLORS,
@@ -113,7 +113,7 @@ export default function FinanceDashboard({
 	const startOfMonth = new Date(
 		new Date().getFullYear(),
 		new Date().getMonth(),
-		1
+		1,
 	)
 		.toISOString()
 		.split("T")[0];
@@ -144,8 +144,8 @@ export default function FinanceDashboard({
 				accountType === "cash"
 					? "cash"
 					: accountType === "credit_card"
-					? "card"
-					: "wallet",
+						? "card"
+						: "wallet",
 			isDefault: accounts.length === 0,
 		};
 
@@ -234,7 +234,11 @@ export default function FinanceDashboard({
 			{/* Load failure banner - the data on screen may be stale or empty */}
 			{loadError && (
 				<View style={styles.loadErrorBanner}>
-					<Ionicons name="cloud-offline-outline" size={18} color={theme.error} />
+					<Ionicons
+						name="cloud-offline-outline"
+						size={18}
+						color={theme.error}
+					/>
 					<Text style={styles.loadErrorText} numberOfLines={2}>
 						Couldn't load your finance data. Showing what's on this device.
 					</Text>
@@ -442,25 +446,65 @@ export default function FinanceDashboard({
 					<ScrollView horizontal showsHorizontalScrollIndicator={false}>
 						{accounts.map((account) => (
 							<View key={account.id} style={styles.accountCard}>
-								<View
-									style={[
-										styles.accountIconWrapper,
-										{ backgroundColor: account.color + "15" },
-									]}
-								>
-									<Ionicons
-										name={
-											account.type === "cash"
-												? "cash-outline"
-												: account.type === "credit_card"
-												? "card-outline"
-												: account.type === "investment"
-												? "trending-up-outline"
-												: "wallet-outline"
-										}
-										size={22}
-										color={account.color}
-									/>
+								<View style={styles.accountCardHeader}>
+									<View
+										style={[
+											styles.accountIconWrapper,
+											{ backgroundColor: account.color + "18" },
+										]}
+									>
+										<Ionicons
+											name={
+												account.type === "cash"
+													? "cash-outline"
+													: account.type === "credit_card"
+														? "card-outline"
+														: account.type === "investment"
+															? "trending-up-outline"
+															: account.type === "bank"
+																? "business-outline"
+																: "wallet-outline"
+											}
+											size={21}
+											color={account.color}
+										/>
+									</View>
+									<View style={styles.accountActions}>
+										<TouchableOpacity
+											style={styles.accountActionButton}
+											accessibilityRole="button"
+											accessibilityLabel={`Edit ${account.name}`}
+											onPress={() => startEdit(account)}
+										>
+											<Ionicons name="pencil" size={15} color={theme.primary} />
+										</TouchableOpacity>
+										<TouchableOpacity
+											style={styles.accountActionButton}
+											accessibilityRole="button"
+											accessibilityLabel={`Delete ${account.name}`}
+											onPress={() =>
+												Alert.alert(
+													"Delete account",
+													`Are you sure you want to delete "${account.name}"? This action cannot be undone.`,
+													[
+														{ text: "Cancel", style: "cancel" },
+														{
+															text: "Delete",
+															style: "destructive",
+															onPress: () => deleteAccount(account.id),
+														},
+													],
+													{ cancelable: true },
+												)
+											}
+										>
+											<Ionicons
+												name="trash-outline"
+												size={15}
+												color={theme.error}
+											/>
+										</TouchableOpacity>
+									</View>
 								</View>
 								<Text style={styles.accountName} numberOfLines={1}>
 									{account.name}
@@ -468,38 +512,36 @@ export default function FinanceDashboard({
 								<Text style={styles.accountType}>
 									{account.type.replace("_", " ")}
 								</Text>
-								<Text style={styles.accountBalance}>
-									{hideBalance
-										? "••••"
-										: account.type === "credit_card"
-										? `${currency}${formatAmount(
-												(account.creditLimit || 0) - (account.creditUsed || 0)
-										  )} / ${formatAmount(account.creditLimit || 0)}`
-										: `${currency}${formatAmount(account.balance)}`}
-								</Text>
-								<View style={styles.accountActions}>
-									<TouchableOpacity onPress={() => startEdit(account)}>
-										<Ionicons name="pencil" size={16} color={theme.primary} />
-									</TouchableOpacity>
-									<TouchableOpacity
-										onPress={() =>
-											Alert.alert(
-												"Delete account",
-												`Are you sure you want to delete "${account.name}"? This action cannot be undone.`,
-												[
-													{ text: "Cancel", style: "cancel" },
-													{
-														text: "Delete",
-														style: "destructive",
-														onPress: () => deleteAccount(account.id),
-													},
-												],
-												{ cancelable: true }
-											)
-										}
+								<View style={styles.accountBalanceBlock}>
+									<Text style={styles.accountBalanceLabel}>
+										{account.type === "credit_card"
+											? "Available credit"
+											: "Current balance"}
+									</Text>
+									<Text
+										style={styles.accountBalance}
+										numberOfLines={1}
+										adjustsFontSizeToFit
+										minimumFontScale={0.8}
 									>
-										<Ionicons name="trash" size={16} color={theme.error} />
-									</TouchableOpacity>
+										{hideBalance
+											? "••••"
+											: account.type === "credit_card"
+												? `${currency}${formatAmount(
+														(account.creditLimit || 0) -
+															(account.creditUsed || 0),
+													)}`
+												: `${currency}${formatAmount(account.balance)}`}
+									</Text>
+									{account.type === "credit_card" && (
+										<Text style={styles.accountLimit} numberOfLines={1}>
+											{hideBalance
+												? "of •••• limit"
+												: `of ${currency}${formatAmount(
+														account.creditLimit || 0,
+													)} limit`}
+										</Text>
+									)}
 								</View>
 							</View>
 						))}
@@ -584,7 +626,7 @@ export default function FinanceDashboard({
 							const catInfo = EXPENSE_CATEGORIES[bill.category];
 							const daysLeft = Math.ceil(
 								(new Date(bill.dueDate).getTime() - new Date().getTime()) /
-									(1000 * 60 * 60 * 24)
+									(1000 * 60 * 60 * 24),
 							);
 							return (
 								<View key={bill.id} style={styles.billItem}>
@@ -698,8 +740,8 @@ export default function FinanceDashboard({
 													transaction.type === "income"
 														? theme.success
 														: transaction.type === "expense"
-														? theme.error
-														: theme.primary,
+															? theme.error
+															: theme.primary,
 											},
 										]}
 									>
@@ -816,10 +858,10 @@ export default function FinanceDashboard({
 													type === "cash"
 														? "cash"
 														: type === "credit_card"
-														? "card"
-														: type === "investment"
-														? "trending-up"
-														: "wallet"
+															? "card"
+															: type === "investment"
+																? "trending-up"
+																: "wallet"
 												}
 												size={20}
 												color={accountType === type ? "#FFF" : theme.text}
@@ -945,10 +987,10 @@ export default function FinanceDashboard({
 														type === "cash"
 															? "cash"
 															: type === "credit_card"
-															? "card"
-															: type === "investment"
-															? "trending-up"
-															: "wallet"
+																? "card"
+																: type === "investment"
+																	? "trending-up"
+																	: "wallet"
 													}
 													size={20}
 													color={editForm.type === type ? "#FFF" : theme.text}
@@ -1269,53 +1311,80 @@ const createStyles = (theme: Theme) =>
 		accountCard: {
 			backgroundColor: theme.surface,
 			borderRadius: 16,
+			borderWidth: 1,
+			borderColor: theme.border,
 			padding: 14,
 			marginRight: 10,
-			width: 140,
+			width: 184,
+			height: 182,
+			alignItems: "stretch",
+			justifyContent: "space-between",
+		},
+		accountCardHeader: {
+			width: "100%",
+			flexDirection: "row",
 			alignItems: "center",
-			justifyContent: "center",
+			justifyContent: "space-between",
 		},
 		accountIconWrapper: {
-			width: 40,
-			height: 40,
+			width: 42,
+			height: 42,
 			borderRadius: 12,
 			justifyContent: "center",
 			alignItems: "center",
-			marginBottom: 8,
 		},
 		accountName: {
-			fontSize: 15,
-			fontWeight: "600",
+			fontSize: 14,
+			fontWeight: "700",
 			color: theme.text,
-			marginBottom: 2,
-			textAlign: "center",
+			marginTop: 10,
 		},
 		accountType: {
-			fontSize: 11,
+			fontSize: 10,
+			fontWeight: "600",
 			color: theme.textMuted,
 			textTransform: "capitalize",
-			marginBottom: 6,
-			textAlign: "center",
+			marginTop: 2,
+		},
+		accountBalanceBlock: {
+			width: "100%",
+			marginTop: "auto",
+		},
+		accountBalanceLabel: {
+			fontSize: 11,
+			color: theme.textMuted,
+			marginBottom: 3,
 		},
 		accountBalance: {
-			fontSize: 16,
+			fontSize: 18,
 			fontWeight: "700",
-			color: theme.primary,
-			marginBottom: 4,
-			textAlign: "center",
+			color: theme.text,
+		},
+		accountLimit: {
+			fontSize: 11,
+			color: theme.textMuted,
+			marginTop: 2,
 		},
 		accountActions: {
 			flexDirection: "row",
-			justifyContent: "center",
+			justifyContent: "flex-end",
 			alignItems: "center",
-			marginTop: 6,
-			gap: 10,
+			gap: 6,
+		},
+		accountActionButton: {
+			width: 32,
+			height: 32,
+			borderRadius: 10,
+			backgroundColor: theme.background,
+			alignItems: "center",
+			justifyContent: "center",
 		},
 		addAccountCard: {
 			backgroundColor: theme.surface,
 			borderRadius: 18,
 			padding: 16,
 			width: 100,
+			height: 182,
 			alignItems: "center",
 			justifyContent: "center",
 			borderWidth: 2,

@@ -12,12 +12,19 @@ import { useColors } from "@/src/context/themeContext";
 import {
 	clearFailedCount,
 	getQueueState,
+	QueueChange,
 	QueueState,
 	subscribe,
 } from "@/src/services/writeQueue";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import React, { useEffect, useState } from "react";
-import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import {
+	ActivityIndicator,
+	StyleSheet,
+	Text,
+	TouchableOpacity,
+	View,
+} from "react-native";
 
 export const SyncStatusBanner: React.FC = () => {
 	const theme = useColors();
@@ -31,38 +38,83 @@ export const SyncStatusBanner: React.FC = () => {
 	if (!hasPending && !hasFailed) return null;
 
 	const styles = createStyles(theme);
-
-	// Rejected writes are the more serious message, so they win the banner.
-	if (hasFailed && !hasPending) {
-		return (
-			<TouchableOpacity
-				style={[styles.banner, styles.bannerError]}
-				onPress={clearFailedCount}
-				activeOpacity={0.8}
-			>
-				<Ionicons name="alert-circle" size={16} color="#FFF" />
-				<Text style={styles.text}>
-					{queue.failed} change{queue.failed > 1 ? "s" : ""} couldn&apos;t be
-					saved. Tap to dismiss.
-				</Text>
-			</TouchableOpacity>
-		);
-	}
+	const changes: { change: QueueChange; status: "failed" | "pending" }[] = [
+		...queue.failedDetails.map((change) => ({
+			change,
+			status: "failed" as const,
+		})),
+		...queue.pendingDetails.map((change) => ({
+			change,
+			status: "pending" as const,
+		})),
+	];
 
 	return (
-		<View style={[styles.banner, styles.bannerPending]}>
-			{queue.flushing ? (
-				<ActivityIndicator size="small" color="#FFF" />
-			) : (
-				<Ionicons name="cloud-offline-outline" size={16} color="#FFF" />
+		<View
+			style={[
+				styles.banner,
+				hasFailed ? styles.bannerError : styles.bannerPending,
+			]}
+		>
+			<View style={styles.bannerHeader}>
+				{queue.flushing && !hasFailed ? (
+					<ActivityIndicator size="small" color="#FFF" />
+				) : (
+					<Ionicons
+						name={hasFailed ? "alert-circle" : "cloud-offline-outline"}
+						size={16}
+						color="#FFF"
+					/>
+				)}
+				<Text style={styles.text}>
+					{hasFailed
+						? `${queue.failed} change${queue.failed > 1 ? "s" : ""} need${queue.failed === 1 ? "s" : ""} attention${hasPending ? `; ${queue.pending} still syncing` : ""}`
+						: queue.flushing
+							? `Syncing ${queue.pending} change${queue.pending > 1 ? "s" : ""}…`
+							: `${queue.pending} change${queue.pending > 1 ? "s" : ""} saved on this device, waiting for a connection`}
+				</Text>
+				{hasFailed && (
+					<TouchableOpacity
+						style={styles.dismissButton}
+						onPress={clearFailedCount}
+						accessibilityRole="button"
+						accessibilityLabel="Dismiss save warning"
+					>
+						<Ionicons name="close" size={18} color="#FFF" />
+					</TouchableOpacity>
+				)}
+			</View>
+			{changes.length > 0 && (
+				<View style={styles.changeList}>
+					{changes.slice(0, 3).map(({ change, status }) => (
+						<View key={change.id} style={styles.changeItem}>
+							<View style={styles.changeHeading}>
+								<Text style={styles.changeSummary} numberOfLines={1}>
+									{change.summary}
+								</Text>
+								<Text style={styles.changeStatus}>
+									{status === "failed" ? "Failed" : "Waiting"}
+								</Text>
+							</View>
+							{change.fields.length > 0 && (
+								<Text style={styles.changeFields} numberOfLines={1}>
+									Fields: {change.fields.join(", ")}
+								</Text>
+							)}
+							{change.error && (
+								<Text style={styles.changeError} numberOfLines={2}>
+									{change.error}
+								</Text>
+							)}
+						</View>
+					))}
+					{changes.length > 3 && (
+						<Text style={styles.moreChanges}>
+							+{changes.length - 3} more changes
+						</Text>
+					)}
+				</View>
 			)}
-			<Text style={styles.text}>
-				{queue.flushing
-					? `Syncing ${queue.pending} change${queue.pending > 1 ? "s" : ""}…`
-					: `${queue.pending} change${
-							queue.pending > 1 ? "s" : ""
-					  } saved on this device, waiting for a connection`}
-			</Text>
 		</View>
 	);
 };
@@ -70,11 +122,13 @@ export const SyncStatusBanner: React.FC = () => {
 const createStyles = (theme: any) =>
 	StyleSheet.create({
 		banner: {
+			paddingHorizontal: 14,
+			paddingVertical: 10,
+		},
+		bannerHeader: {
 			flexDirection: "row",
 			alignItems: "center",
 			gap: 8,
-			paddingHorizontal: 14,
-			paddingVertical: 8,
 		},
 		bannerPending: {
 			backgroundColor: theme.warning,
@@ -86,6 +140,54 @@ const createStyles = (theme: any) =>
 			flex: 1,
 			color: "#FFF",
 			fontSize: 12.5,
+			fontWeight: "600",
+		},
+		dismissButton: {
+			width: 28,
+			height: 28,
+			alignItems: "center",
+			justifyContent: "center",
+		},
+		changeList: {
+			marginTop: 6,
+			marginLeft: 24,
+			gap: 5,
+		},
+		changeItem: {
+			paddingTop: 5,
+			borderTopWidth: StyleSheet.hairlineWidth,
+			borderTopColor: "rgba(255,255,255,0.3)",
+		},
+		changeHeading: {
+			flexDirection: "row",
+			alignItems: "center",
+			gap: 8,
+		},
+		changeSummary: {
+			flex: 1,
+			color: "#FFF",
+			fontSize: 12,
+			fontWeight: "700",
+		},
+		changeStatus: {
+			color: "rgba(255,255,255,0.85)",
+			fontSize: 10,
+			fontWeight: "700",
+			textTransform: "uppercase",
+		},
+		changeFields: {
+			color: "rgba(255,255,255,0.9)",
+			fontSize: 11,
+			marginTop: 2,
+		},
+		changeError: {
+			color: "#FFF",
+			fontSize: 11,
+			marginTop: 2,
+		},
+		moreChanges: {
+			color: "#FFF",
+			fontSize: 11,
 			fontWeight: "600",
 		},
 	});

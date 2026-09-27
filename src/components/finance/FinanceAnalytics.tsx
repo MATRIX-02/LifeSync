@@ -83,19 +83,15 @@ export default function FinanceAnalytics({
 	currency,
 	onOpenDrawer,
 }: FinanceAnalyticsProps) {
-	const {
-		transactions,
-		accounts,
-		getFinancialSummary,
-		getSpendingByCategory,
-		getMonthlyTrends,
-		getNetWorth,
-	} = useFinanceStore();
+	const { transactions, accounts, getNetWorth } = useFinanceStore();
 
 	const styles = createStyles(theme);
 
 	const [timeRange, setTimeRange] = useState<TimeRange>("month");
 	const [showPeriodDropdown, setShowPeriodDropdown] = useState(false);
+	const [selectedAccountId, setSelectedAccountId] = useState("all");
+	const [showAccountDropdown, setShowAccountDropdown] = useState(false);
+	const [showAllCategories, setShowAllCategories] = useState(false);
 
 	const dateRange = useMemo(() => {
 		const now = new Date();
@@ -127,46 +123,99 @@ export default function FinanceAnalytics({
 		return { start, end: now.toISOString().split("T")[0] };
 	}, [timeRange]);
 
-	const summaryData = useMemo(
-		() => getFinancialSummary(dateRange.start, dateRange.end),
-		[dateRange, transactions]
+	const periodTransactions = useMemo(
+		() =>
+			transactions.filter(
+				(t) =>
+					t.date >= dateRange.start &&
+					t.date <= dateRange.end &&
+					(selectedAccountId === "all" ||
+						t.accountId === selectedAccountId ||
+						t.toAccountId === selectedAccountId),
+			),
+		[dateRange, selectedAccountId, transactions],
 	);
 
-	// Provide defaults to prevent undefined errors
-	const summary = {
-		totalIncome: summaryData?.totalIncome ?? 0,
-		totalExpenses: summaryData?.totalExpenses ?? 0,
-		balance: summaryData?.balance ?? 0,
-		netSavings: summaryData?.netSavings ?? 0,
-		topCategories: summaryData?.topCategories ?? [],
-		averageDailySpending: summaryData?.averageDailySpending ?? 0,
-		largestExpense: summaryData?.largestExpense ?? null,
-	};
+	const summary = useMemo(() => {
+		const totalIncome = periodTransactions
+			.filter((t) => t.type === "income")
+			.reduce((total, t) => total + t.amount, 0);
+		const totalExpenses = periodTransactions
+			.filter((t) => t.type === "expense")
+			.reduce((total, t) => total + t.amount, 0);
+		return {
+			totalIncome,
+			totalExpenses,
+			balance: totalIncome - totalExpenses,
+		};
+	}, [periodTransactions]);
 
-	const spendingByCategory = useMemo(
-		() => getSpendingByCategory(dateRange.start, dateRange.end),
-		[dateRange, transactions]
-	);
-
-	const incomeByCategory = useMemo(() => {
-		const filtered = transactions.filter(
-			(t) =>
-				t.type === "income" &&
-				t.date >= dateRange.start &&
-				t.date <= dateRange.end
-		);
+	const spendingByCategory = useMemo(() => {
 		const categoryMap: Record<string, number> = {};
-		filtered.forEach((t) => {
-			categoryMap[t.category] = (categoryMap[t.category] || 0) + t.amount;
-		});
+		periodTransactions
+			.filter((t) => t.type === "expense")
+			.forEach((t) => {
+				categoryMap[t.category] = (categoryMap[t.category] || 0) + t.amount;
+			});
 		return Object.entries(categoryMap)
 			.map(([category, amount]) => ({ category, amount }))
 			.sort((a, b) => b.amount - a.amount);
-	}, [dateRange, transactions]);
+	}, [periodTransactions]);
 
-	const monthlyTrends = useMemo(() => getMonthlyTrends(12), [transactions]);
+	const incomeByCategory = useMemo(() => {
+		const categoryMap: Record<string, number> = {};
+		periodTransactions
+			.filter((t) => t.type === "income")
+			.forEach((t) => {
+				categoryMap[t.category] = (categoryMap[t.category] || 0) + t.amount;
+			});
+		return Object.entries(categoryMap)
+			.map(([category, amount]) => ({ category, amount }))
+			.sort((a, b) => b.amount - a.amount);
+	}, [periodTransactions]);
 
-	const netWorth = getNetWorth();
+	const monthlyTrends = useMemo(() => {
+		const months = Array.from({ length: 12 }, (_, index) => {
+			const date = new Date();
+			date.setDate(1);
+			date.setMonth(date.getMonth() - (11 - index));
+			return {
+				year: date.getFullYear(),
+				monthIndex: date.getMonth(),
+				month: date.toLocaleString("en-US", { month: "short" }),
+				income: 0,
+				expense: 0,
+			};
+		});
+		const monthLookup = new Map(
+			months.map((month) => [`${month.year}-${month.monthIndex + 1}`, month]),
+		);
+		transactions.forEach((transaction) => {
+			if (
+				selectedAccountId !== "all" &&
+				transaction.accountId !== selectedAccountId &&
+				transaction.toAccountId !== selectedAccountId
+			) {
+				return;
+			}
+			if (transaction.type !== "income" && transaction.type !== "expense") {
+				return;
+			}
+			const [year, month] = transaction.date.split("-").map(Number);
+			const bucket = monthLookup.get(`${year}-${month}`);
+			if (bucket) {
+				if (transaction.type === "income") bucket.income += transaction.amount;
+				else bucket.expense += transaction.amount;
+			}
+		});
+		return months;
+	}, [selectedAccountId, transactions]);
+
+	const selectedAccount = accounts.find(
+		(account) => account.id === selectedAccountId,
+	);
+	const visibleAccounts = selectedAccount ? [selectedAccount] : accounts;
+	const netWorth = selectedAccount?.balance ?? getNetWorth();
 
 	const formatAmount = (value: number | undefined | null) => {
 		const num = value ?? 0;
@@ -186,7 +235,7 @@ export default function FinanceAnalytics({
 
 	const formatPercent = (
 		value: number | undefined | null,
-		total: number | undefined | null
+		total: number | undefined | null,
 	) => {
 		const v = value ?? 0;
 		const t = total ?? 0;
@@ -198,26 +247,73 @@ export default function FinanceAnalytics({
 	const savingsRate =
 		summary.totalIncome > 0
 			? ((summary.totalIncome - summary.totalExpenses) / summary.totalIncome) *
-			  100
+				100
 			: 0;
 
 	const days = Math.max(
 		1,
-		(new Date(dateRange.end).getTime() - new Date(dateRange.start).getTime()) /
-			(24 * 60 * 60 * 1000)
+		Math.floor(
+			(new Date(dateRange.end).getTime() -
+				new Date(dateRange.start).getTime()) /
+				(24 * 60 * 60 * 1000),
+		) + 1,
 	);
 	const avgDailySpending = summary.totalExpenses / days;
 
-	// Transaction count
-	const txCount = transactions.filter(
-		(t) => t.date >= dateRange.start && t.date <= dateRange.end
-	).length;
+	const txCount = periodTransactions.length;
+
+	const comparison = useMemo(() => {
+		if (timeRange === "all") return null;
+		const dayMs = 24 * 60 * 60 * 1000;
+		const currentStart = new Date(`${dateRange.start}T00:00:00Z`);
+		const currentEnd = new Date(`${dateRange.end}T00:00:00Z`);
+		const periodLength =
+			Math.floor((currentEnd.getTime() - currentStart.getTime()) / dayMs) + 1;
+		const previousEnd = new Date(currentStart.getTime() - dayMs);
+		const previousStart = new Date(
+			previousEnd.getTime() - (periodLength - 1) * dayMs,
+		);
+		const toDateKey = (date: Date) => date.toISOString().split("T")[0];
+		const previousTransactions = transactions.filter(
+			(t) =>
+				t.date >= toDateKey(previousStart) &&
+				t.date <= toDateKey(previousEnd) &&
+				(selectedAccountId === "all" ||
+					t.accountId === selectedAccountId ||
+					t.toAccountId === selectedAccountId),
+		);
+		return {
+			start: toDateKey(previousStart),
+			income: previousTransactions
+				.filter((t) => t.type === "income")
+				.reduce((total, t) => total + t.amount, 0),
+			expenses: previousTransactions
+				.filter((t) => t.type === "expense")
+				.reduce((total, t) => total + t.amount, 0),
+		};
+	}, [dateRange, selectedAccountId, timeRange, transactions]);
+
+	const getPercentageChange = (current: number, previous: number) => {
+		if (previous === 0) return current === 0 ? 0 : null;
+		return ((current - previous) / previous) * 100;
+	};
+	const formatChange = (change: number | null) =>
+		change === null ? "New" : `${change > 0 ? "+" : ""}${change.toFixed(1)}%`;
+	const changeColor = (change: number | null, lowerIsBetter = false) =>
+		change === null
+			? theme.primary
+			: (lowerIsBetter ? change <= 0 : change >= 0)
+				? theme.success
+				: theme.error;
 
 	// Calculate max values for chart scaling
+	const hasTrendData = monthlyTrends.some(
+		(month) => month.income > 0 || month.expense > 0,
+	);
 	const maxSpending = Math.max(...spendingByCategory.map((s) => s.amount), 1);
 	const maxTrend = Math.max(
 		...monthlyTrends.map((t) => Math.max(t.income, t.expense)),
-		1
+		1,
 	);
 
 	const getPeriodLabel = () => {
@@ -246,13 +342,70 @@ export default function FinanceAnalytics({
 		<ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
 			{/* Period Selector */}
 			<View style={styles.periodSection}>
-				<TouchableOpacity
-					style={styles.periodDropdown}
-					onPress={() => setShowPeriodDropdown(!showPeriodDropdown)}
-				>
-					<Text style={styles.periodText}>{getPeriodLabel()}</Text>
-					<Ionicons name="chevron-down" size={18} color={theme.text} />
-				</TouchableOpacity>
+				<View style={styles.filterControls}>
+					<TouchableOpacity
+						style={styles.periodDropdown}
+						onPress={() => {
+							setShowPeriodDropdown(!showPeriodDropdown);
+							setShowAccountDropdown(false);
+						}}
+					>
+						<Text style={styles.periodText}>{getPeriodLabel()}</Text>
+						<Ionicons name="chevron-down" size={18} color={theme.text} />
+					</TouchableOpacity>
+					<View style={styles.accountFilterWrap}>
+						<TouchableOpacity
+							style={styles.accountFilterButton}
+							onPress={() => {
+								setShowAccountDropdown(!showAccountDropdown);
+								setShowPeriodDropdown(false);
+							}}
+						>
+							<Ionicons name="filter-outline" size={16} color={theme.text} />
+							<Text
+								style={[styles.periodText, styles.accountFilterLabel]}
+								numberOfLines={1}
+							>
+								{selectedAccount?.name ?? "All accounts"}
+							</Text>
+							<Ionicons name="chevron-down" size={18} color={theme.text} />
+						</TouchableOpacity>
+						{showAccountDropdown && (
+							<View style={styles.accountDropdownMenu}>
+								{[
+									{ id: "all", name: "All accounts" },
+									...accounts.map((account) => ({
+										id: account.id,
+										name: account.name,
+									})),
+								].map((account) => (
+									<TouchableOpacity
+										key={account.id}
+										style={[
+											styles.dropdownItem,
+											selectedAccountId === account.id &&
+												styles.dropdownItemActive,
+										]}
+										onPress={() => {
+											setSelectedAccountId(account.id);
+											setShowAccountDropdown(false);
+										}}
+									>
+										<Text
+											style={[
+												styles.dropdownItemText,
+												selectedAccountId === account.id &&
+													styles.dropdownItemTextActive,
+											]}
+										>
+											{account.name}
+										</Text>
+									</TouchableOpacity>
+								))}
+							</View>
+						)}
+					</View>
+				</View>
 
 				{showPeriodDropdown && (
 					<View style={styles.dropdownMenu}>
@@ -280,7 +433,7 @@ export default function FinanceAnalytics({
 											: range.charAt(0).toUpperCase() + range.slice(1)}
 									</Text>
 								</TouchableOpacity>
-							)
+							),
 						)}
 					</View>
 				)}
@@ -399,6 +552,67 @@ export default function FinanceAnalytics({
 				</View>
 			</View>
 
+			{comparison && (
+				<View style={styles.comparisonCard}>
+					<View style={styles.comparisonHeader}>
+						<View>
+							<Text style={styles.comparisonTitle}>Period comparison</Text>
+							<Text style={styles.comparisonSubtitle}>
+								Compared with the previous period
+							</Text>
+						</View>
+						<Ionicons
+							name="git-compare-outline"
+							size={20}
+							color={theme.primary}
+						/>
+					</View>
+					<View style={styles.comparisonMetrics}>
+						{(
+							[
+								{
+									label: "Income",
+									current: summary.totalIncome,
+									previous: comparison.income,
+									lowerIsBetter: false,
+								},
+								{
+									label: "Expenses",
+									current: summary.totalExpenses,
+									previous: comparison.expenses,
+									lowerIsBetter: true,
+								},
+							] as const
+						).map((metric) => {
+							const change = getPercentageChange(
+								metric.current,
+								metric.previous,
+							);
+							return (
+								<View key={metric.label} style={styles.comparisonMetric}>
+									<Text style={styles.comparisonLabel}>{metric.label}</Text>
+									<Text style={styles.comparisonAmount}>
+										{currency}
+										{formatAmount(metric.current)}
+									</Text>
+									<Text
+										style={[
+											styles.comparisonChange,
+											{ color: changeColor(change, metric.lowerIsBetter) },
+										]}
+									>
+										{formatChange(change)}
+										<Text style={styles.comparisonPrevious}>
+											{` vs ${currency}${formatAmount(metric.previous)}`}
+										</Text>
+									</Text>
+								</View>
+							);
+						})}
+					</View>
+				</View>
+			)}
+
 			{/* Monthly Trends - Bar Chart */}
 			<View style={styles.section}>
 				<View style={styles.sectionHeader}>
@@ -419,7 +633,7 @@ export default function FinanceAnalytics({
 					</View>
 				</View>
 
-				{monthlyTrends.length === 0 ? (
+				{!hasTrendData ? (
 					<View style={styles.emptyChart}>
 						<Ionicons
 							name="bar-chart-outline"
@@ -472,7 +686,21 @@ export default function FinanceAnalytics({
 
 			{/* Spending by Category */}
 			<View style={styles.section}>
-				<Text style={styles.sectionTitle}>Spending Breakdown</Text>
+				<View style={styles.sectionHeader}>
+					<Text style={[styles.sectionTitle, styles.categoryHeading]}>
+						Spending Breakdown
+					</Text>
+					{spendingByCategory.length > 6 && (
+						<TouchableOpacity
+							style={styles.categoryToggle}
+							onPress={() => setShowAllCategories(!showAllCategories)}
+						>
+							<Text style={styles.categoryToggleText}>
+								{showAllCategories ? "Top 6" : "Show all"}
+							</Text>
+						</TouchableOpacity>
+					)}
+				</View>
 				{spendingByCategory.length === 0 ? (
 					<View style={styles.emptyChart}>
 						<Ionicons
@@ -486,7 +714,10 @@ export default function FinanceAnalytics({
 					</View>
 				) : (
 					<View style={styles.categoryCard}>
-						{spendingByCategory.slice(0, 6).map((item, index) => {
+						{(showAllCategories
+							? spendingByCategory
+							: spendingByCategory.slice(0, 6)
+						).map((item) => {
 							const catInfo =
 								EXPENSE_CATEGORIES[item.category as ExpenseCategory];
 							const percentage =
@@ -541,7 +772,7 @@ export default function FinanceAnalytics({
 								INCOME_CATEGORIES[item.category as IncomeCategory];
 							const totalIncome = incomeByCategory.reduce(
 								(sum, i) => sum + i.amount,
-								0
+								0,
 							);
 							const percentage =
 								totalIncome > 0 ? (item.amount / totalIncome) * 100 : 0;
@@ -590,7 +821,7 @@ export default function FinanceAnalytics({
 				<View style={styles.section}>
 					<Text style={styles.sectionTitle}>Accounts</Text>
 					<View style={styles.accountsCard}>
-						{accounts.map((account) => {
+						{visibleAccounts.map((account) => {
 							const percentage =
 								netWorth > 0 ? (account.balance / netWorth) * 100 : 0;
 							return (
@@ -684,7 +915,7 @@ export default function FinanceAnalytics({
 									accounts for{" "}
 									{formatPercent(
 										spendingByCategory[0].amount,
-										summary.totalExpenses
+										summary.totalExpenses,
 									)}{" "}
 									of expenses.
 								</Text>
@@ -726,6 +957,11 @@ const createStyles = (theme: Theme) =>
 			paddingVertical: 12,
 			zIndex: 100,
 		},
+		filterControls: {
+			flexDirection: "row",
+			alignItems: "center",
+			gap: 8,
+		},
 		periodDropdown: {
 			flexDirection: "row",
 			alignItems: "center",
@@ -735,6 +971,40 @@ const createStyles = (theme: Theme) =>
 			paddingHorizontal: 16,
 			borderRadius: 12,
 			gap: 8,
+		},
+		accountFilterWrap: {
+			flex: 1,
+			position: "relative",
+			zIndex: 2,
+		},
+		accountFilterButton: {
+			minWidth: 0,
+			flexDirection: "row",
+			alignItems: "center",
+			backgroundColor: theme.surface,
+			paddingVertical: 10,
+			paddingHorizontal: 12,
+			borderRadius: 12,
+			gap: 7,
+		},
+		accountFilterLabel: {
+			flex: 1,
+		},
+		accountDropdownMenu: {
+			position: "absolute",
+			top: 46,
+			right: 0,
+			minWidth: 180,
+			maxWidth: 260,
+			backgroundColor: theme.surface,
+			borderRadius: 12,
+			padding: 4,
+			shadowColor: "#000",
+			shadowOffset: { width: 0, height: 4 },
+			shadowOpacity: 0.15,
+			shadowRadius: 12,
+			elevation: 8,
+			zIndex: 1000,
 		},
 		periodText: {
 			fontSize: 15,
@@ -878,6 +1148,59 @@ const createStyles = (theme: Theme) =>
 			fontSize: 10,
 			color: theme.textMuted,
 		},
+		comparisonCard: {
+			marginHorizontal: 16,
+			marginTop: 12,
+			padding: 16,
+			backgroundColor: theme.surface,
+			borderRadius: 16,
+		},
+		comparisonHeader: {
+			flexDirection: "row",
+			alignItems: "center",
+			justifyContent: "space-between",
+			marginBottom: 16,
+		},
+		comparisonTitle: {
+			fontSize: 15,
+			fontWeight: "700",
+			color: theme.text,
+		},
+		comparisonSubtitle: {
+			fontSize: 12,
+			color: theme.textMuted,
+			marginTop: 3,
+		},
+		comparisonMetrics: {
+			flexDirection: "row",
+			gap: 12,
+		},
+		comparisonMetric: {
+			flex: 1,
+			minWidth: 0,
+			padding: 12,
+			backgroundColor: theme.background,
+			borderRadius: 12,
+		},
+		comparisonLabel: {
+			fontSize: 12,
+			color: theme.textMuted,
+		},
+		comparisonAmount: {
+			fontSize: 16,
+			fontWeight: "700",
+			color: theme.text,
+			marginTop: 5,
+		},
+		comparisonChange: {
+			fontSize: 12,
+			fontWeight: "700",
+			marginTop: 5,
+		},
+		comparisonPrevious: {
+			fontWeight: "400",
+			color: theme.textMuted,
+		},
 		section: {
 			paddingHorizontal: 16,
 			marginTop: 24,
@@ -893,6 +1216,19 @@ const createStyles = (theme: Theme) =>
 			fontWeight: "600",
 			color: theme.text,
 			marginBottom: 12,
+		},
+		categoryHeading: {
+			marginBottom: 0,
+		},
+		categoryToggle: {
+			paddingHorizontal: 8,
+			paddingVertical: 5,
+			marginBottom: 8,
+		},
+		categoryToggleText: {
+			fontSize: 13,
+			fontWeight: "600",
+			color: theme.primary,
 		},
 		legendRow: {
 			flexDirection: "row",

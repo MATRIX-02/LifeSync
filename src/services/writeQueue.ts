@@ -41,19 +41,30 @@ type Listener = (state: QueueState) => void;
 
 export interface QueueState {
 	pending: number;
+	pendingDetails: QueueChange[];
 	/** Set once a write has been queued; cleared when the queue drains. */
 	offline: boolean;
 	flushing: boolean;
 	/** Writes abandoned because the server rejected them outright. */
 	failed: number;
+	failedDetails: QueueChange[];
 	lastFlushAt: number | null;
+}
+
+export interface QueueChange {
+	id: string;
+	summary: string;
+	fields: string[];
+	error?: string;
 }
 
 let state: QueueState = {
 	pending: 0,
+	pendingDetails: [],
 	offline: false,
 	flushing: false,
 	failed: 0,
+	failedDetails: [],
 	lastFlushAt: null,
 };
 
@@ -77,6 +88,104 @@ export const subscribe = (listener: Listener): (() => void) => {
 };
 
 export const getQueueState = (): QueueState => ({ ...state });
+
+const tableLabels: Record<string, string> = {
+	finance_accounts: "Account",
+	finance_transactions: "Transaction",
+	user_habits: "Habit",
+	habit_logs: "Habit log",
+	workout_plans: "Workout plan",
+	workout_sessions: "Workout session",
+	study_goals: "Study goal",
+	study_subjects: "Study subject",
+	study_sessions: "Study session",
+};
+
+const toChangeDetail = (
+	item: Pick<QueuedWrite, "id" | "table" | "op" | "args" | "filters">,
+	error?: string,
+): QueueChange => {
+	const payload = item.args[0];
+	const record = Array.isArray(payload) ? payload[0] : payload;
+	const fields =
+		record && typeof record === "object"
+			? Object.keys(record)
+					.filter(
+						(key) =>
+							![
+								"id",
+								"user_id",
+								"created_at",
+								"updated_at",
+								"createdAt",
+								"updatedAt",
+							].includes(key),
+					)
+					.map((key) => key.replace(/([A-Z])/g, " $1").replace(/_/g, " "))
+					.slice(0, 4)
+			: [];
+	const recordLabel =
+		record && typeof record === "object"
+			? [record.name, record.title, record.person_name].find(
+					(value) => typeof value === "string" && value.trim(),
+				)
+			: undefined;
+	const idFilter = item.filters.find(
+		([method, args]) => method === "eq" && args[0] === "id",
+	);
+	const recordId = record?.id ?? idFilter?.[1][1];
+	const operation =
+		item.op === "insert"
+			? "Add"
+			: item.op === "delete"
+				? "Delete"
+				: item.op === "update"
+					? "Update"
+					: "Save";
+	const tableLabel =
+		tableLabels[item.table] ??
+		item.table
+			.split("_")
+			.map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+			.join(" ");
+	const label = typeof recordLabel === "string" ? recordLabel.trim() : "";
+	const idSuffix = typeof recordId === "string" ? recordId.slice(-6) : "";
+	const suffix = label
+		? `: ${label.slice(0, 48)}`
+		: idSuffix
+			? ` #${idSuffix}`
+			: "";
+	return {
+		id: item.id,
+		summary: `${operation} ${tableLabel}${suffix}`,
+		fields,
+		error: error?.replace(/\s+/g, " ").slice(0, 160),
+	};
+};
+
+export const isDuplicatePrimaryKeyInsert = (
+	result: any,
+	op: WriteOp,
+	args: any[],
+): boolean => {
+	if (op !== "insert" || result?.error?.code !== "23505") return false;
+	const payload = args[0];
+	if (Array.isArray(payload) || !payload || typeof payload !== "object") {
+		return false;
+	}
+	const id = payload.id;
+	const details = String(result.error.details || "");
+	return (
+		typeof id === "string" &&
+		details.includes(`Key (id)=(${id})`) &&
+		/already exists|duplicate key/i.test(
+			`${details} ${result.error.message || ""}`,
+		)
+	);
+};
+
+const isReplayOfCommittedInsert = (result: any, item: QueuedWrite): boolean =>
+	isDuplicatePrimaryKeyInsert(result, item.op, item.args);
 
 // ---------------------------------------------------------------------------
 // Persistence
@@ -115,7 +224,7 @@ export const isOfflineFailure = (result: any): boolean => {
 	return (
 		(code === "" || code === undefined) &&
 		/network request failed|failed to fetch|network error|timeout|ECONN/i.test(
-			message
+			message,
 		)
 	);
 };
@@ -125,7 +234,7 @@ export const isOfflineFailure = (result: any): boolean => {
 // ---------------------------------------------------------------------------
 
 export const enqueue = async (
-	entry: Omit<QueuedWrite, "id" | "createdAt" | "attempts">
+	entry: Omit<QueuedWrite, "id" | "createdAt" | "attempts">,
 ): Promise<void> => {
 	const queue = await readQueue();
 
@@ -143,7 +252,12 @@ export const enqueue = async (
 	});
 
 	await writeQueueToDisk(queue);
-	state = { ...state, pending: queue.length, offline: true };
+	state = {
+		...state,
+		pending: queue.length,
+		pendingDetails: queue.map((item) => toChangeDetail(item)),
+		offline: true,
+	};
 	emit();
 };
 
@@ -181,6 +295,7 @@ export const flushQueue = async (rawClient: any): Promise<void> => {
 	emit();
 
 	let abandoned = 0;
+	const abandonedDetails: QueueChange[] = [];
 
 	try {
 		while (queue.length > 0) {
@@ -199,10 +314,11 @@ export const flushQueue = async (rawClient: any): Promise<void> => {
 				item.lastError = result.error?.message;
 				if (item.attempts >= MAX_ATTEMPTS) {
 					console.warn(
-						`writeQueue: giving up on ${item.op} ${item.table} after ${item.attempts} attempts`
+						`writeQueue: giving up on ${item.op} ${item.table} after ${item.attempts} attempts`,
 					);
 					queue.shift();
 					abandoned += 1;
+					abandonedDetails.push(toChangeDetail(item, item.lastError));
 					await writeQueueToDisk(queue);
 					continue;
 				}
@@ -210,13 +326,18 @@ export const flushQueue = async (rawClient: any): Promise<void> => {
 				break;
 			}
 
-			if (result?.error) {
+			if (isReplayOfCommittedInsert(result, item)) {
+				console.info(
+					`writeQueue: ${item.op} on ${item.table} already exists; treating replay as saved`,
+				);
+			} else if (result?.error) {
 				// The server understood it and said no. Retrying cannot help.
 				console.error(
 					`writeQueue: dropping ${item.op} on ${item.table} - server rejected it:`,
-					result.error.message
+					result.error.message,
 				);
 				abandoned += 1;
+				abandonedDetails.push(toChangeDetail(item, result.error.message));
 			}
 
 			queue.shift();
@@ -228,8 +349,10 @@ export const flushQueue = async (rawClient: any): Promise<void> => {
 			...state,
 			flushing: false,
 			pending: remaining,
+			pendingDetails: (await readQueue()).map((item) => toChangeDetail(item)),
 			offline: remaining > 0,
 			failed: state.failed + abandoned,
+			failedDetails: [...state.failedDetails, ...abandonedDetails].slice(-10),
 			lastFlushAt: Date.now(),
 		};
 		emit();
@@ -239,7 +362,12 @@ export const flushQueue = async (rawClient: any): Promise<void> => {
 /** Called once at startup so the badge reflects writes queued in a past run. */
 export const hydrateQueueState = async (): Promise<void> => {
 	const queue = await readQueue();
-	state = { ...state, pending: queue.length, offline: queue.length > 0 };
+	state = {
+		...state,
+		pending: queue.length,
+		pendingDetails: queue.map((item) => toChangeDetail(item)),
+		offline: queue.length > 0,
+	};
 	emit();
 };
 
@@ -251,21 +379,44 @@ export const hydrateQueueState = async (): Promise<void> => {
 export const noteRejectedWrite = (
 	table: string,
 	op: WriteOp,
-	message: string
+	message: string,
+	args: any[] = [],
+	filters: [string, any[]][] = [],
 ): void => {
 	console.error(`writeQueue: ${op} on ${table} rejected by server:`, message);
-	state = { ...state, failed: state.failed + 1 };
+	const item = {
+		id: `${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
+		table,
+		op,
+		args,
+		filters,
+	};
+	state = {
+		...state,
+		failed: state.failed + 1,
+		failedDetails: [
+			...state.failedDetails,
+			toChangeDetail(item, message),
+		].slice(-10),
+	};
 	emit();
 };
 
 export const clearFailedCount = (): void => {
-	state = { ...state, failed: 0 };
+	state = { ...state, failed: 0, failedDetails: [] };
 	emit();
 };
 
 /** Drops everything. Only for an explicit user "discard pending changes". */
 export const discardQueue = async (): Promise<void> => {
 	await AsyncStorage.removeItem(QUEUE_KEY);
-	state = { ...state, pending: 0, offline: false, failed: 0 };
+	state = {
+		...state,
+		pending: 0,
+		pendingDetails: [],
+		offline: false,
+		failed: 0,
+		failedDetails: [],
+	};
 	emit();
 };

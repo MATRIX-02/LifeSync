@@ -12,6 +12,7 @@
 
 import {
 	enqueue,
+	isDuplicatePrimaryKeyInsert,
 	isOfflineFailure,
 	noteRejectedWrite,
 	QueuedWrite,
@@ -27,12 +28,37 @@ const WRITE_OPS: WriteOp[] = ["insert", "update", "upsert", "delete"];
  * through and, if the write ends up queued, is recorded so replay matches.
  */
 const REPLAYABLE = new Set([
-	"eq", "neq", "gt", "gte", "lt", "lte", "like", "ilike", "is", "in",
-	"contains", "containedBy", "not", "or", "filter", "match",
-	"select", "order", "limit", "single", "maybeSingle", "range", "csv",
+	"eq",
+	"neq",
+	"gt",
+	"gte",
+	"lt",
+	"lte",
+	"like",
+	"ilike",
+	"is",
+	"in",
+	"contains",
+	"containedBy",
+	"not",
+	"or",
+	"filter",
+	"match",
+	"select",
+	"order",
+	"limit",
+	"single",
+	"maybeSingle",
+	"range",
+	"csv",
 ]);
 
-type Pending = { table: string; op: WriteOp; args: any[]; filters: [string, any[]][] };
+type Pending = {
+	table: string;
+	op: WriteOp;
+	args: any[];
+	filters: [string, any[]][];
+};
 
 const describe = (p: Pending) =>
 	`${p.op} on ${p.table}${p.filters.length ? ` (${p.filters.length} filters)` : ""}`;
@@ -79,14 +105,30 @@ const execute = async (rawBuilder: any, pending: Pending): Promise<any> => {
 	} catch (err: any) {
 		// postgrest-js normally resolves rather than throws, but a polyfill or
 		// an aborted request can still reject. Treat it as a transport failure.
-		result = { data: null, error: { message: String(err?.message || err), code: "" }, status: 0 };
+		result = {
+			data: null,
+			error: { message: String(err?.message || err), code: "" },
+			status: 0,
+		};
 	}
 
 	if (!isOfflineFailure(result)) {
 		// Understood and refused. The caller still gets its error (stores bail on
 		// it as before), but now the user is told instead of only the console.
 		if (result?.error) {
-			noteRejectedWrite(pending.table, pending.op, result.error.message);
+			if (isDuplicatePrimaryKeyInsert(result, pending.op, pending.args)) {
+				console.info(
+					`writeQueue: ${pending.op} on ${pending.table} already exists; caller can handle duplicate`,
+				);
+			} else {
+				noteRejectedWrite(
+					pending.table,
+					pending.op,
+					result.error.message,
+					pending.args,
+					pending.filters,
+				);
+			}
 		}
 		return result;
 	}
@@ -107,7 +149,13 @@ const execute = async (rawBuilder: any, pending: Pending): Promise<any> => {
 		return result;
 	}
 
-	return { data: null, error: null, status: 202, statusText: "Queued", count: null };
+	return {
+		data: null,
+		error: null,
+		status: 202,
+		statusText: "Queued",
+		count: null,
+	};
 };
 
 /**
@@ -115,7 +163,7 @@ const execute = async (rawBuilder: any, pending: Pending): Promise<any> => {
  * for replaying the queue, so replays never re-enter this wrapper.
  */
 export const withWriteQueue = <T extends { from: (t: string) => any }>(
-	client: T
+	client: T,
 ): T => {
 	const originalFrom = client.from.bind(client);
 
