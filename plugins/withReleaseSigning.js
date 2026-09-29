@@ -30,6 +30,14 @@
 
 const { withAppBuildGradle } = require("@expo/config-plugins");
 
+// AGP defaults to v2 only once minSdk >= 24, which is a valid APK but is
+// rejected by some OEM package installers (OxygenOS among them) with a bare
+// "App not installed" and no reason. Signing with all three schemes costs a
+// few hundred KB of META-INF and removes that failure mode.
+const SIGNING_FLAGS = `                enableV1Signing true
+                enableV2Signing true
+                enableV3Signing true`;
+
 const SIGNING_CONFIG = `
         release {
             if (project.hasProperty('LIFESYNC_UPLOAD_STORE_FILE')) {
@@ -37,6 +45,7 @@ const SIGNING_CONFIG = `
                 storePassword LIFESYNC_UPLOAD_STORE_PASSWORD
                 keyAlias LIFESYNC_UPLOAD_KEY_ALIAS
                 keyPassword LIFESYNC_UPLOAD_KEY_PASSWORD
+${SIGNING_FLAGS}
             }
         }`;
 
@@ -64,12 +73,12 @@ module.exports = function withReleaseSigning(config) {
 			if (!gradle.includes(debugSigningBlock)) {
 				throw new Error(
 					"withReleaseSigning: could not find the debug signingConfig block. " +
-						"The prebuild template changed - update this plugin."
+						"The prebuild template changed - update this plugin.",
 				);
 			}
 			gradle = gradle.replace(
 				debugSigningBlock,
-				debugSigningBlock + "\n" + SIGNING_CONFIG
+				debugSigningBlock + "\n" + SIGNING_CONFIG,
 			);
 		}
 
@@ -83,13 +92,15 @@ module.exports = function withReleaseSigning(config) {
 			gradle = gradle.replace(
 				releaseUsesDebug,
 				`        release {
-            ${CONDITIONAL}`
+            ${CONDITIONAL}`,
 			);
-		} else if (!gradle.includes(`release {
-            ${CONDITIONAL}`)) {
+		} else if (
+			!gradle.includes(`release {
+            ${CONDITIONAL}`)
+		) {
 			throw new Error(
 				"withReleaseSigning: the release buildType no longer points at the " +
-					"debug signingConfig and has not been patched. Update this plugin."
+					"debug signingConfig and has not been patched. Update this plugin.",
 			);
 		}
 
@@ -104,8 +115,21 @@ module.exports = function withReleaseSigning(config) {
 				debugUsesDebug,
 				`        debug {
             ${CONDITIONAL}
-        }`
+        }`,
 			);
+		}
+
+		// 4. Back-fill the signature scheme flags on a build.gradle that step 1
+		//    already patched before those flags existed.
+		if (!gradle.includes("enableV1Signing")) {
+			const keyPasswordLine =
+				"                keyPassword LIFESYNC_UPLOAD_KEY_PASSWORD";
+			if (gradle.includes(keyPasswordLine)) {
+				gradle = gradle.replace(
+					keyPasswordLine,
+					keyPasswordLine + "\n" + SIGNING_FLAGS,
+				);
+			}
 		}
 
 		config.modResults.contents = gradle;
