@@ -93,7 +93,7 @@ export const useTransactionDetectionStore = create<TransactionDetectionState>()(
 				// Check for duplicate by reference ID
 				if (transaction.referenceId) {
 					const hasDuplicate = pendingTransactions.some(
-						(t) => t.referenceId === transaction.referenceId
+						(t) => t.referenceId === transaction.referenceId,
 					);
 					if (hasDuplicate) {
 						return;
@@ -106,7 +106,7 @@ export const useTransactionDetectionStore = create<TransactionDetectionState>()(
 					(t) =>
 						t.amount === transaction.amount &&
 						Math.abs(t.timestamp.getTime() - transaction.timestamp.getTime()) <
-							twoMinutes
+							twoMinutes,
 				);
 				if (hasSimilar) {
 					return;
@@ -115,7 +115,7 @@ export const useTransactionDetectionStore = create<TransactionDetectionState>()(
 				set({
 					pendingTransactions: [transaction, ...pendingTransactions].slice(
 						0,
-						50
+						50,
 					), // Keep max 50
 				});
 			},
@@ -190,10 +190,12 @@ export const useTransactionDetectionStore = create<TransactionDetectionState>()(
 			startListening: async () => {
 				if (Platform.OS !== "android") return;
 
-				const { settings, addDetectedTransaction } = get();
+				const { settings, addDetectedTransaction, isListening, isSmsWatching } =
+					get();
 
 				// Start notification listener
 				if (
+					!isListening &&
 					settings.notificationListenerEnabled &&
 					settings.notificationPermissionGranted
 				) {
@@ -206,7 +208,11 @@ export const useTransactionDetectionStore = create<TransactionDetectionState>()(
 				}
 
 				// Start SMS watcher
-				if (settings.smsReaderEnabled && settings.smsPermissionGranted) {
+				if (
+					!isSmsWatching &&
+					settings.smsReaderEnabled &&
+					settings.smsPermissionGranted
+				) {
 					startSmsWatcher((transaction) => {
 						addDetectedTransaction(transaction);
 					}, 30000);
@@ -293,6 +299,6 @@ export const useTransactionDetectionStore = create<TransactionDetectionState>()(
 				dismissedIds: state.dismissedIds,
 				settings: state.settings,
 			}),
-		}
-	)
+		},
+	),
 );

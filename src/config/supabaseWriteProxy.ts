@@ -194,9 +194,22 @@ export const withWriteQueue = <T extends { from: (t: string) => any }>(
 		});
 	};
 
+	// Mutating RPCs need the same offline treatment as table writes. They are
+	// written to be idempotent, so replaying one that already committed is safe.
+	const patchedRpc = (...args: any[]) => {
+		const builder = (client as any).rpc(...args);
+		return wrapBuilder(builder, {
+			table: String(args[0]),
+			op: "rpc",
+			args,
+			filters: [],
+		});
+	};
+
 	return new Proxy(client, {
 		get(target, prop) {
 			if (prop === "from") return patchedFrom;
+			if (prop === "rpc") return patchedRpc;
 			const value = Reflect.get(target, prop);
 			return typeof value === "function" ? value.bind(target) : value;
 		},

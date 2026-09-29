@@ -14,7 +14,7 @@ import {
 } from "@/src/types/finance";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useLocalSearchParams } from "expo-router";
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
 	ActivityIndicator,
 	Dimensions,
@@ -110,6 +110,9 @@ function SplitWiseNew({ theme, currency, onOpenDrawer }: SplitWiseProps) {
 	const [selectedGroup, setSelectedGroup] = useState<SplitGroup | null>(null);
 	const [detailTab, setDetailTab] = useState<DetailTab>("overview");
 	const [isLoading, setIsLoading] = useState(true);
+	// `isLoading` only drives the spinner; a state update can't block a second
+	// tap in the same tick, which created duplicate groups.
+	const submittingRef = useRef(false);
 	const [refreshing, setRefreshing] = useState(false);
 
 	// State - Invitations
@@ -175,9 +178,8 @@ function SplitWiseNew({ theme, currency, onOpenDrawer }: SplitWiseProps) {
 		if (!currentUserId) return [] as SplitGroup[];
 
 		try {
-			const { data, error } = await SplitWiseService.fetchUserGroups(
-				currentUserId
-			);
+			const { data, error } =
+				await SplitWiseService.fetchUserGroups(currentUserId);
 			if (error) {
 				console.error("Error fetching groups:", error);
 				return [] as SplitGroup[];
@@ -204,9 +206,8 @@ function SplitWiseNew({ theme, currency, onOpenDrawer }: SplitWiseProps) {
 		if (!currentUserId) return;
 
 		try {
-			const { data, error } = await SplitWiseService.fetchPendingInvitations(
-				currentUserId
-			);
+			const { data, error } =
+				await SplitWiseService.fetchPendingInvitations(currentUserId);
 			if (error) {
 				console.error("Error fetching invitations:", error);
 				return;
@@ -250,9 +251,9 @@ function SplitWiseNew({ theme, currency, onOpenDrawer }: SplitWiseProps) {
 				setPendingInvitations((prev) => [newInvitation, ...prev]);
 				Alert.alert(
 					"New Invitation!",
-					`${newInvitation.invitedByName} invited you to join "${newInvitation.groupName}"`
+					`${newInvitation.invitedByName} invited you to join "${newInvitation.groupName}"`,
 				);
-			}
+			},
 		);
 
 		return () => {
@@ -276,9 +277,11 @@ function SplitWiseNew({ theme, currency, onOpenDrawer }: SplitWiseProps) {
 				};
 				setSelectedGroup(groupWithCurrentUser);
 				setGroups((prev) =>
-					prev.map((g) => (g.id === updatedGroup.id ? groupWithCurrentUser : g))
+					prev.map((g) =>
+						g.id === updatedGroup.id ? groupWithCurrentUser : g,
+					),
 				);
-			}
+			},
 		);
 
 		return () => {
@@ -326,31 +329,37 @@ function SplitWiseNew({ theme, currency, onOpenDrawer }: SplitWiseProps) {
 		const selectedType = GROUP_TYPES.find((t) => t.value === groupForm.type);
 		const groupIcon = selectedType?.icon || "people";
 
+		if (submittingRef.current) return;
+		submittingRef.current = true;
 		setIsLoading(true);
-		const { data, error } = await SplitWiseService.createSplitGroup(
-			currentUserId,
-			currentUserName,
-			{
-				name: groupForm.name.trim(),
-				description: groupForm.description.trim(),
-				color: groupForm.color,
-				icon: groupIcon,
-			}
-		);
+		try {
+			const { data, error } = await SplitWiseService.createSplitGroup(
+				currentUserId,
+				currentUserName,
+				{
+					name: groupForm.name.trim(),
+					description: groupForm.description.trim(),
+					color: groupForm.color,
+					icon: groupIcon,
+				},
+			);
 
-		if (error) {
-			Alert.alert("Error", error);
-		} else if (data) {
-			setGroups((prev) => [data, ...prev]);
-			setGroupForm({
-				name: "",
-				description: "",
-				type: "group",
-				color: COLORS[0],
-			});
-			setShowCreateGroup(false);
+			if (error) {
+				Alert.alert("Error", error);
+			} else if (data) {
+				setGroups((prev) => [data, ...prev]);
+				setGroupForm({
+					name: "",
+					description: "",
+					type: "group",
+					color: COLORS[0],
+				});
+				setShowCreateGroup(false);
+			}
+		} finally {
+			submittingRef.current = false;
+			setIsLoading(false);
 		}
-		setIsLoading(false);
 	};
 
 	const handleOpenEditGroup = () => {
@@ -371,27 +380,33 @@ function SplitWiseNew({ theme, currency, onOpenDrawer }: SplitWiseProps) {
 			return;
 		}
 
+		if (submittingRef.current) return;
+		submittingRef.current = true;
 		setIsLoading(true);
-		const { error } = await SplitWiseService.updateSplitGroup(
-			selectedGroup.id,
-			{
-				name: groupForm.name.trim(),
-				description: groupForm.description.trim(),
-				color: groupForm.color,
-			}
-		);
+		try {
+			const { error } = await SplitWiseService.updateSplitGroup(
+				selectedGroup.id,
+				{
+					name: groupForm.name.trim(),
+					description: groupForm.description.trim(),
+					color: groupForm.color,
+				},
+			);
 
-		if (error) {
-			Alert.alert("Error", error);
-		} else {
-			// Refresh groups and selected group
-			const updatedGroups = await fetchGroups();
-			const updated =
-				updatedGroups.find((g) => g.id === selectedGroup.id) || null;
-			setSelectedGroup(updated);
-			setShowEditGroup(false);
+			if (error) {
+				Alert.alert("Error", error);
+			} else {
+				// Refresh groups and selected group
+				const updatedGroups = await fetchGroups();
+				const updated =
+					updatedGroups.find((g) => g.id === selectedGroup.id) || null;
+				setSelectedGroup(updated);
+				setShowEditGroup(false);
+			}
+		} finally {
+			submittingRef.current = false;
+			setIsLoading(false);
 		}
-		setIsLoading(false);
 	};
 
 	const handleDeleteGroup = async () => {
@@ -407,19 +422,19 @@ function SplitWiseNew({ theme, currency, onOpenDrawer }: SplitWiseProps) {
 					style: "destructive",
 					onPress: async () => {
 						const { error } = await SplitWiseService.deleteSplitGroup(
-							selectedGroup.id
+							selectedGroup.id,
 						);
 						if (error) {
 							Alert.alert("Error", error);
 						} else {
 							setGroups((prev) =>
-								prev.filter((g) => g.id !== selectedGroup.id)
+								prev.filter((g) => g.id !== selectedGroup.id),
 							);
 							setSelectedGroup(null);
 						}
 					},
 				},
-			]
+			],
 		);
 	};
 
@@ -431,7 +446,7 @@ function SplitWiseNew({ theme, currency, onOpenDrawer }: SplitWiseProps) {
 
 		const { data, error } = await SplitWiseService.addNonUserMember(
 			selectedGroup.id,
-			memberName.trim()
+			memberName.trim(),
 		);
 
 		if (error) {
@@ -458,7 +473,7 @@ function SplitWiseNew({ theme, currency, onOpenDrawer }: SplitWiseProps) {
 		setIsSearching(true);
 		const { data, error } = await SplitWiseService.searchUsersByEmail(
 			query,
-			currentUserId
+			currentUserId,
 		);
 		setIsSearching(false);
 
@@ -481,7 +496,7 @@ function SplitWiseNew({ theme, currency, onOpenDrawer }: SplitWiseProps) {
 
 	const handleSendInvitation = async (
 		inviteeUserId: string,
-		inviteeName: string
+		inviteeName: string,
 	) => {
 		if (!selectedGroup) return;
 
@@ -492,7 +507,7 @@ function SplitWiseNew({ theme, currency, onOpenDrawer }: SplitWiseProps) {
 			currentUserName,
 			inviteeUserId,
 			undefined,
-			inviteMessage.trim() || undefined
+			inviteMessage.trim() || undefined,
 		);
 
 		if (error) {
@@ -510,7 +525,7 @@ function SplitWiseNew({ theme, currency, onOpenDrawer }: SplitWiseProps) {
 						groupName: selectedGroup.name,
 						invitedByName: currentUserName,
 						invitedByUserId: currentUserId,
-					}
+					},
 				);
 			} catch (notificationError) {
 				console.error("Error sending push notification:", notificationError);
@@ -527,21 +542,21 @@ function SplitWiseNew({ theme, currency, onOpenDrawer }: SplitWiseProps) {
 
 	const handleRespondToInvitation = async (
 		invitation: GroupInvitation,
-		accept: boolean
+		accept: boolean,
 	) => {
 		const { error } = await SplitWiseService.respondToInvitation(
 			invitation.id,
 			currentUserId,
 			currentUserName,
 			currentUserEmail,
-			accept
+			accept,
 		);
 
 		if (error) {
 			Alert.alert("Error", error);
 		} else {
 			setPendingInvitations((prev) =>
-				prev.filter((i) => i.id !== invitation.id)
+				prev.filter((i) => i.id !== invitation.id),
 			);
 			if (accept) {
 				await fetchGroups();
@@ -559,7 +574,7 @@ function SplitWiseNew({ theme, currency, onOpenDrawer }: SplitWiseProps) {
 		if (member.isCurrentUser && isUserAdmin && admins.length === 1) {
 			Alert.alert(
 				"Error",
-				"You cannot leave as you're the only admin. Transfer admin rights first."
+				"You cannot leave as you're the only admin. Transfer admin rights first.",
 			);
 			return;
 		}
@@ -577,27 +592,27 @@ function SplitWiseNew({ theme, currency, onOpenDrawer }: SplitWiseProps) {
 					onPress: async () => {
 						const { error } = await SplitWiseService.removeMember(
 							selectedGroup.id,
-							member.id
+							member.id,
 						);
 						if (error) {
 							Alert.alert("Error", error);
 						} else {
 							if (member.isCurrentUser) {
 								setGroups((prev) =>
-									prev.filter((g) => g.id !== selectedGroup.id)
+									prev.filter((g) => g.id !== selectedGroup.id),
 								);
 								setSelectedGroup(null);
 							} else {
 								const updatedGroups = await fetchGroups();
 								const updated = updatedGroups.find(
-									(g) => g.id === selectedGroup.id
+									(g) => g.id === selectedGroup.id,
 								);
 								if (updated) setSelectedGroup(updated);
 							}
 						}
 					},
 				},
-			]
+			],
 		);
 	};
 
@@ -634,12 +649,12 @@ function SplitWiseNew({ theme, currency, onOpenDrawer }: SplitWiseProps) {
 
 			const totalSplit = splits.reduce(
 				(s, x) => s + (isNaN(x.amount) ? 0 : x.amount),
-				0
+				0,
 			);
 			if (Math.abs(totalSplit - amount) > 0.005) {
 				Alert.alert(
 					"Error",
-					"Exact splits must add up exactly to the total amount"
+					"Exact splits must add up exactly to the total amount",
 				);
 				return;
 			}
@@ -660,7 +675,7 @@ function SplitWiseNew({ theme, currency, onOpenDrawer }: SplitWiseProps) {
 				(p) => ({
 					memberId: p.memberId,
 					amount: Math.floor((p.percent / 100) * amount * 100) / 100,
-				})
+				}),
 			);
 			let sumComputed = computed.reduce((s, c) => s + c.amount, 0);
 			let remainder = Math.round((amount - sumComputed) * 100) / 100;
@@ -670,7 +685,7 @@ function SplitWiseNew({ theme, currency, onOpenDrawer }: SplitWiseProps) {
 					Math.round((computed[i].amount + 0.01) * 100) / 100;
 				remainder =
 					Math.round(
-						(amount - computed.reduce((s, c) => s + c.amount, 0)) * 100
+						(amount - computed.reduce((s, c) => s + c.amount, 0)) * 100,
 					) / 100;
 			}
 			splits = computed;
@@ -678,7 +693,7 @@ function SplitWiseNew({ theme, currency, onOpenDrawer }: SplitWiseProps) {
 			const totalShares = members.reduce(
 				(sum: number, m) =>
 					sum + (parseFloat(expenseForm.customSplits[m.id] || "1") || 0),
-				0
+				0,
 			);
 			if (totalShares <= 0) {
 				Alert.alert("Error", "Total shares must be greater than zero");
@@ -693,7 +708,7 @@ function SplitWiseNew({ theme, currency, onOpenDrawer }: SplitWiseProps) {
 						((parseFloat(expenseForm.customSplits[m.id] || "1") || 0) /
 							totalShares) *
 							amount *
-							100
+							100,
 					) / 100,
 			}));
 			let sumSharesAmount = computedShares.reduce((s, c) => s + c.amount, 0);
@@ -707,7 +722,7 @@ function SplitWiseNew({ theme, currency, onOpenDrawer }: SplitWiseProps) {
 					Math.round((computedShares[i].amount + 0.01) * 100) / 100;
 				remainderShares =
 					Math.round(
-						(amount - computedShares.reduce((s, c) => s + c.amount, 0)) * 100
+						(amount - computedShares.reduce((s, c) => s + c.amount, 0)) * 100,
 					) / 100;
 			}
 			splits = computedShares;
@@ -757,20 +772,20 @@ function SplitWiseNew({ theme, currency, onOpenDrawer }: SplitWiseProps) {
 					onPress: async () => {
 						const { error } = await SplitWiseService.deleteExpense(
 							selectedGroup.id,
-							expenseId
+							expenseId,
 						);
 						if (error) {
 							Alert.alert("Error", error);
 						} else {
 							const updatedGroups = await fetchGroups();
 							const updated = updatedGroups.find(
-								(g) => g.id === selectedGroup.id
+								(g) => g.id === selectedGroup.id,
 							);
 							if (updated) setSelectedGroup(updated);
 						}
 					},
 				},
-			]
+			],
 		);
 	};
 
@@ -850,7 +865,7 @@ function SplitWiseNew({ theme, currency, onOpenDrawer }: SplitWiseProps) {
 						if (selectedGroup.members.length === 0) {
 							Alert.alert(
 								"Add Members First",
-								"Please add members before adding expenses"
+								"Please add members before adding expenses",
 							);
 							return;
 						}
@@ -1360,7 +1375,7 @@ const GroupDetailView: React.FC<GroupDetailViewProps> = ({
 								{expenses
 									.sort(
 										(a, b) =>
-											new Date(b.date).getTime() - new Date(a.date).getTime()
+											new Date(b.date).getTime() - new Date(a.date).getTime(),
 									)
 									.slice(0, 3)
 									.map((expense) => {
@@ -1399,10 +1414,10 @@ const GroupDetailView: React.FC<GroupDetailViewProps> = ({
 								<Text style={styles.sectionTitle}>Settlement History</Text>
 								{settlements.slice(0, 5).map((settlement) => {
 									const from = members.find(
-										(m) => m.id === settlement.fromMemberId
+										(m) => m.id === settlement.fromMemberId,
 									);
 									const to = members.find(
-										(m) => m.id === settlement.toMemberId
+										(m) => m.id === settlement.toMemberId,
 									);
 									return (
 										<View key={settlement.id} style={styles.settlementItem}>
@@ -1444,12 +1459,12 @@ const GroupDetailView: React.FC<GroupDetailViewProps> = ({
 							expenses
 								.sort(
 									(a, b) =>
-										new Date(b.date).getTime() - new Date(a.date).getTime()
+										new Date(b.date).getTime() - new Date(a.date).getTime(),
 								)
 								.map((expense) => {
 									const payer = members.find((m) => m.id === expense.paidBy);
 									const categoryInfo = EXPENSE_CATEGORIES.find(
-										(c) => c.value === expense.category
+										(c) => c.value === expense.category,
 									);
 									return (
 										<View key={expense.id} style={styles.expenseCard}>
@@ -1496,7 +1511,7 @@ const GroupDetailView: React.FC<GroupDetailViewProps> = ({
 												<View style={styles.splitsList}>
 													{expense.splits.map((split) => {
 														const member = members.find(
-															(m) => m.id === split.memberId
+															(m) => m.id === split.memberId,
 														);
 														return (
 															<View
@@ -1587,18 +1602,18 @@ const GroupDetailView: React.FC<GroupDetailViewProps> = ({
 														balanceAmount > 0.01
 															? theme.success
 															: balanceAmount < -0.01
-															? theme.error
-															: theme.textMuted,
+																? theme.error
+																: theme.textMuted,
 												},
 											]}
 										>
 											{balanceAmount > 0.01
 												? `Gets back ${currency}${formatAmount(balanceAmount)}`
 												: balanceAmount < -0.01
-												? `Owes ${currency}${formatAmount(
-														Math.abs(balanceAmount)
-												  )}`
-												: "All settled"}
+													? `Owes ${currency}${formatAmount(
+															Math.abs(balanceAmount),
+														)}`
+													: "All settled"}
 										</Text>
 									</View>
 									{isAdmin && !member.isCurrentUser && (
@@ -1911,7 +1926,12 @@ const InviteUserModal: React.FC<InviteUserModalProps> = ({
 	const [localQuery, setLocalQuery] = useState(searchQuery);
 
 	return (
-		<Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
+		<Modal
+			visible={visible}
+			animationType="slide"
+			transparent
+			onRequestClose={onClose}
+		>
 			<View style={styles.sheetOverlay}>
 				{/* Backdrop is a sibling of the sheet, so it cannot claim the
 				    touch responder and swallow the sheet's own scrolls. */}
@@ -2082,7 +2102,7 @@ const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
 		const editedVal = parseNum(text);
 		const sumOthers = vals.reduce(
 			(s, x) => s + (x.id === memberId ? 0 : x.v),
-			0
+			0,
 		);
 		let newEdited = editedVal;
 		if (sumOthers + newEdited > amount)
@@ -2123,7 +2143,7 @@ const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
 		let editedVal = parseNum(text);
 		const sumOthers = vals.reduce(
 			(s, x) => s + (x.id === memberId ? 0 : x.v),
-			0
+			0,
 		);
 		if (sumOthers + editedVal > 100) editedVal = Math.max(0, 100 - sumOthers);
 		setExpenseForm((prev) => ({
@@ -2153,7 +2173,7 @@ const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
 		if (expenseForm.splitType === "exact") {
 			const total = members.reduce(
 				(s, m) => s + parseNum(expenseForm.customSplits[m.id] || "0"),
-				0
+				0,
 			);
 			if (Math.abs(total - amount) > 0.005) {
 				Alert.alert("Error", "Exact splits must add up to the total amount");
@@ -2162,7 +2182,7 @@ const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
 		} else if (expenseForm.splitType === "percentage") {
 			const total = members.reduce(
 				(s, m) => s + parseNum(expenseForm.customSplits[m.id] || "0"),
-				0
+				0,
 			);
 			if (Math.abs(total - 100) > 0.01) {
 				Alert.alert("Error", "Percentages must add up to 100%");
@@ -2171,7 +2191,7 @@ const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
 		} else if (expenseForm.splitType === "shares") {
 			const totalShares = members.reduce(
 				(s, m) => s + (parseNum(expenseForm.customSplits[m.id] || "1") || 0),
-				0
+				0,
 			);
 			if (totalShares <= 0) {
 				Alert.alert("Error", "Total shares must be greater than zero");
@@ -2184,7 +2204,12 @@ const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
 	};
 
 	return (
-		<Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
+		<Modal
+			visible={visible}
+			animationType="slide"
+			transparent
+			onRequestClose={onClose}
+		>
 			<View style={styles.sheetOverlay}>
 				{/* Backdrop is a sibling of the sheet, so it cannot claim the
 				    touch responder and swallow the sheet's own scrolls. */}
@@ -2294,7 +2319,10 @@ const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
 											},
 										]}
 										onPress={() =>
-											setExpenseForm((prev) => ({ ...prev, category: cat.value }))
+											setExpenseForm((prev) => ({
+												...prev,
+												category: cat.value,
+											}))
 										}
 									>
 										<Ionicons
@@ -2347,7 +2375,7 @@ const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
 												{type.charAt(0).toUpperCase() + type.slice(1)}
 											</Text>
 										</TouchableOpacity>
-									)
+									),
 								)}
 							</View>
 						</View>
@@ -2495,7 +2523,12 @@ const SettlementModal: React.FC<SettlementModalProps> = ({
 	currency,
 	styles,
 }) => (
-	<Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
+	<Modal
+		visible={visible}
+		animationType="slide"
+		transparent
+		onRequestClose={onClose}
+	>
 		<View style={styles.sheetOverlay}>
 			{/* Backdrop is a sibling of the sheet, so it cannot claim the
 			    touch responder and swallow the sheet's own scrolls. */}
@@ -2628,7 +2661,12 @@ const InvitationsModal: React.FC<InvitationsModalProps> = ({
 	theme,
 	styles,
 }) => (
-	<Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
+	<Modal
+		visible={visible}
+		animationType="slide"
+		transparent
+		onRequestClose={onClose}
+	>
 		<View style={styles.sheetOverlay}>
 			{/* Backdrop is a sibling of the sheet, so it cannot claim the
 			    touch responder and swallow the sheet's own scrolls. */}
@@ -2664,7 +2702,8 @@ const InvitationsModal: React.FC<InvitationsModalProps> = ({
 										Invited by {invitation.invitedByName}
 									</Text>
 									<Text style={styles.invitationExpiry}>
-										Expires {new Date(invitation.expiresAt).toLocaleDateString()}
+										Expires{" "}
+										{new Date(invitation.expiresAt).toLocaleDateString()}
 									</Text>
 								</View>
 								<View style={styles.invitationActions}>

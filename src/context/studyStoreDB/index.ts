@@ -45,6 +45,11 @@ const DEFAULT_STREAK: StudyStreak = {
 	monthlyStats: {},
 };
 
+// De-dupes overlapping initialize() calls and lets a slow one detect that a
+// newer load (or a sign-out) superseded it.
+let loadGeneration = 0;
+let inFlightLoad: Promise<void> | null = null;
+
 export const useStudyStore = create<StudyStore>()((set, get) => ({
 	// ============ INITIAL STATE ============
 	studyGoals: [],
@@ -69,113 +74,134 @@ export const useStudyStore = create<StudyStore>()((set, get) => ({
 
 	// ============ INITIALIZE ============
 	initialize: async (userId: string) => {
-		console.log("📚 Loading study data from database for user:", userId);
-		set({ isLoading: true, userId });
+		// Login and app-resume routinely overlap; without this the slower of the
+		// two lands last and clobbers the fresher state.
+		if (inFlightLoad) return inFlightLoad;
 
-		try {
-			const [
-				goalsRes,
-				subjectsRes,
-				sessionsRes,
-				decksRes,
-				cardsRes,
-				revisionRes,
-				testsRes,
-				plansRes,
-				notesRes,
-				streakRes,
-			] = await Promise.all([
-				supabase.from("study_goals").select("*").eq("user_id", userId),
-				supabase.from("study_subjects").select("*").eq("user_id", userId),
-				supabase
-					.from("study_sessions")
-					.select("*")
-					.eq("user_id", userId)
-					.order("start_time", { ascending: false }),
-				supabase.from("flashcard_decks").select("*").eq("user_id", userId),
-				supabase.from("flashcards").select("*").eq("user_id", userId),
-				supabase.from("revision_schedule").select("*").eq("user_id", userId),
-				supabase.from("mock_tests").select("*").eq("user_id", userId),
-				supabase.from("daily_plans").select("*").eq("user_id", userId),
-				supabase.from("study_notes").select("*").eq("user_id", userId),
-				supabase
-					.from("study_streak")
-					.select("*")
-					.eq("user_id", userId)
-					.single(),
-			]);
+		const generation = ++loadGeneration;
+		const isStale = () =>
+			generation !== loadGeneration || get().userId !== userId;
 
-			const studyGoals = (goalsRes.data || []).map((g: any) =>
-				objectToCamelCase(g),
-			);
-			const subjects = (subjectsRes.data || []).map((s: any) =>
-				objectToCamelCase(s),
-			);
-			const studySessions = (sessionsRes.data || []).map((s: any) =>
-				objectToCamelCase(s),
-			);
-			const flashcardDecks = (decksRes.data || []).map((d: any) =>
-				objectToCamelCase(d),
-			);
-			const flashcards = (cardsRes.data || []).map((c: any) =>
-				objectToCamelCase(c),
-			);
-			const revisionSchedule = (revisionRes.data || []).map((r: any) =>
-				objectToCamelCase(r),
-			);
-			const mockTests = (testsRes.data || []).map((t: any) => {
-				const test = objectToCamelCase(t);
-				return {
-					...test,
-					attempts:
-						typeof test.attempts === "string"
-							? JSON.parse(test.attempts)
-							: test.attempts || [],
-				};
-			});
-			const dailyPlans = (plansRes.data || []).map((p: any) => {
-				const plan = objectToCamelCase(p);
-				return {
-					...plan,
-					tasks:
-						typeof plan.tasks === "string"
-							? JSON.parse(plan.tasks)
-							: plan.tasks || [],
-				};
-			});
-			const studyNotes = (notesRes.data || []).map((n: any) =>
-				objectToCamelCase(n),
-			);
-			const streak = streakRes.data
-				? objectToCamelCase(streakRes.data)
-				: DEFAULT_STREAK;
+		const run = async () => {
+			console.log("📚 Loading study data from database for user:", userId);
+			set({ isLoading: true, userId });
 
-			// Find active session
-			const activeSession =
-				studySessions.find((s: StudySession) => s.isActive) || null;
+			try {
+				const [
+					goalsRes,
+					subjectsRes,
+					sessionsRes,
+					decksRes,
+					cardsRes,
+					revisionRes,
+					testsRes,
+					plansRes,
+					notesRes,
+					streakRes,
+				] = await Promise.all([
+					supabase.from("study_goals").select("*").eq("user_id", userId),
+					supabase.from("study_subjects").select("*").eq("user_id", userId),
+					supabase
+						.from("study_sessions")
+						.select("*")
+						.eq("user_id", userId)
+						.order("start_time", { ascending: false }),
+					supabase.from("flashcard_decks").select("*").eq("user_id", userId),
+					supabase.from("flashcards").select("*").eq("user_id", userId),
+					supabase.from("revision_schedule").select("*").eq("user_id", userId),
+					supabase.from("mock_tests").select("*").eq("user_id", userId),
+					supabase.from("daily_plans").select("*").eq("user_id", userId),
+					supabase.from("study_notes").select("*").eq("user_id", userId),
+					supabase
+						.from("study_streak")
+						.select("*")
+						.eq("user_id", userId)
+						.single(),
+				]);
 
-			console.log(
-				`✅ Loaded ${studyGoals.length} goals, ${subjects.length} subjects, ${studySessions.length} sessions`,
-			);
+				const studyGoals = (goalsRes.data || []).map((g: any) =>
+					objectToCamelCase(g),
+				);
+				const subjects = (subjectsRes.data || []).map((s: any) =>
+					objectToCamelCase(s),
+				);
+				const studySessions = (sessionsRes.data || []).map((s: any) =>
+					objectToCamelCase(s),
+				);
+				const flashcardDecks = (decksRes.data || []).map((d: any) =>
+					objectToCamelCase(d),
+				);
+				const flashcards = (cardsRes.data || []).map((c: any) =>
+					objectToCamelCase(c),
+				);
+				const revisionSchedule = (revisionRes.data || []).map((r: any) =>
+					objectToCamelCase(r),
+				);
+				const mockTests = (testsRes.data || []).map((t: any) => {
+					const test = objectToCamelCase(t);
+					return {
+						...test,
+						attempts:
+							typeof test.attempts === "string"
+								? JSON.parse(test.attempts)
+								: test.attempts || [],
+					};
+				});
+				const dailyPlans = (plansRes.data || []).map((p: any) => {
+					const plan = objectToCamelCase(p);
+					return {
+						...plan,
+						tasks:
+							typeof plan.tasks === "string"
+								? JSON.parse(plan.tasks)
+								: plan.tasks || [],
+					};
+				});
+				const studyNotes = (notesRes.data || []).map((n: any) =>
+					objectToCamelCase(n),
+				);
+				const streak = streakRes.data
+					? objectToCamelCase(streakRes.data)
+					: DEFAULT_STREAK;
 
-			set({
-				studyGoals,
-				subjects,
-				studySessions,
-				flashcardDecks,
-				flashcards,
-				revisionSchedule,
-				mockTests,
-				dailyPlans,
-				studyNotes,
-				streak,
-				activeSession,
-				isLoading: false,
-			});
-		} catch (error) {
-			console.error("❌ Error loading study data:", error);
-			set({ isLoading: false });
-		}
+				// Find active session
+				const activeSession =
+					studySessions.find((s: StudySession) => s.isActive) || null;
+
+				if (isStale()) {
+					console.log("↩️ Study load superseded, dropping result");
+					return;
+				}
+
+				console.log(
+					`✅ Loaded ${studyGoals.length} goals, ${subjects.length} subjects, ${studySessions.length} sessions`,
+				);
+
+				set({
+					studyGoals,
+					subjects,
+					studySessions,
+					flashcardDecks,
+					flashcards,
+					revisionSchedule,
+					mockTests,
+					dailyPlans,
+					studyNotes,
+					streak,
+					activeSession,
+					isLoading: false,
+				});
+			} catch (error) {
+				if (isStale()) return;
+				console.error("❌ Error loading study data:", error);
+				set({ isLoading: false });
+			}
+		};
+
+		inFlightLoad = run().finally(() => {
+			inFlightLoad = null;
+		});
+		return inFlightLoad;
 	},
 
 	// ============ STUDY GOALS ============

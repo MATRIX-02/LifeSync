@@ -72,7 +72,7 @@ const localToday = (): string => {
 	const now = new Date();
 	return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(
 		2,
-		"0"
+		"0",
 	)}-${String(now.getDate()).padStart(2, "0")}`;
 };
 
@@ -82,7 +82,7 @@ const daysInMonth = (year: number, monthIndex: number) =>
 const toIso = (year: number, monthIndex: number, day: number) =>
 	`${year}-${String(monthIndex + 1).padStart(2, "0")}-${String(day).padStart(
 		2,
-		"0"
+		"0",
 	)}`;
 
 /**
@@ -95,19 +95,21 @@ const toIso = (year: number, monthIndex: number, day: number) =>
  */
 export const advanceDueDate = (
 	date: string,
-	frequency: RecurringTransaction["frequency"]
+	frequency: RecurringTransaction["frequency"],
 ): string => {
 	const [year, month, day] = date.split("-").map(Number);
 	const monthIndex = month - 1;
 
 	if (frequency === "monthly" || frequency === "yearly") {
-		const nextMonthIndex = frequency === "monthly" ? monthIndex + 1 : monthIndex;
-		const targetYear = year + (frequency === "yearly" ? 1 : 0) + Math.floor(nextMonthIndex / 12);
+		const nextMonthIndex =
+			frequency === "monthly" ? monthIndex + 1 : monthIndex;
+		const targetYear =
+			year + (frequency === "yearly" ? 1 : 0) + Math.floor(nextMonthIndex / 12);
 		const targetMonth = ((nextMonthIndex % 12) + 12) % 12;
 		return toIso(
 			targetYear,
 			targetMonth,
-			Math.min(day, daysInMonth(targetYear, targetMonth))
+			Math.min(day, daysInMonth(targetYear, targetMonth)),
 		);
 	}
 
@@ -116,7 +118,6 @@ export const advanceDueDate = (
 	next.setUTCDate(next.getUTCDate() + step);
 	return next.toISOString().split("T")[0];
 };
-
 
 export const useFinanceStore = create<FinanceStore>()((set, get) => ({
 	// Initial State
@@ -146,7 +147,8 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
 		if (inFlightLoad) return inFlightLoad;
 
 		const generation = ++loadGeneration;
-		const isStale = () => generation !== loadGeneration || get().userId !== userId;
+		const isStale = () =>
+			generation !== loadGeneration || get().userId !== userId;
 
 		const run = async () => {
 			console.log("📥 Loading finance data from database for user:", userId);
@@ -165,7 +167,7 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
 						userId,
 						"(session user:",
 						sessionUserId,
-						")"
+						")",
 					);
 					set({
 						isLoading: false,
@@ -249,16 +251,16 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
 					}
 
 					const accounts = (accountsRes.data || []).map((a: any) =>
-						objectToCamelCase(a)
+						objectToCamelCase(a),
 					);
 					const transactions = (transactionsRes.data || []).map((t: any) =>
-						objectToCamelCase(t)
+						objectToCamelCase(t),
 					);
-					const recurringTransactions = (recurringRes.data || []).map((r: any) =>
-						objectToCamelCase(r)
+					const recurringTransactions = (recurringRes.data || []).map(
+						(r: any) => objectToCamelCase(r),
 					);
 					const budgets = (budgetsRes.data || []).map((b: any) =>
-						objectToCamelCase(b)
+						objectToCamelCase(b),
 					);
 					const savingsGoals = (goalsRes.data || []).map((g: any) => {
 						const goal = objectToCamelCase(g);
@@ -271,7 +273,7 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
 						};
 					});
 					const billReminders = (billsRes.data || []).map((b: any) =>
-						objectToCamelCase(b)
+						objectToCamelCase(b),
 					);
 					const debts = (debtsRes.data || []).map((d: any) => {
 						const debt = objectToCamelCase(d);
@@ -303,7 +305,7 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
 					});
 
 					console.log(
-						`✅ Loaded ${accounts.length} accounts, ${transactions.length} transactions`
+						`✅ Loaded ${accounts.length} accounts, ${transactions.length} transactions`,
 					);
 					set({
 						accounts,
@@ -327,7 +329,7 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
 					lastError = error?.message || String(error);
 					console.error(
 						`❌ Finance load attempt ${attempt}/${MAX_ATTEMPTS} failed:`,
-						lastError
+						lastError,
 					);
 					if (attempt < MAX_ATTEMPTS && !isStale()) {
 						await sleep(500 * 2 ** (attempt - 1)); // 500ms, 1s
@@ -338,7 +340,10 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
 			if (isStale()) return;
 			// Every attempt failed. Keep whatever is already in the store rather
 			// than blanking a populated screen, and record why for the UI.
-			console.error("❌ Finance load failed, keeping existing state:", lastError);
+			console.error(
+				"❌ Finance load failed, keeping existing state:",
+				lastError,
+			);
 			set({ isLoading: false, loadError: lastError });
 		};
 
@@ -390,7 +395,7 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
 			accounts: accounts.map((a) =>
 				a.id === id
 					? { ...a, ...updates, updatedAt: new Date().toISOString() }
-					: a
+					: a,
 			),
 		});
 	},
@@ -447,34 +452,15 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
 			return acc;
 		});
 
-		const { error } = await supabase
-			.from("finance_transactions")
-			.insert(objectToSnakeCase({ ...newTransaction, user_id: userId }));
+		// One RPC writes the row and shifts both account balances in a single
+		// transaction, deriving the delta server-side. Splitting this into two
+		// requests let the insert commit while the balance update failed.
+		const { error } = await supabase.rpc("finance_add_transaction", {
+			p_row: objectToSnakeCase({ ...newTransaction, user_id: userId }),
+		});
 		if (error) {
 			console.error("Error adding transaction:", error);
 			return;
-		}
-
-		// Update accounts in DB
-		for (const acc of updatedAccounts) {
-			if (
-				acc.id === transaction.accountId ||
-				acc.id === transaction.toAccountId
-			) {
-				await supabase
-					.from("finance_accounts")
-					.update(
-						objectToSnakeCase({
-							balance: acc.balance,
-							// Persist alongside balance, or the card's outstanding
-							// amount is lost on the next load.
-							creditUsed: acc.creditUsed ?? null,
-							updated_at: new Date().toISOString(),
-						})
-					)
-					.eq("id", acc.id)
-					.eq("user_id", userId);
-			}
 		}
 
 		set((state) => ({
@@ -509,42 +495,23 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
 		applyEffect(next, 1);
 
 		const updatedAccounts = accounts.map((acc) =>
-			applyAccountDelta(acc, balanceDeltas[acc.id] || 0)
+			applyAccountDelta(acc, balanceDeltas[acc.id] || 0),
 		);
 
-		const dbData = objectToSnakeCase({
-			...updates,
-			updated_at: new Date().toISOString(),
+		const { error } = await supabase.rpc("finance_update_transaction", {
+			p_id: id,
+			p_updates: objectToSnakeCase(updates),
 		});
-		const { error } = await supabase
-			.from("finance_transactions")
-			.update(dbData)
-			.eq("id", id)
-			.eq("user_id", userId);
 		if (error) {
 			console.error("Error updating transaction:", error);
 			return;
-		}
-
-		for (const acc of updatedAccounts) {
-			if (!balanceDeltas[acc.id]) continue;
-			await supabase
-				.from("finance_accounts")
-				.update(
-					objectToSnakeCase({
-						balance: acc.balance,
-						creditUsed: acc.creditUsed ?? null,
-					})
-				)
-				.eq("id", acc.id)
-				.eq("user_id", userId);
 		}
 
 		set({
 			transactions: transactions.map((t) =>
 				t.id === id
 					? { ...t, ...updates, updatedAt: new Date().toISOString() }
-					: t
+					: t,
 			),
 			accounts: updatedAccounts,
 		});
@@ -572,33 +539,12 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
 			return acc;
 		});
 
-		const { error } = await supabase
-			.from("finance_transactions")
-			.delete()
-			.eq("id", id)
-			.eq("user_id", userId);
+		const { error } = await supabase.rpc("finance_delete_transactions", {
+			p_ids: [id],
+		});
 		if (error) {
 			console.error("Error deleting transaction:", error);
 			return;
-		}
-
-		// Update accounts in DB
-		for (const acc of updatedAccounts) {
-			if (
-				acc.id === transaction.accountId ||
-				acc.id === transaction.toAccountId
-			) {
-				await supabase
-					.from("finance_accounts")
-					.update(
-					objectToSnakeCase({
-						balance: acc.balance,
-						creditUsed: acc.creditUsed ?? null,
-					})
-				)
-					.eq("id", acc.id)
-					.eq("user_id", userId);
-			}
 		}
 
 		set({
@@ -619,7 +565,9 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
 		const balanceDeltas: Record<string, number> = {};
 		for (const transaction of toDelete) {
 			const change =
-				transaction.type === "income" ? -transaction.amount : transaction.amount;
+				transaction.type === "income"
+					? -transaction.amount
+					: transaction.amount;
 			balanceDeltas[transaction.accountId] =
 				(balanceDeltas[transaction.accountId] || 0) + change;
 			if (transaction.toAccountId) {
@@ -629,32 +577,15 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
 		}
 
 		const updatedAccounts = accounts.map((acc) =>
-			applyAccountDelta(acc, balanceDeltas[acc.id] || 0)
+			applyAccountDelta(acc, balanceDeltas[acc.id] || 0),
 		);
 
-		const { error } = await supabase
-			.from("finance_transactions")
-			.delete()
-			.in("id", toDelete.map((t) => t.id))
-			.eq("user_id", userId);
+		const { error } = await supabase.rpc("finance_delete_transactions", {
+			p_ids: toDelete.map((t) => t.id),
+		});
 		if (error) {
 			console.error("Error deleting transactions:", error);
 			return;
-		}
-
-		// Update affected accounts in DB
-		for (const acc of updatedAccounts) {
-			if (!balanceDeltas[acc.id]) continue;
-			await supabase
-				.from("finance_accounts")
-				.update(
-					objectToSnakeCase({
-						balance: acc.balance,
-						creditUsed: acc.creditUsed ?? null,
-					})
-				)
-				.eq("id", acc.id)
-				.eq("user_id", userId);
 		}
 
 		set({
@@ -665,7 +596,7 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
 
 	getTransactionsByAccount: (accountId) =>
 		get().transactions.filter(
-			(t) => t.accountId === accountId || t.toAccountId === accountId
+			(t) => t.accountId === accountId || t.toAccountId === accountId,
 		),
 	getTransactionsByCategory: (category) =>
 		get().transactions.filter((t) => t.category === category),
@@ -707,7 +638,7 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
 		}
 		set({
 			recurringTransactions: recurringTransactions.map((t) =>
-				t.id === id ? { ...t, ...updates } : t
+				t.id === id ? { ...t, ...updates } : t,
 			),
 		});
 	},
@@ -750,7 +681,7 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
 				// and the amount would vanish. Skip rather than lose funds.
 				if (recurring.type === "transfer") {
 					console.warn(
-						`Skipping recurring transfer "${recurring.description}": transfers need a destination account, which recurring rules don't store.`
+						`Skipping recurring transfer "${recurring.description}": transfers need a destination account, which recurring rules don't store.`,
 					);
 					continue;
 				}
@@ -788,7 +719,7 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
 
 				if (posted >= MAX_RECURRING_CATCHUP) {
 					console.warn(
-						`Recurring "${recurring.description}" hit the ${MAX_RECURRING_CATCHUP}-occurrence catch-up cap; the rest will post on the next run.`
+						`Recurring "${recurring.description}" hit the ${MAX_RECURRING_CATCHUP}-occurrence catch-up cap; the rest will post on the next run.`,
 					);
 				}
 
@@ -873,7 +804,7 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
 					t.type === "expense" &&
 					t.category === budget.category &&
 					t.date >= budget.startDate &&
-					t.date <= budget.endDate
+					t.date <= budget.endDate,
 			)
 			.reduce((sum, t) => sum + t.amount, 0);
 
@@ -916,8 +847,7 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
 		if (!userId) return;
 
 		const dbUpdates: any = { ...updates, updated_at: new Date().toISOString() };
-		if (updates.contributions)
-			dbUpdates.contributions = updates.contributions;
+		if (updates.contributions) dbUpdates.contributions = updates.contributions;
 
 		const { error } = await supabase
 			.from("savings_goals")
@@ -932,7 +862,7 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
 			savingsGoals: savingsGoals.map((g) =>
 				g.id === id
 					? { ...g, ...updates, updatedAt: new Date().toISOString() }
-					: g
+					: g,
 			),
 		});
 	},
@@ -1052,7 +982,7 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
 		}
 		set({
 			billReminders: billReminders.map((b) =>
-				b.id === id ? { ...b, ...updates } : b
+				b.id === id ? { ...b, ...updates } : b,
 			),
 		});
 	},
@@ -1178,7 +1108,7 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
 			debts: debts.map((d) =>
 				d.id === id
 					? { ...d, ...updates, updatedAt: new Date().toISOString() }
-					: d
+					: d,
 			),
 		});
 	},
@@ -1224,8 +1154,13 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
 			const isOwe = debt.type === "owe";
 			const acc = accounts.find((a) => a.id === accountId);
 			if (acc) {
+				const next = applyAccountDelta(
+					acc,
+					isOwe ? -actualPayment : actualPayment,
+				);
 				await get().updateAccount(accountId, {
-					balance: acc.balance + (isOwe ? -actualPayment : actualPayment),
+					balance: next.balance,
+					creditUsed: next.creditUsed,
 				});
 			}
 		}
@@ -1287,7 +1222,7 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
 			splitGroups: splitGroups.map((g) =>
 				g.id === id
 					? { ...g, ...updates, updatedAt: new Date().toISOString() }
-					: g
+					: g,
 			),
 		});
 	},
@@ -1377,7 +1312,7 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
 					expenses: group.expenses.map((e) =>
 						e.id === id
 							? { ...e, ...updates, updatedAt: new Date().toISOString() }
-							: e
+							: e,
 					),
 				});
 				break;
@@ -1421,7 +1356,7 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
 			e.splits.forEach((s) => {
 				memberOwes.set(
 					s.memberId,
-					(memberOwes.get(s.memberId) || 0) + s.amount
+					(memberOwes.get(s.memberId) || 0) + s.amount,
 				);
 			});
 		});
@@ -1429,11 +1364,11 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
 		group.settlements.forEach((s) => {
 			memberPaid.set(
 				s.fromMemberId,
-				(memberPaid.get(s.fromMemberId) || 0) + s.amount
+				(memberPaid.get(s.fromMemberId) || 0) + s.amount,
 			);
 			memberPaid.set(
 				s.toMemberId,
-				(memberPaid.get(s.toMemberId) || 0) - s.amount
+				(memberPaid.get(s.toMemberId) || 0) - s.amount,
 			);
 		});
 
@@ -1480,7 +1415,7 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
 		let filtered = transactions;
 		if (startDate && endDate)
 			filtered = transactions.filter(
-				(t) => t.date >= startDate && t.date <= endDate
+				(t) => t.date >= startDate && t.date <= endDate,
 			);
 
 		const totalIncome = filtered
@@ -1518,9 +1453,9 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
 						Math.ceil(
 							(new Date(filtered[0].date).getTime() -
 								new Date(filtered[filtered.length - 1].date).getTime()) /
-								86400000
-						)
-				  )
+								86400000,
+						),
+					)
 				: 1;
 		const expenses = filtered.filter((t) => t.type === "expense");
 		const largestExpense =
@@ -1544,7 +1479,7 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
 		let filtered = transactions.filter((t) => t.type === "expense");
 		if (startDate && endDate)
 			filtered = filtered.filter(
-				(t) => t.date >= startDate && t.date <= endDate
+				(t) => t.date >= startDate && t.date <= endDate,
 			);
 
 		const totalExpense = filtered.reduce((s, t) => s + t.amount, 0);
@@ -1584,7 +1519,7 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
 				.split("T")[0];
 
 			const monthTransactions = transactions.filter(
-				(t) => t.date >= startOfMonth && t.date <= endOfMonth
+				(t) => t.date >= startOfMonth && t.date <= endOfMonth,
 			);
 			const income = monthTransactions
 				.filter((t) => t.type === "income")
@@ -1616,7 +1551,7 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
 			.from("user_sync_status")
 			.upsert(
 				{ user_id: userId, finance_currency: currency },
-				{ onConflict: "user_id" }
+				{ onConflict: "user_id" },
 			)
 			.then(({ error }: any) => {
 				if (error) console.error("Error saving currency preference:", error);
@@ -1632,7 +1567,7 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
 		try {
 			if (data.accounts?.length) {
 				const accountsData = data.accounts.map((a) =>
-					objectToSnakeCase({ ...a, user_id: userId })
+					objectToSnakeCase({ ...a, user_id: userId }),
 				);
 				await supabase
 					.from("finance_accounts")
@@ -1640,7 +1575,7 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
 			}
 			if (data.transactions?.length) {
 				const transData = data.transactions.map((t) =>
-					objectToSnakeCase({ ...t, user_id: userId })
+					objectToSnakeCase({ ...t, user_id: userId }),
 				);
 				for (let i = 0; i < transData.length; i += 500) {
 					await supabase
@@ -1650,7 +1585,7 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
 			}
 			if (data.recurringTransactions?.length) {
 				const recurData = data.recurringTransactions.map((r) =>
-					objectToSnakeCase({ ...r, user_id: userId })
+					objectToSnakeCase({ ...r, user_id: userId }),
 				);
 				await supabase
 					.from("recurring_transactions")
@@ -1658,7 +1593,7 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
 			}
 			if (data.budgets?.length) {
 				const budgetData = data.budgets.map((b) =>
-					objectToSnakeCase({ ...b, user_id: userId })
+					objectToSnakeCase({ ...b, user_id: userId }),
 				);
 				await supabase
 					.from("finance_budgets")
@@ -1670,7 +1605,7 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
 						...g,
 						user_id: userId,
 						contributions: g.contributions || [],
-					})
+					}),
 				);
 				await supabase
 					.from("savings_goals")
@@ -1678,7 +1613,7 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
 			}
 			if (data.billReminders?.length) {
 				const billsData = data.billReminders.map((b) =>
-					objectToSnakeCase({ ...b, user_id: userId })
+					objectToSnakeCase({ ...b, user_id: userId }),
 				);
 				await supabase
 					.from("bill_reminders")
@@ -1690,7 +1625,7 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
 						...d,
 						user_id: userId,
 						payments: d.payments || [],
-					})
+					}),
 				);
 				await supabase
 					.from("finance_debts")
@@ -1704,7 +1639,7 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
 						members: g.members || [],
 						expenses: g.expenses || [],
 						settlements: g.settlements || [],
-					})
+					}),
 				);
 				await supabase
 					.from("split_groups")

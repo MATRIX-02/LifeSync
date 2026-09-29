@@ -7,6 +7,7 @@ import { AppState } from "react-native";
 import { supabase } from "../config/supabase";
 import { logToDbLog } from "../context/habitStoreDB";
 import { customExerciseToDb } from "../context/workoutStoreDB/helpers";
+import { getQueueState } from "./writeQueue";
 
 // Types for sync status
 export type SyncStatus = "idle" | "syncing" | "success" | "error";
@@ -1611,6 +1612,12 @@ const runAutoSync = async (reason: string): Promise<void> => {
 	if (!autoSyncUserId || !autoSyncGetData) return;
 	if (autoSyncInFlight) {
 		console.log(`autoSync (${reason}) skipped: a sync is already running`);
+		return;
+	}
+	// A backlog means local state is ahead of the server. Upserting it now would
+	// push stale absolute balances and fight the queued writes on replay.
+	if (getQueueState().pending > 0) {
+		console.log(`autoSync (${reason}) skipped: offline writes still pending`);
 		return;
 	}
 	autoSyncInFlight = true;

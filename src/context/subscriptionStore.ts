@@ -22,7 +22,7 @@ interface SubscriptionActions {
 	validateCoupon: (
 		code: string,
 		planSlug: SubscriptionPlan,
-		billingCycle: "monthly" | "yearly"
+		billingCycle: "monthly" | "yearly",
 	) => Promise<{
 		valid: boolean;
 		coupon: Coupon | null;
@@ -31,16 +31,16 @@ interface SubscriptionActions {
 	calculatePrice: (
 		plan: SubscriptionPlanRow,
 		billingCycle: "monthly" | "yearly",
-		coupon?: Coupon | null
+		coupon?: Coupon | null,
 	) => { originalPrice: number; finalPrice: number; discount: number };
 	subscribeToPlan: (
 		userId: string,
 		planId: string,
 		billingCycle: "monthly" | "yearly",
-		couponId?: string
+		couponId?: string,
 	) => Promise<{ error: Error | null; subscription: UserSubscription | null }>;
 	cancelSubscription: (
-		subscriptionId: string
+		subscriptionId: string,
 	) => Promise<{ error: Error | null }>;
 	createRazorpayOrder: (
 		userId: string,
@@ -50,7 +50,7 @@ interface SubscriptionActions {
 		billingCycle: "monthly" | "yearly",
 		userEmail: string,
 		userName: string,
-		couponId?: string
+		couponId?: string,
 	) => Promise<{ error: Error | null; order: RazorpayOrder | null }>;
 	createPhonePePayment: (
 		userId: string,
@@ -61,13 +61,19 @@ interface SubscriptionActions {
 		userEmail: string,
 		userName: string,
 		userPhone: string,
-		couponId?: string
+		couponId?: string,
 	) => Promise<{ error: Error | null; order: PhonePeOrder | null }>;
 	clearCoupon: () => void;
 	clearError: () => void;
 }
 
 type SubscriptionStore = SubscriptionState & SubscriptionActions;
+
+// Collapses concurrent subscribeToPlan calls for the same plan onto one request.
+const subscribeInFlight = new Map<
+	string,
+	Promise<{ error: Error | null; subscription: UserSubscription | null }>
+>();
 
 export const useSubscriptionStore = create<SubscriptionStore>((set, get) => ({
 	// State
@@ -100,7 +106,7 @@ export const useSubscriptionStore = create<SubscriptionStore>((set, get) => ({
 	validateCoupon: async (
 		code: string,
 		planSlug: SubscriptionPlan,
-		billingCycle: "monthly" | "yearly"
+		billingCycle: "monthly" | "yearly",
 	) => {
 		set({ isLoading: true, error: null });
 		try {
@@ -185,7 +191,7 @@ export const useSubscriptionStore = create<SubscriptionStore>((set, get) => ({
 	calculatePrice: (
 		plan: SubscriptionPlanRow,
 		billingCycle: "monthly" | "yearly",
-		coupon?: Coupon | null
+		coupon?: Coupon | null,
 	) => {
 		const originalPrice =
 			billingCycle === "monthly" ? plan.price_monthly : plan.price_yearly;
@@ -210,76 +216,106 @@ export const useSubscriptionStore = create<SubscriptionStore>((set, get) => ({
 		userId: string,
 		planId: string,
 		billingCycle: "monthly" | "yearly",
-		couponId?: string
+		couponId?: string,
 	) => {
-		set({ isLoading: true, error: null });
-		try {
-			// Calculate period dates
-			const now = new Date();
-			const endDate = new Date();
-			if (billingCycle === "monthly") {
-				endDate.setMonth(endDate.getMonth() + 1);
-			} else {
-				endDate.setFullYear(endDate.getFullYear() + 1);
-			}
+		// A retry after the cancel-then-insert pair partly ran would cancel the
+		// subscription it just created and charge for a second one.
+		const inFlightKey = `${userId}:${planId}:${billingCycle}`;
+		if (subscribeInFlight.has(inFlightKey)) {
+			return subscribeInFlight.get(inFlightKey)!;
+		}
 
-			// Deactivate existing subscription
-			await (supabase.from("user_subscriptions") as any)
-				.update({ status: "cancelled", cancelled_at: now.toISOString() })
-				.eq("user_id", userId)
-				.eq("status", "active");
+		const run = async () => {
+			set({ isLoading: true, error: null });
+			try {
+				// Calculate period dates
+				const now = new Date();
+				const endDate = new Date();
+				if (billingCycle === "monthly") {
+					endDate.setMonth(endDate.getMonth() + 1);
+				} else {
+					endDate.setFullYear(endDate.getFullYear() + 1);
+				}
 
-			// Create new subscription
-			const { data: subscription, error } = await (
-				supabase.from("user_subscriptions") as any
-			)
-				.insert({
-					user_id: userId,
-					plan_id: planId,
-					status: "active",
-					billing_cycle: billingCycle,
-					current_period_start: now.toISOString(),
-					current_period_end: endDate.toISOString(),
-				})
-				.select()
-				.single();
+				// If this exact plan is already active, a previous attempt got through.
+				// Return it rather than cancelling and re-inserting a duplicate.
+				const { data: existing } = await (
+					supabase.from("user_subscriptions") as any
+				)
+					.select("*")
+					.eq("user_id", userId)
+					.eq("plan_id", planId)
+					.eq("billing_cycle", billingCycle)
+					.eq("status", "active")
+					.maybeSingle();
 
-			if (error) throw error;
+				if (existing) {
+					set({ currentCoupon: null });
+					return { error: null, subscription: existing };
+				}
 
-			// Update coupon usage if used
-			if (couponId) {
-				await (supabase.rpc as any)("increment_coupon_usage", {
-					coupon_id: couponId,
-				});
+				// Deactivate existing subscription
+				await (supabase.from("user_subscriptions") as any)
+					.update({ status: "cancelled", cancelled_at: now.toISOString() })
+					.eq("user_id", userId)
+					.eq("status", "active");
 
-				// Record coupon redemption
-				const { currentCoupon } = get();
-				if (currentCoupon) {
-					const plan = get().plans.find((p) => p.id === planId);
-					if (plan) {
-						const { discount } = get().calculatePrice(
-							plan,
-							billingCycle,
-							currentCoupon
-						);
-						await (supabase.from("coupon_redemptions") as any).insert({
-							coupon_id: couponId,
-							user_id: userId,
-							subscription_id: (subscription as any).id,
-							discount_applied: discount,
-						});
+				// Create new subscription
+				const { data: subscription, error } = await (
+					supabase.from("user_subscriptions") as any
+				)
+					.insert({
+						user_id: userId,
+						plan_id: planId,
+						status: "active",
+						billing_cycle: billingCycle,
+						current_period_start: now.toISOString(),
+						current_period_end: endDate.toISOString(),
+					})
+					.select()
+					.single();
+
+				if (error) throw error;
+
+				// Update coupon usage if used
+				if (couponId) {
+					await (supabase.rpc as any)("increment_coupon_usage", {
+						coupon_id: couponId,
+					});
+
+					// Record coupon redemption
+					const { currentCoupon } = get();
+					if (currentCoupon) {
+						const plan = get().plans.find((p) => p.id === planId);
+						if (plan) {
+							const { discount } = get().calculatePrice(
+								plan,
+								billingCycle,
+								currentCoupon,
+							);
+							await (supabase.from("coupon_redemptions") as any).insert({
+								coupon_id: couponId,
+								user_id: userId,
+								subscription_id: (subscription as any).id,
+								discount_applied: discount,
+							});
+						}
 					}
 				}
-			}
 
-			set({ currentCoupon: null });
-			return { error: null, subscription };
-		} catch (error) {
-			set({ error: (error as Error).message });
-			return { error: error as Error, subscription: null };
-		} finally {
-			set({ isLoading: false });
-		}
+				set({ currentCoupon: null });
+				return { error: null, subscription };
+			} catch (error) {
+				set({ error: (error as Error).message });
+				return { error: error as Error, subscription: null };
+			} finally {
+				set({ isLoading: false });
+			}
+		};
+
+		const promise = run().finally(() => subscribeInFlight.delete(inFlightKey));
+		subscribeInFlight.set(inFlightKey, promise);
+		return promise;
 	},
 
 	cancelSubscription: async (subscriptionId: string) => {
@@ -311,7 +347,7 @@ export const useSubscriptionStore = create<SubscriptionStore>((set, get) => ({
 		billingCycle: "monthly" | "yearly",
 		userEmail: string,
 		userName: string,
-		couponId?: string
+		couponId?: string,
 	) => {
 		set({ isLoading: true, error: null });
 		try {
@@ -345,7 +381,7 @@ export const useSubscriptionStore = create<SubscriptionStore>((set, get) => ({
 		userEmail: string,
 		userName: string,
 		userPhone: string,
-		couponId?: string
+		couponId?: string,
 	) => {
 		set({ isLoading: true, error: null });
 		try {

@@ -21,11 +21,12 @@ const QUEUE_KEY = "@lifesync/write_queue_v1";
 const MAX_ATTEMPTS = 8;
 const MAX_ENTRIES = 500;
 
-export type WriteOp = "insert" | "update" | "upsert" | "delete";
+export type WriteOp = "insert" | "update" | "upsert" | "delete" | "rpc";
 
 /** A replayable description of a single write. */
 export interface QueuedWrite {
 	id: string;
+	/** For op "rpc", the function name rather than a table. */
 	table: string;
 	op: WriteOp;
 	/** Arguments passed to the op, e.g. the row(s) for insert. */
@@ -92,6 +93,9 @@ export const getQueueState = (): QueueState => ({ ...state });
 const tableLabels: Record<string, string> = {
 	finance_accounts: "Account",
 	finance_transactions: "Transaction",
+	finance_add_transaction: "Transaction",
+	finance_update_transaction: "Transaction",
+	finance_delete_transactions: "Transaction",
 	user_habits: "Habit",
 	habit_logs: "Habit log",
 	workout_plans: "Workout plan",
@@ -105,7 +109,11 @@ const toChangeDetail = (
 	item: Pick<QueuedWrite, "id" | "table" | "op" | "args" | "filters">,
 	error?: string,
 ): QueueChange => {
-	const payload = item.args[0];
+	// rpc args are [fnName, params]; the row lives inside the params object.
+	const payload =
+		item.op === "rpc"
+			? (item.args[1]?.p_row ?? item.args[1]?.p_updates ?? item.args[1])
+			: item.args[0];
 	const record = Array.isArray(payload) ? payload[0] : payload;
 	const fields =
 		record && typeof record === "object"
@@ -134,12 +142,13 @@ const toChangeDetail = (
 		([method, args]) => method === "eq" && args[0] === "id",
 	);
 	const recordId = record?.id ?? idFilter?.[1][1];
+	const rpcVerb = item.op === "rpc" ? item.table.split("_")[1] : "";
 	const operation =
-		item.op === "insert"
+		item.op === "insert" || rpcVerb === "add"
 			? "Add"
-			: item.op === "delete"
+			: item.op === "delete" || rpcVerb === "delete"
 				? "Delete"
-				: item.op === "update"
+				: item.op === "update" || rpcVerb === "update"
 					? "Update"
 					: "Save";
 	const tableLabel =
@@ -173,15 +182,15 @@ export const isDuplicatePrimaryKeyInsert = (
 	if (Array.isArray(payload) || !payload || typeof payload !== "object") {
 		return false;
 	}
-	const id = payload.id;
-	const details = String(result.error.details || "");
-	return (
-		typeof id === "string" &&
-		details.includes(`Key (id)=(${id})`) &&
-		/already exists|duplicate key/i.test(
-			`${details} ${result.error.message || ""}`,
-		)
-	);
+	if (typeof payload.id !== "string") return false;
+	const text = `${result.error.details || ""} ${result.error.message || ""}`;
+	// PostgREST often returns `details: null`, leaving only the constraint name
+	// in `message`, so the id itself can't be required here. It must still be
+	// the PRIMARY key: any other unique violation is a genuine rejection.
+	if (text.includes("Key (id)=(")) {
+		return text.includes(`Key (id)=(${payload.id})`);
+	}
+	return /_pkey/i.test(text);
 };
 
 const isReplayOfCommittedInsert = (result: any, item: QueuedWrite): boolean =>
@@ -233,36 +242,53 @@ export const isOfflineFailure = (result: any): boolean => {
 // Queue operations
 // ---------------------------------------------------------------------------
 
+/**
+ * Serializes every read-modify-write of the persisted queue. Without this an
+ * `enqueue` overlapping a `flushQueue` writes back a pre-shift snapshot and
+ * resurrects entries that were already replayed, re-running committed writes.
+ */
+let diskLock: Promise<unknown> = Promise.resolve();
+const withQueueLock = <T>(fn: () => Promise<T>): Promise<T> => {
+	const run = diskLock.then(fn, fn);
+	diskLock = run.catch(() => {});
+	return run;
+};
+
 export const enqueue = async (
 	entry: Omit<QueuedWrite, "id" | "createdAt" | "attempts">,
-): Promise<void> => {
-	const queue = await readQueue();
+): Promise<void> =>
+	withQueueLock(async () => {
+		const queue = await readQueue();
 
-	if (queue.length >= MAX_ENTRIES) {
-		// Refuse silently-unbounded growth rather than filling the device.
-		console.warn("writeQueue: queue is full, dropping oldest entry");
-		queue.shift();
-	}
+		if (queue.length >= MAX_ENTRIES) {
+			// Refuse silently-unbounded growth rather than filling the device.
+			console.warn("writeQueue: queue is full, dropping oldest entry");
+			queue.shift();
+		}
 
-	queue.push({
-		...entry,
-		id: `${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
-		createdAt: Date.now(),
-		attempts: 0,
+		queue.push({
+			...entry,
+			id: `${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
+			createdAt: Date.now(),
+			attempts: 0,
+		});
+
+		await writeQueueToDisk(queue);
+		state = {
+			...state,
+			pending: queue.length,
+			pendingDetails: queue.map((item) => toChangeDetail(item)),
+			offline: true,
+		};
+		emit();
 	});
-
-	await writeQueueToDisk(queue);
-	state = {
-		...state,
-		pending: queue.length,
-		pendingDetails: queue.map((item) => toChangeDetail(item)),
-		offline: true,
-	};
-	emit();
-};
 
 /** Rebuild and run one queued write against the raw (unwrapped) client. */
 const replay = async (rawClient: any, item: QueuedWrite): Promise<any> => {
+	// The RPCs are written to be idempotent, so a replay of one that already
+	// committed is a no-op rather than a double-apply.
+	if (item.op === "rpc") return await rawClient.rpc(...item.args);
+
 	let builder = rawClient.from(item.table)[item.op](...item.args);
 	for (const [method, args] of item.filters) {
 		if (typeof builder[method] !== "function") {
@@ -281,76 +307,83 @@ const replay = async (rawClient: any, item: QueuedWrite): Promise<any> => {
  */
 export const flushQueue = async (rawClient: any): Promise<void> => {
 	if (state.flushing) return;
-
-	let queue = await readQueue();
-	if (queue.length === 0) {
-		if (state.offline || state.pending !== 0) {
-			state = { ...state, pending: 0, offline: false };
-			emit();
-		}
-		return;
-	}
-
+	// Claim the guard synchronously: every caller below awaits, and overlapping
+	// callers (startup, 30s interval, foreground, fetchFromCloud) would otherwise
+	// both read the same queue and replay the same insert twice.
 	state = { ...state, flushing: true };
 	emit();
 
 	let abandoned = 0;
 	const abandonedDetails: QueueChange[] = [];
 
-	try {
-		while (queue.length > 0) {
-			const item = queue[0];
-			let result: any;
+	// Mutate the persisted queue only under the lock, and always re-read it,
+	// so a concurrent `enqueue` is never clobbered by a stale in-memory copy.
+	const commit = (fn: (queue: QueuedWrite[]) => QueuedWrite[]): Promise<void> =>
+		withQueueLock(async () => {
+			await writeQueueToDisk(fn(await readQueue()));
+		});
+	const drop = (id: string) =>
+		commit((queue) => queue.filter((entry) => entry.id !== id));
 
+	try {
+		while (true) {
+			const head = (await withQueueLock(readQueue))[0];
+			if (!head) break;
+
+			let result: any;
 			try {
-				result = await replay(rawClient, item);
+				result = await replay(rawClient, head);
 			} catch (err: any) {
 				result = { error: { message: String(err?.message || err) }, status: 0 };
 			}
 
 			if (isOfflineFailure(result)) {
 				// Still offline. Keep this and everything after it, in order.
-				item.attempts += 1;
-				item.lastError = result.error?.message;
-				if (item.attempts >= MAX_ATTEMPTS) {
+				const lastError = result.error?.message;
+				const attempts = head.attempts + 1;
+
+				if (attempts >= MAX_ATTEMPTS) {
 					console.warn(
-						`writeQueue: giving up on ${item.op} ${item.table} after ${item.attempts} attempts`,
+						`writeQueue: giving up on ${head.op} ${head.table} after ${attempts} attempts`,
 					);
-					queue.shift();
+					await drop(head.id);
 					abandoned += 1;
-					abandonedDetails.push(toChangeDetail(item, item.lastError));
-					await writeQueueToDisk(queue);
+					abandonedDetails.push(toChangeDetail(head, lastError));
 					continue;
 				}
-				await writeQueueToDisk(queue);
+
+				await commit((queue) =>
+					queue.map((entry) =>
+						entry.id === head.id ? { ...entry, attempts, lastError } : entry,
+					),
+				);
 				break;
 			}
 
-			if (isReplayOfCommittedInsert(result, item)) {
+			if (isReplayOfCommittedInsert(result, head)) {
 				console.info(
-					`writeQueue: ${item.op} on ${item.table} already exists; treating replay as saved`,
+					`writeQueue: ${head.op} on ${head.table} already exists; treating replay as saved`,
 				);
 			} else if (result?.error) {
 				// The server understood it and said no. Retrying cannot help.
 				console.error(
-					`writeQueue: dropping ${item.op} on ${item.table} - server rejected it:`,
+					`writeQueue: dropping ${head.op} on ${head.table} - server rejected it:`,
 					result.error.message,
 				);
 				abandoned += 1;
-				abandonedDetails.push(toChangeDetail(item, result.error.message));
+				abandonedDetails.push(toChangeDetail(head, result.error.message));
 			}
 
-			queue.shift();
-			await writeQueueToDisk(queue);
+			await drop(head.id);
 		}
 	} finally {
-		const remaining = (await readQueue()).length;
+		const remaining = await readQueue();
 		state = {
 			...state,
 			flushing: false,
-			pending: remaining,
-			pendingDetails: (await readQueue()).map((item) => toChangeDetail(item)),
-			offline: remaining > 0,
+			pending: remaining.length,
+			pendingDetails: remaining.map((item) => toChangeDetail(item)),
+			offline: remaining.length > 0,
 			failed: state.failed + abandoned,
 			failedDetails: [...state.failedDetails, ...abandonedDetails].slice(-10),
 			lastFlushAt: Date.now(),

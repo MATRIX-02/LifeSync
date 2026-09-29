@@ -25,6 +25,11 @@ const supabase = supabaseClient as any;
 
 export * from "./types";
 
+// De-dupes overlapping initialize() calls and lets a slow one detect that a
+// newer load (or a sign-out) superseded it.
+let loadGeneration = 0;
+let inFlightLoad: Promise<void> | null = null;
+
 export const useWorkoutStore = create<WorkoutStore>()((set, get) => ({
 	// Initial State
 	fitnessProfile: null,
@@ -47,115 +52,136 @@ export const useWorkoutStore = create<WorkoutStore>()((set, get) => ({
 
 	// Initialize from database
 	initialize: async (userId: string) => {
-		console.log("📥 Loading workout data from database for user:", userId);
-		set({ isLoading: true, userId });
+		// Login and app-resume routinely overlap; without this the slower of the
+		// two lands last and clobbers the fresher state.
+		if (inFlightLoad) return inFlightLoad;
 
-		try {
-			const [
-				profileRes,
-				plansRes,
-				sessionsRes,
-				recordsRes,
-				measurementsRes,
-				weightsRes,
-				exercisesRes,
-			] = await Promise.all([
-				(supabase.from("fitness_profiles") as any)
-					.select("*")
-					.eq("user_id", userId)
-					.single(),
-				(supabase.from("workout_plans") as any)
-					.select("*")
-					.eq("user_id", userId),
-				(supabase.from("workout_sessions") as any)
-					.select("*")
-					.eq("user_id", userId)
-					.order("date", { ascending: false }),
-				(supabase.from("personal_records") as any)
-					.select("*")
-					.eq("user_id", userId),
-				(supabase.from("body_measurements") as any)
-					.select("*")
-					.eq("user_id", userId)
-					.order("date", { ascending: false }),
-				(supabase.from("body_weights") as any)
-					.select("*")
-					.eq("user_id", userId)
-					.order("date", { ascending: false }),
-				(supabase.from("custom_exercises") as any)
-					.select("*")
-					.eq("user_id", userId),
-			]);
+		const generation = ++loadGeneration;
+		const isStale = () =>
+			generation !== loadGeneration || get().userId !== userId;
 
-			const fitnessProfile =
-				profileRes.data && !profileRes.error
-					? objectToCamelCase(profileRes.data)
-					: null;
+		const run = async () => {
+			console.log("📥 Loading workout data from database for user:", userId);
+			set({ isLoading: true, userId });
 
-			const workoutPlans = (plansRes.data || []).map((plan: any) => {
-				const camelPlan = objectToCamelCase(plan);
-				return {
-					...camelPlan,
-					exercises:
-						typeof camelPlan.exercises === "string"
-							? JSON.parse(camelPlan.exercises)
-							: camelPlan.exercises || [],
-					createdAt: new Date(camelPlan.createdAt),
-					updatedAt: new Date(camelPlan.updatedAt),
-				};
-			});
+			try {
+				const [
+					profileRes,
+					plansRes,
+					sessionsRes,
+					recordsRes,
+					measurementsRes,
+					weightsRes,
+					exercisesRes,
+				] = await Promise.all([
+					(supabase.from("fitness_profiles") as any)
+						.select("*")
+						.eq("user_id", userId)
+						.single(),
+					(supabase.from("workout_plans") as any)
+						.select("*")
+						.eq("user_id", userId),
+					(supabase.from("workout_sessions") as any)
+						.select("*")
+						.eq("user_id", userId)
+						.order("date", { ascending: false }),
+					(supabase.from("personal_records") as any)
+						.select("*")
+						.eq("user_id", userId),
+					(supabase.from("body_measurements") as any)
+						.select("*")
+						.eq("user_id", userId)
+						.order("date", { ascending: false }),
+					(supabase.from("body_weights") as any)
+						.select("*")
+						.eq("user_id", userId)
+						.order("date", { ascending: false }),
+					(supabase.from("custom_exercises") as any)
+						.select("*")
+						.eq("user_id", userId),
+				]);
 
-			const workoutSessions = (sessionsRes.data || []).map((session: any) => {
-				const camelSession = objectToCamelCase(session);
-				return {
-					...camelSession,
-					exercises:
-						typeof camelSession.exercises === "string"
-							? JSON.parse(camelSession.exercises)
-							: camelSession.exercises || [],
-					date: new Date(camelSession.date),
-					startTime: new Date(camelSession.startTime),
-					endTime: camelSession.endTime
-						? new Date(camelSession.endTime)
-						: undefined,
-				};
-			});
+				const fitnessProfile =
+					profileRes.data && !profileRes.error
+						? objectToCamelCase(profileRes.data)
+						: null;
 
-			const personalRecords = (recordsRes.data || []).map((record: any) => ({
-				...objectToCamelCase(record),
-				date: new Date(record.date),
-			}));
+				const workoutPlans = (plansRes.data || []).map((plan: any) => {
+					const camelPlan = objectToCamelCase(plan);
+					return {
+						...camelPlan,
+						exercises:
+							typeof camelPlan.exercises === "string"
+								? JSON.parse(camelPlan.exercises)
+								: camelPlan.exercises || [],
+						createdAt: new Date(camelPlan.createdAt),
+						updatedAt: new Date(camelPlan.updatedAt),
+					};
+				});
 
-			const bodyMeasurements = (measurementsRes.data || []).map((m: any) =>
-				objectToCamelCase(m),
-			);
-			const bodyWeights = (weightsRes.data || []).map((w: any) =>
-				objectToCamelCase(w),
-			);
-			const customExercises = (exercisesRes.data || []).map((e: any) =>
-				objectToCamelCase(e),
-			);
-			const activePlan = workoutPlans.find((p: WorkoutPlan) => p.isActive);
+				const workoutSessions = (sessionsRes.data || []).map((session: any) => {
+					const camelSession = objectToCamelCase(session);
+					return {
+						...camelSession,
+						exercises:
+							typeof camelSession.exercises === "string"
+								? JSON.parse(camelSession.exercises)
+								: camelSession.exercises || [],
+						date: new Date(camelSession.date),
+						startTime: new Date(camelSession.startTime),
+						endTime: camelSession.endTime
+							? new Date(camelSession.endTime)
+							: undefined,
+					};
+				});
 
-			console.log(
-				`✅ Loaded ${workoutPlans.length} plans, ${workoutSessions.length} sessions`,
-			);
+				const personalRecords = (recordsRes.data || []).map((record: any) => ({
+					...objectToCamelCase(record),
+					date: new Date(record.date),
+				}));
 
-			set({
-				fitnessProfile,
-				workoutPlans,
-				workoutSessions,
-				personalRecords,
-				bodyMeasurements,
-				bodyWeights,
-				customExercises,
-				activePlanId: activePlan?.id || null,
-				isLoading: false,
-			});
-		} catch (error) {
-			console.error("❌ Error loading workout data:", error);
-			set({ isLoading: false });
-		}
+				const bodyMeasurements = (measurementsRes.data || []).map((m: any) =>
+					objectToCamelCase(m),
+				);
+				const bodyWeights = (weightsRes.data || []).map((w: any) =>
+					objectToCamelCase(w),
+				);
+				const customExercises = (exercisesRes.data || []).map((e: any) =>
+					objectToCamelCase(e),
+				);
+				const activePlan = workoutPlans.find((p: WorkoutPlan) => p.isActive);
+
+				if (isStale()) {
+					console.log("↩️ Workout load superseded, dropping result");
+					return;
+				}
+
+				console.log(
+					`✅ Loaded ${workoutPlans.length} plans, ${workoutSessions.length} sessions`,
+				);
+
+				set({
+					fitnessProfile,
+					workoutPlans,
+					workoutSessions,
+					personalRecords,
+					bodyMeasurements,
+					bodyWeights,
+					customExercises,
+					activePlanId: activePlan?.id || null,
+					isLoading: false,
+				});
+			} catch (error) {
+				if (isStale()) return;
+				console.error("❌ Error loading workout data:", error);
+				set({ isLoading: false });
+			}
+		};
+
+		inFlightLoad = run().finally(() => {
+			inFlightLoad = null;
+		});
+		return inFlightLoad;
 	},
 
 	// Fitness Profile

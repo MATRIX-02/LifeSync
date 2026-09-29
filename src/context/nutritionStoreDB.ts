@@ -110,7 +110,7 @@ const objectToCamelCase = (obj: Record<string, any>): Record<string, any> => {
 	const result: Record<string, any> = {};
 	for (const key in obj) {
 		const camelKey = key.replace(/_([a-z])/g, (_, letter) =>
-			letter.toUpperCase()
+			letter.toUpperCase(),
 		);
 		result[camelKey] = obj[key];
 	}
@@ -122,7 +122,7 @@ const objectToSnakeCase = (obj: Record<string, any>): Record<string, any> => {
 	for (const key in obj) {
 		const snakeKey = key.replace(
 			/[A-Z]/g,
-			(letter) => `_${letter.toLowerCase()}`
+			(letter) => `_${letter.toLowerCase()}`,
 		);
 		result[snakeKey] = obj[key];
 	}
@@ -181,7 +181,7 @@ interface NutritionStore {
 		calories: number,
 		protein?: number,
 		carbs?: number,
-		fat?: number
+		fat?: number,
 	) => Promise<void>;
 	calculateDailyGoals: () => {
 		calories: number;
@@ -198,7 +198,7 @@ interface NutritionStore {
 	getMealsByDate: (date: Date) => InternalMealLogEntry[];
 	getMealsByDateRange: (
 		startDate: Date,
-		endDate: Date
+		endDate: Date,
 	) => InternalMealLogEntry[];
 
 	// Custom Foods
@@ -256,6 +256,11 @@ interface NutritionStore {
 // STORE IMPLEMENTATION
 // ============================================
 
+// De-dupes overlapping initialize() calls and lets a slow one detect that a
+// newer load (or a sign-out) superseded it.
+let loadGeneration = 0;
+let inFlightLoad: Promise<void> | null = null;
+
 export const useNutritionStore = create<NutritionStore>()((set, get) => ({
 	// Initial State
 	nutritionProfile: null,
@@ -274,200 +279,223 @@ export const useNutritionStore = create<NutritionStore>()((set, get) => ({
 	// INITIALIZATION
 	// ============================================
 	initialize: async (userId: string) => {
-		console.log("📥 Loading nutrition data from database for user:", userId);
-		set({ isLoading: true, userId });
+		// Login and app-resume routinely overlap; without this the slower of the
+		// two lands last and clobbers the fresher state.
+		if (inFlightLoad) return inFlightLoad;
 
-		try {
-			const today = new Date();
-			const thirtyDaysAgo = new Date(
-				today.getTime() - 30 * 24 * 60 * 60 * 1000
-			);
+		const generation = ++loadGeneration;
+		const isStale = () =>
+			generation !== loadGeneration || get().userId !== userId;
 
-			const [
-				profileRes,
-				customFoodsRes,
-				mealLogsRes,
-				gutHealthRes,
-				hydrationRes,
-				fastingRes,
-				mealPlansRes,
-				supplementsRes,
-			] = await Promise.all([
-				supabase
-					.from("nutrition_profiles")
-					.select("*")
-					.eq("user_id", userId)
-					.single(),
-				supabase.from("custom_foods").select("*").eq("user_id", userId),
-				supabase
-					.from("meal_logs")
-					.select("*")
-					.eq("user_id", userId)
-					.gte("date", thirtyDaysAgo.toISOString().split("T")[0])
-					.order("date", { ascending: false }),
-				supabase
-					.from("gut_health_logs")
-					.select("*")
-					.eq("user_id", userId)
-					.gte("date", thirtyDaysAgo.toISOString().split("T")[0])
-					.order("date", { ascending: false }),
-				supabase
-					.from("hydration_logs")
-					.select("*")
-					.eq("user_id", userId)
-					.gte("date", thirtyDaysAgo.toISOString().split("T")[0])
-					.order("timestamp", { ascending: false }),
-				supabase
-					.from("fasting_logs")
-					.select("*")
-					.eq("user_id", userId)
-					.order("start_time", { ascending: false })
-					.limit(30),
-				supabase.from("meal_plans").select("*").eq("user_id", userId),
-				supabase
-					.from("supplement_logs")
-					.select("*")
-					.eq("user_id", userId)
-					.gte("date", thirtyDaysAgo.toISOString().split("T")[0]),
-			]);
+		const run = async () => {
+			console.log("📥 Loading nutrition data from database for user:", userId);
+			set({ isLoading: true, userId });
 
-			// Process profile
-			const nutritionProfile =
-				profileRes.data && !profileRes.error
-					? (objectToCamelCase(profileRes.data) as NutritionProfile)
-					: null;
+			try {
+				const today = new Date();
+				const thirtyDaysAgo = new Date(
+					today.getTime() - 30 * 24 * 60 * 60 * 1000,
+				);
 
-			// Process custom foods
-			const customFoods = (customFoodsRes.data || []).map((food: any) => {
-				const camelFood = objectToCamelCase(food);
-				return {
-					...camelFood,
-					nutrition:
-						typeof camelFood.nutrition === "string"
-							? JSON.parse(camelFood.nutrition)
-							: camelFood.nutrition,
-					dietaryTags:
-						typeof camelFood.dietaryTags === "string"
-							? JSON.parse(camelFood.dietaryTags)
-							: camelFood.dietaryTags || [],
-					cuisineType:
-						typeof camelFood.cuisineType === "string"
-							? JSON.parse(camelFood.cuisineType)
-							: camelFood.cuisineType || [],
-				} as FoodItem;
-			});
+				const [
+					profileRes,
+					customFoodsRes,
+					mealLogsRes,
+					gutHealthRes,
+					hydrationRes,
+					fastingRes,
+					mealPlansRes,
+					supplementsRes,
+				] = await Promise.all([
+					supabase
+						.from("nutrition_profiles")
+						.select("*")
+						.eq("user_id", userId)
+						.single(),
+					supabase.from("custom_foods").select("*").eq("user_id", userId),
+					supabase
+						.from("meal_logs")
+						.select("*")
+						.eq("user_id", userId)
+						.gte("date", thirtyDaysAgo.toISOString().split("T")[0])
+						.order("date", { ascending: false }),
+					supabase
+						.from("gut_health_logs")
+						.select("*")
+						.eq("user_id", userId)
+						.gte("date", thirtyDaysAgo.toISOString().split("T")[0])
+						.order("date", { ascending: false }),
+					supabase
+						.from("hydration_logs")
+						.select("*")
+						.eq("user_id", userId)
+						.gte("date", thirtyDaysAgo.toISOString().split("T")[0])
+						.order("timestamp", { ascending: false }),
+					supabase
+						.from("fasting_logs")
+						.select("*")
+						.eq("user_id", userId)
+						.order("start_time", { ascending: false })
+						.limit(30),
+					supabase.from("meal_plans").select("*").eq("user_id", userId),
+					supabase
+						.from("supplement_logs")
+						.select("*")
+						.eq("user_id", userId)
+						.gte("date", thirtyDaysAgo.toISOString().split("T")[0]),
+				]);
 
-			// Process meal logs
-			const mealLogs = (mealLogsRes.data || []).map((log: any) => {
-				const camelLog = objectToCamelCase(log);
-				return {
-					...camelLog,
-					date: new Date(camelLog.date),
-					foods:
-						typeof camelLog.foods === "string"
-							? JSON.parse(camelLog.foods)
-							: camelLog.foods || [],
-					nutrition:
-						typeof camelLog.totalNutrition === "string"
-							? JSON.parse(camelLog.totalNutrition)
-							: camelLog.totalNutrition || {},
-				} as InternalMealLogEntry;
-			});
+				// Process profile
+				const nutritionProfile =
+					profileRes.data && !profileRes.error
+						? (objectToCamelCase(profileRes.data) as NutritionProfile)
+						: null;
 
-			// Process gut health logs
-			const gutHealthLogs = (gutHealthRes.data || []).map((log: any) => {
-				const camelLog = objectToCamelCase(log);
-				return {
-					...camelLog,
-					date: new Date(camelLog.date),
-					digestionRating: camelLog.overallGutFeeling,
-					symptoms:
-						typeof camelLog.symptoms === "string"
-							? JSON.parse(camelLog.symptoms)
-							: camelLog.symptoms || [],
-					probioticFoods:
-						typeof camelLog.probioticFoods === "string"
-							? JSON.parse(camelLog.probioticFoods)
-							: camelLog.probioticFoods || [],
-					prebioticFoods:
-						typeof camelLog.prebioticFoods === "string"
-							? JSON.parse(camelLog.prebioticFoods)
-							: camelLog.prebioticFoods || [],
-				} as InternalGutHealthLog;
-			});
+				// Process custom foods
+				const customFoods = (customFoodsRes.data || []).map((food: any) => {
+					const camelFood = objectToCamelCase(food);
+					return {
+						...camelFood,
+						nutrition:
+							typeof camelFood.nutrition === "string"
+								? JSON.parse(camelFood.nutrition)
+								: camelFood.nutrition,
+						dietaryTags:
+							typeof camelFood.dietaryTags === "string"
+								? JSON.parse(camelFood.dietaryTags)
+								: camelFood.dietaryTags || [],
+						cuisineType:
+							typeof camelFood.cuisineType === "string"
+								? JSON.parse(camelFood.cuisineType)
+								: camelFood.cuisineType || [],
+					} as FoodItem;
+				});
 
-			// Process hydration logs
-			const hydrationLogs = (hydrationRes.data || []).map((log: any) => {
-				const camelLog = objectToCamelCase(log);
-				return {
-					...camelLog,
-					date: new Date(camelLog.date),
-					amount: camelLog.amountMl,
-					timestamp: new Date(camelLog.timestamp),
-				} as InternalHydrationLog;
-			});
+				// Process meal logs
+				const mealLogs = (mealLogsRes.data || []).map((log: any) => {
+					const camelLog = objectToCamelCase(log);
+					return {
+						...camelLog,
+						date: new Date(camelLog.date),
+						foods:
+							typeof camelLog.foods === "string"
+								? JSON.parse(camelLog.foods)
+								: camelLog.foods || [],
+						nutrition:
+							typeof camelLog.totalNutrition === "string"
+								? JSON.parse(camelLog.totalNutrition)
+								: camelLog.totalNutrition || {},
+					} as InternalMealLogEntry;
+				});
 
-			// Process fasting logs
-			const fastingLogs = (fastingRes.data || []).map((log: any) => {
-				const camelLog = objectToCamelCase(log);
-				return {
-					...camelLog,
-					fastingType: camelLog.fastType,
-					startTime: new Date(camelLog.startTime),
-					endTime: camelLog.endTime ? new Date(camelLog.endTime) : undefined,
-				} as InternalFastingLog;
-			});
+				// Process gut health logs
+				const gutHealthLogs = (gutHealthRes.data || []).map((log: any) => {
+					const camelLog = objectToCamelCase(log);
+					return {
+						...camelLog,
+						date: new Date(camelLog.date),
+						digestionRating: camelLog.overallGutFeeling,
+						symptoms:
+							typeof camelLog.symptoms === "string"
+								? JSON.parse(camelLog.symptoms)
+								: camelLog.symptoms || [],
+						probioticFoods:
+							typeof camelLog.probioticFoods === "string"
+								? JSON.parse(camelLog.probioticFoods)
+								: camelLog.probioticFoods || [],
+						prebioticFoods:
+							typeof camelLog.prebioticFoods === "string"
+								? JSON.parse(camelLog.prebioticFoods)
+								: camelLog.prebioticFoods || [],
+					} as InternalGutHealthLog;
+				});
 
-			// Find current active fast
-			const currentFasting =
-				fastingLogs.find((f: InternalFastingLog) => !f.completed) || null;
+				// Process hydration logs
+				const hydrationLogs = (hydrationRes.data || []).map((log: any) => {
+					const camelLog = objectToCamelCase(log);
+					return {
+						...camelLog,
+						date: new Date(camelLog.date),
+						amount: camelLog.amountMl,
+						timestamp: new Date(camelLog.timestamp),
+					} as InternalHydrationLog;
+				});
 
-			// Process meal plans
-			const mealPlans = (mealPlansRes.data || []).map((plan: any) => {
-				const camelPlan = objectToCamelCase(plan);
-				return {
-					...camelPlan,
-					meals:
-						typeof camelPlan.meals === "string"
-							? JSON.parse(camelPlan.meals)
-							: camelPlan.meals || [],
-					startDate: camelPlan.startDate
-						? new Date(camelPlan.startDate)
-						: undefined,
-					endDate: camelPlan.endDate ? new Date(camelPlan.endDate) : undefined,
-				} as InternalMealPlan;
-			});
+				// Process fasting logs
+				const fastingLogs = (fastingRes.data || []).map((log: any) => {
+					const camelLog = objectToCamelCase(log);
+					return {
+						...camelLog,
+						fastingType: camelLog.fastType,
+						startTime: new Date(camelLog.startTime),
+						endTime: camelLog.endTime ? new Date(camelLog.endTime) : undefined,
+					} as InternalFastingLog;
+				});
 
-			// Process supplement logs
-			const supplementLogs = (supplementsRes.data || []).map((log: any) => {
-				const camelLog = objectToCamelCase(log);
-				return {
-					...camelLog,
-					date: new Date(camelLog.date),
-					time: new Date(camelLog.time),
-				} as InternalSupplementLog;
-			});
+				// Find current active fast
+				const currentFasting =
+					fastingLogs.find((f: InternalFastingLog) => !f.completed) || null;
 
-			console.log(
-				`✅ Loaded ${mealLogs.length} meal logs, ${gutHealthLogs.length} gut health logs, ${hydrationLogs.length} hydration logs`
-			);
+				// Process meal plans
+				const mealPlans = (mealPlansRes.data || []).map((plan: any) => {
+					const camelPlan = objectToCamelCase(plan);
+					return {
+						...camelPlan,
+						meals:
+							typeof camelPlan.meals === "string"
+								? JSON.parse(camelPlan.meals)
+								: camelPlan.meals || [],
+						startDate: camelPlan.startDate
+							? new Date(camelPlan.startDate)
+							: undefined,
+						endDate: camelPlan.endDate
+							? new Date(camelPlan.endDate)
+							: undefined,
+					} as InternalMealPlan;
+				});
 
-			set({
-				nutritionProfile,
-				customFoods,
-				mealLogs,
-				gutHealthLogs,
-				hydrationLogs,
-				fastingLogs,
-				mealPlans,
-				supplementLogs,
-				currentFasting,
-				isLoading: false,
-			});
-		} catch (error) {
-			console.error("❌ Error loading nutrition data:", error);
-			set({ isLoading: false });
-		}
+				// Process supplement logs
+				const supplementLogs = (supplementsRes.data || []).map((log: any) => {
+					const camelLog = objectToCamelCase(log);
+					return {
+						...camelLog,
+						date: new Date(camelLog.date),
+						time: new Date(camelLog.time),
+					} as InternalSupplementLog;
+				});
+
+				if (isStale()) {
+					console.log("↩️ Nutrition load superseded, dropping result");
+					return;
+				}
+
+				console.log(
+					`✅ Loaded ${mealLogs.length} meal logs, ${gutHealthLogs.length} gut health logs, ${hydrationLogs.length} hydration logs`,
+				);
+
+				set({
+					nutritionProfile,
+					customFoods,
+					mealLogs,
+					gutHealthLogs,
+					hydrationLogs,
+					fastingLogs,
+					mealPlans,
+					supplementLogs,
+					currentFasting,
+					isLoading: false,
+				});
+			} catch (error) {
+				if (isStale()) return;
+				console.error("❌ Error loading nutrition data:", error);
+				set({ isLoading: false });
+			}
+		};
+
+		inFlightLoad = run().finally(() => {
+			inFlightLoad = null;
+		});
+		return inFlightLoad;
 	},
 
 	// ============================================
@@ -687,7 +715,7 @@ export const useNutritionStore = create<NutritionStore>()((set, get) => ({
 
 			set({
 				mealLogs: mealLogs.map((log) =>
-					log.id === id ? { ...log, ...updates } : log
+					log.id === id ? { ...log, ...updates } : log,
 				),
 			});
 		} catch (error) {
@@ -786,7 +814,7 @@ export const useNutritionStore = create<NutritionStore>()((set, get) => ({
 
 			set({
 				customFoods: customFoods.map((food) =>
-					food.id === id ? { ...food, ...updates } : food
+					food.id === id ? { ...food, ...updates } : food,
 				),
 			});
 		} catch (error) {
@@ -893,7 +921,7 @@ export const useNutritionStore = create<NutritionStore>()((set, get) => ({
 
 			set({
 				gutHealthLogs: gutHealthLogs.map((log) =>
-					log.id === id ? { ...log, ...updates } : log
+					log.id === id ? { ...log, ...updates } : log,
 				),
 			});
 		} catch (error) {
@@ -996,7 +1024,7 @@ export const useNutritionStore = create<NutritionStore>()((set, get) => ({
 
 			set({
 				hydrationLogs: hydrationLogs.map((log) =>
-					log.id === id ? { ...log, ...updates } : log
+					log.id === id ? { ...log, ...updates } : log,
 				),
 			});
 		} catch (error) {
@@ -1121,8 +1149,8 @@ export const useNutritionStore = create<NutritionStore>()((set, get) => ({
 								actualHours: Math.round(actualHours * 10) / 10,
 								completed: true,
 								notes,
-						  }
-						: log
+							}
+						: log,
 				),
 				currentFasting: null,
 			});
@@ -1195,14 +1223,14 @@ export const useNutritionStore = create<NutritionStore>()((set, get) => ({
 				plan.startDate instanceof Date
 					? plan.startDate
 					: plan.startDate
-					? new Date(plan.startDate)
-					: null;
+						? new Date(plan.startDate)
+						: null;
 			const endDate =
 				plan.endDate instanceof Date
 					? plan.endDate
 					: plan.endDate
-					? new Date(plan.endDate)
-					: null;
+						? new Date(plan.endDate)
+						: null;
 
 			const planData = {
 				user_id: userId,
@@ -1270,7 +1298,7 @@ export const useNutritionStore = create<NutritionStore>()((set, get) => ({
 
 			set({
 				mealPlans: mealPlans.map((plan) =>
-					plan.id === id ? { ...plan, ...updates } : plan
+					plan.id === id ? { ...plan, ...updates } : plan,
 				),
 			});
 		} catch (error) {
@@ -1413,7 +1441,7 @@ export const useNutritionStore = create<NutritionStore>()((set, get) => ({
 					sugar: acc.sugar + (nutrition.sugar || 0),
 				};
 			},
-			{ calories: 0, protein: 0, carbs: 0, fat: 0, fiber: 0, sugar: 0 }
+			{ calories: 0, protein: 0, carbs: 0, fat: 0, fiber: 0, sugar: 0 },
 		);
 
 		const totalWater = hydration.reduce((total, log) => total + log.amount, 0);
@@ -1452,28 +1480,28 @@ export const useNutritionStore = create<NutritionStore>()((set, get) => ({
 		return {
 			date: "weekly_average",
 			totalCalories: Math.round(
-				summaries.reduce((sum, s) => sum + s.totalCalories, 0) / daysWithData
+				summaries.reduce((sum, s) => sum + s.totalCalories, 0) / daysWithData,
 			),
 			totalProtein: Math.round(
-				summaries.reduce((sum, s) => sum + s.totalProtein, 0) / daysWithData
+				summaries.reduce((sum, s) => sum + s.totalProtein, 0) / daysWithData,
 			),
 			totalCarbs: Math.round(
-				summaries.reduce((sum, s) => sum + s.totalCarbs, 0) / daysWithData
+				summaries.reduce((sum, s) => sum + s.totalCarbs, 0) / daysWithData,
 			),
 			totalFat: Math.round(
-				summaries.reduce((sum, s) => sum + s.totalFat, 0) / daysWithData
+				summaries.reduce((sum, s) => sum + s.totalFat, 0) / daysWithData,
 			),
 			totalFiber: Math.round(
-				summaries.reduce((sum, s) => sum + s.totalFiber, 0) / daysWithData
+				summaries.reduce((sum, s) => sum + s.totalFiber, 0) / daysWithData,
 			),
 			totalSugar: Math.round(
-				summaries.reduce((sum, s) => sum + s.totalSugar, 0) / daysWithData
+				summaries.reduce((sum, s) => sum + s.totalSugar, 0) / daysWithData,
 			),
 			totalWater: Math.round(
-				summaries.reduce((sum, s) => sum + s.totalWater, 0) / daysWithData
+				summaries.reduce((sum, s) => sum + s.totalWater, 0) / daysWithData,
 			),
 			mealCount: Math.round(
-				summaries.reduce((sum, s) => sum + s.mealCount, 0) / days
+				summaries.reduce((sum, s) => sum + s.mealCount, 0) / days,
 			),
 			calorieGoal: summaries[0]?.calorieGoal || 2000,
 			proteinGoal: summaries[0]?.proteinGoal || 60,
@@ -1536,7 +1564,7 @@ export const useNutritionStore = create<NutritionStore>()((set, get) => ({
 				type: "warning",
 				title: "Stay Hydrated",
 				message: `Drink more water! ${Math.round(
-					(todaySummary.waterGoal - todaySummary.totalWater) / 1000
+					(todaySummary.waterGoal - todaySummary.totalWater) / 1000,
 				)}L remaining.`,
 				icon: "water",
 			});
@@ -1547,7 +1575,7 @@ export const useNutritionStore = create<NutritionStore>()((set, get) => ({
 		const avgDigestion =
 			recentGutHealth.reduce(
 				(sum, log) => sum + (log.digestionRating || 3),
-				0
+				0,
 			) / (recentGutHealth.length || 1);
 		if (avgDigestion < 3 && recentGutHealth.length > 0) {
 			insights.push({

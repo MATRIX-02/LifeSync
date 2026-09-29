@@ -34,6 +34,11 @@ let logIndexCache: {
 	index: Map<string, HabitLog[]>;
 } | null = null;
 
+// De-dupes overlapping initialize() calls and lets a slow one detect that a
+// newer load (or a sign-out) superseded it.
+let loadGeneration = 0;
+let inFlightLoad: Promise<void> | null = null;
+
 // Local calendar date as "YYYY-MM-DD". toISOString() would shift the day for
 // anyone east or west of UTC, which silently moved logs a day in either
 // direction depending on the hour they were made.
@@ -316,47 +321,68 @@ export const useHabitStore = create<HabitStoreDB>()((set, get) => ({
 
 	// Initialize - fetch all data from database
 	initialize: async (userId: string) => {
-		set({ isLoading: true, error: null, userId });
+		// Login and app-resume routinely overlap; without this the slower of the
+		// two lands last and clobbers the fresher state.
+		if (inFlightLoad) return inFlightLoad;
 
-		try {
-			console.log("📥 Loading habits from database for user:", userId);
+		const generation = ++loadGeneration;
+		const isStale = () =>
+			generation !== loadGeneration || get().userId !== userId;
 
-			// Fetch habits
-			const { data: habitsData, error: habitsError } = await supabase
-				.from("user_habits")
-				.select("*")
-				.eq("user_id", userId)
-				.order("created_at", { ascending: false });
+		const run = async () => {
+			set({ isLoading: true, error: null, userId });
 
-			if (habitsError) throw habitsError;
+			try {
+				console.log("📥 Loading habits from database for user:", userId);
 
-			// Fetch logs
-			const { data: logsData, error: logsError } = await supabase
-				.from("habit_logs")
-				.select("*")
-				.eq("user_id", userId)
-				.order("timestamp", { ascending: false });
+				// Fetch habits
+				const { data: habitsData, error: habitsError } = await supabase
+					.from("user_habits")
+					.select("*")
+					.eq("user_id", userId)
+					.order("created_at", { ascending: false });
 
-			if (logsError) throw logsError;
+				if (habitsError) throw habitsError;
 
-			const habits = (habitsData || []).map(dbHabitToHabit);
-			const logs = (logsData || []).map(dbLogToLog);
+				// Fetch logs
+				const { data: logsData, error: logsError } = await supabase
+					.from("habit_logs")
+					.select("*")
+					.eq("user_id", userId)
+					.order("timestamp", { ascending: false });
 
-			console.log(`✅ Loaded ${habits.length} habits, ${logs.length} logs`);
+				if (logsError) throw logsError;
 
-			set({
-				habits,
-				logs,
-				isLoading: false,
-				hasLoaded: true,
-			});
+				if (isStale()) {
+					console.log("↩️ Habit load superseded, dropping result");
+					return;
+				}
 
-			// Calculate stats for all habits
-			habits.forEach((habit) => get().calculateStats(habit.id));
-		} catch (error: any) {
-			console.error("❌ Failed to load habits from database:", error);
-			set({ isLoading: false, error: error.message });
-		}
+				const habits = (habitsData || []).map(dbHabitToHabit);
+				const logs = (logsData || []).map(dbLogToLog);
+
+				console.log(`✅ Loaded ${habits.length} habits, ${logs.length} logs`);
+
+				set({
+					habits,
+					logs,
+					isLoading: false,
+					hasLoaded: true,
+				});
+
+				// Calculate stats for all habits
+				habits.forEach((habit) => get().calculateStats(habit.id));
+			} catch (error: any) {
+				if (isStale()) return;
+				console.error("❌ Failed to load habits from database:", error);
+				set({ isLoading: false, error: error.message });
+			}
+		};
+
+		inFlightLoad = run().finally(() => {
+			inFlightLoad = null;
+		});
+		return inFlightLoad;
 	},
 
 	// Refresh data from database
