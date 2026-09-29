@@ -195,6 +195,8 @@ export interface MockTest {
 	goalId?: string;
 	subjectId?: string;
 	name: string;
+	// NOT NULL in the mock_tests table.
+	date: string;
 	description?: string;
 	totalQuestions: number;
 	totalMarks: number;

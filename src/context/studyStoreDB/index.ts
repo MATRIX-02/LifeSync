@@ -106,22 +106,22 @@ export const useStudyStore = create<StudyStore>()((set, get) => ({
 			]);
 
 			const studyGoals = (goalsRes.data || []).map((g: any) =>
-				objectToCamelCase(g)
+				objectToCamelCase(g),
 			);
 			const subjects = (subjectsRes.data || []).map((s: any) =>
-				objectToCamelCase(s)
+				objectToCamelCase(s),
 			);
 			const studySessions = (sessionsRes.data || []).map((s: any) =>
-				objectToCamelCase(s)
+				objectToCamelCase(s),
 			);
 			const flashcardDecks = (decksRes.data || []).map((d: any) =>
-				objectToCamelCase(d)
+				objectToCamelCase(d),
 			);
 			const flashcards = (cardsRes.data || []).map((c: any) =>
-				objectToCamelCase(c)
+				objectToCamelCase(c),
 			);
 			const revisionSchedule = (revisionRes.data || []).map((r: any) =>
-				objectToCamelCase(r)
+				objectToCamelCase(r),
 			);
 			const mockTests = (testsRes.data || []).map((t: any) => {
 				const test = objectToCamelCase(t);
@@ -144,7 +144,7 @@ export const useStudyStore = create<StudyStore>()((set, get) => ({
 				};
 			});
 			const studyNotes = (notesRes.data || []).map((n: any) =>
-				objectToCamelCase(n)
+				objectToCamelCase(n),
 			);
 			const streak = streakRes.data
 				? objectToCamelCase(streakRes.data)
@@ -155,7 +155,7 @@ export const useStudyStore = create<StudyStore>()((set, get) => ({
 				studySessions.find((s: StudySession) => s.isActive) || null;
 
 			console.log(
-				`✅ Loaded ${studyGoals.length} goals, ${subjects.length} subjects, ${studySessions.length} sessions`
+				`✅ Loaded ${studyGoals.length} goals, ${subjects.length} subjects, ${studySessions.length} sessions`,
 			);
 
 			set({
@@ -210,7 +210,7 @@ export const useStudyStore = create<StudyStore>()((set, get) => ({
 					newGoal.id,
 					newGoal.name,
 					targetDate,
-					3
+					3,
 				);
 
 				// Schedule reminder 1 day before deadline
@@ -218,11 +218,11 @@ export const useStudyStore = create<StudyStore>()((set, get) => ({
 					newGoal.id,
 					newGoal.name,
 					targetDate,
-					1
+					1,
 				);
 
 				console.log(
-					`✅ Scheduled deadline reminders for goal: ${newGoal.name}`
+					`✅ Scheduled deadline reminders for goal: ${newGoal.name}`,
 				);
 			} catch (error) {
 				console.error("Error scheduling goal reminders:", error);
@@ -256,7 +256,7 @@ export const useStudyStore = create<StudyStore>()((set, get) => ({
 			studyGoals: studyGoals.map((g) =>
 				g.id === id
 					? { ...g, ...updates, updatedAt: new Date().toISOString() }
-					: g
+					: g,
 			),
 		});
 	},
@@ -288,7 +288,8 @@ export const useStudyStore = create<StudyStore>()((set, get) => ({
 		const goalSubjects = subjects.filter((s) => s.goalId === goalId);
 		if (goalSubjects.length === 0) return 0;
 		return Math.round(
-			goalSubjects.reduce((sum, s) => sum + s.progress, 0) / goalSubjects.length
+			goalSubjects.reduce((sum, s) => sum + s.progress, 0) /
+				goalSubjects.length,
 		);
 	},
 
@@ -342,7 +343,7 @@ export const useStudyStore = create<StudyStore>()((set, get) => ({
 			subjects: subjects.map((s) =>
 				s.id === id
 					? { ...s, ...updates, updatedAt: new Date().toISOString() }
-					: s
+					: s,
 			),
 		});
 	},
@@ -480,7 +481,7 @@ export const useStudyStore = create<StudyStore>()((set, get) => ({
 
 		set({
 			studySessions: studySessions.map((s) =>
-				s.id === sessionId ? { ...s, ...updates } : s
+				s.id === sessionId ? { ...s, ...updates } : s,
 			),
 			activeSession: null,
 		});
@@ -541,7 +542,7 @@ export const useStudyStore = create<StudyStore>()((set, get) => ({
 
 		set({
 			studySessions: studySessions.map((s) =>
-				s.id === id ? { ...s, ...updates } : s
+				s.id === id ? { ...s, ...updates } : s,
 			),
 		});
 	},
@@ -630,7 +631,7 @@ export const useStudyStore = create<StudyStore>()((set, get) => ({
 		const { error } = await supabase
 			.from("flashcard_decks")
 			.update(
-				objectToSnakeCase({ ...updates, updated_at: new Date().toISOString() })
+				objectToSnakeCase({ ...updates, updated_at: new Date().toISOString() }),
 			)
 			.eq("id", id)
 			.eq("user_id", userId);
@@ -644,7 +645,7 @@ export const useStudyStore = create<StudyStore>()((set, get) => ({
 			flashcardDecks: flashcardDecks.map((d) =>
 				d.id === id
 					? { ...d, ...updates, updatedAt: new Date().toISOString() }
-					: d
+					: d,
 			),
 		});
 	},
@@ -724,7 +725,7 @@ export const useStudyStore = create<StudyStore>()((set, get) => ({
 		const { error } = await supabase
 			.from("flashcards")
 			.update(
-				objectToSnakeCase({ ...updates, updated_at: new Date().toISOString() })
+				objectToSnakeCase({ ...updates, updated_at: new Date().toISOString() }),
 			)
 			.eq("id", id)
 			.eq("user_id", userId);
@@ -738,7 +739,7 @@ export const useStudyStore = create<StudyStore>()((set, get) => ({
 			flashcards: flashcards.map((c) =>
 				c.id === id
 					? { ...c, ...updates, updatedAt: new Date().toISOString() }
-					: c
+					: c,
 			),
 		});
 	},
@@ -782,7 +783,7 @@ export const useStudyStore = create<StudyStore>()((set, get) => ({
 		const { nextLevel, nextDate, newEaseFactor } = calculateNextReviewDate(
 			card.repetitionLevel,
 			wasCorrect,
-			card.easeFactor
+			card.easeFactor,
 		);
 
 		const newStatus =
@@ -874,10 +875,10 @@ export const useStudyStore = create<StudyStore>()((set, get) => ({
 					await NotificationService.scheduleRevisionReminder(
 						newSchedule.id,
 						newSchedule.title,
-						scheduledDate
+						scheduledDate,
 					);
 					console.log(
-						`✅ Scheduled revision reminder for ${newSchedule.title}`
+						`✅ Scheduled revision reminder for ${newSchedule.title}`,
 					);
 				}
 			} catch (error) {
@@ -895,7 +896,7 @@ export const useStudyStore = create<StudyStore>()((set, get) => ({
 		const { error } = await supabase
 			.from("revision_schedule")
 			.update(
-				objectToSnakeCase({ ...updates, updated_at: new Date().toISOString() })
+				objectToSnakeCase({ ...updates, updated_at: new Date().toISOString() }),
 			)
 			.eq("id", id)
 			.eq("user_id", userId);
@@ -909,7 +910,7 @@ export const useStudyStore = create<StudyStore>()((set, get) => ({
 			revisionSchedule: revisionSchedule.map((r) =>
 				r.id === id
 					? { ...r, ...updates, updatedAt: new Date().toISOString() }
-					: r
+					: r,
 			),
 		});
 	},
@@ -961,6 +962,8 @@ export const useStudyStore = create<StudyStore>()((set, get) => ({
 		const newTest: MockTest = {
 			...test,
 			id: generateId(),
+			// mock_tests.date is NOT NULL with no default.
+			date: test.date || new Date().toISOString(),
 			attempts: [],
 			createdAt: new Date().toISOString(),
 			updatedAt: new Date().toISOString(),
@@ -985,7 +988,7 @@ export const useStudyStore = create<StudyStore>()((set, get) => ({
 		const { error } = await supabase
 			.from("mock_tests")
 			.update(
-				objectToSnakeCase({ ...updates, updated_at: new Date().toISOString() })
+				objectToSnakeCase({ ...updates, updated_at: new Date().toISOString() }),
 			)
 			.eq("id", id)
 			.eq("user_id", userId);
@@ -999,7 +1002,7 @@ export const useStudyStore = create<StudyStore>()((set, get) => ({
 			mockTests: mockTests.map((t) =>
 				t.id === id
 					? { ...t, ...updates, updatedAt: new Date().toISOString() }
-					: t
+					: t,
 			),
 		});
 	},
@@ -1083,7 +1086,7 @@ export const useStudyStore = create<StudyStore>()((set, get) => ({
 					"📋 Daily Study Plan",
 					message,
 					null, // Immediate for today, or use the specific date trigger
-					{ type: "daily_plan", planId: newPlan.id }
+					{ type: "daily_plan", planId: newPlan.id },
 				);
 				console.log(`✅ Scheduled daily plan reminder for ${newPlan.date}`);
 			}
@@ -1101,7 +1104,7 @@ export const useStudyStore = create<StudyStore>()((set, get) => ({
 		const { error } = await supabase
 			.from("daily_plans")
 			.update(
-				objectToSnakeCase({ ...updates, updated_at: new Date().toISOString() })
+				objectToSnakeCase({ ...updates, updated_at: new Date().toISOString() }),
 			)
 			.eq("id", id)
 			.eq("user_id", userId);
@@ -1115,7 +1118,7 @@ export const useStudyStore = create<StudyStore>()((set, get) => ({
 			dailyPlans: dailyPlans.map((p) =>
 				p.id === id
 					? { ...p, ...updates, updatedAt: new Date().toISOString() }
-					: p
+					: p,
 			),
 		});
 	},
@@ -1163,7 +1166,7 @@ export const useStudyStore = create<StudyStore>()((set, get) => ({
 		const updatedTasks = plan.tasks.map((t) =>
 			t.id === taskId
 				? { ...t, isCompleted: true, completedAt: new Date().toISOString() }
-				: t
+				: t,
 		);
 
 		await get().updateDailyPlan(planId, { tasks: updatedTasks });
@@ -1221,7 +1224,7 @@ export const useStudyStore = create<StudyStore>()((set, get) => ({
 		const { error } = await supabase
 			.from("study_notes")
 			.update(
-				objectToSnakeCase({ ...updates, updated_at: new Date().toISOString() })
+				objectToSnakeCase({ ...updates, updated_at: new Date().toISOString() }),
 			)
 			.eq("id", id)
 			.eq("user_id", userId);
@@ -1235,7 +1238,7 @@ export const useStudyStore = create<StudyStore>()((set, get) => ({
 			studyNotes: studyNotes.map((n) =>
 				n.id === id
 					? { ...n, ...updates, updatedAt: new Date().toISOString() }
-					: n
+					: n,
 			),
 		});
 	},
@@ -1272,7 +1275,7 @@ export const useStudyStore = create<StudyStore>()((set, get) => ({
 			(n) =>
 				n.title.toLowerCase().includes(lowerQuery) ||
 				n.content.toLowerCase().includes(lowerQuery) ||
-				n.tags?.some((t) => t.toLowerCase().includes(lowerQuery))
+				n.tags?.some((t) => t.toLowerCase().includes(lowerQuery)),
 		);
 	},
 
@@ -1288,7 +1291,7 @@ export const useStudyStore = create<StudyStore>()((set, get) => ({
 		let filteredSessions = studySessions;
 		if (startDate) {
 			filteredSessions = filteredSessions.filter(
-				(s) => s.startTime >= startDate
+				(s) => s.startTime >= startDate,
 			);
 		}
 		if (endDate) {
@@ -1297,7 +1300,7 @@ export const useStudyStore = create<StudyStore>()((set, get) => ({
 
 		const totalMinutes = filteredSessions.reduce(
 			(sum, s) => sum + s.duration,
-			0
+			0,
 		);
 		const totalHoursStudied = totalMinutes / 60;
 		const averageSessionDuration =
@@ -1305,7 +1308,7 @@ export const useStudyStore = create<StudyStore>()((set, get) => ({
 		const averageFocusScore =
 			filteredSessions.length > 0
 				? filteredSessions.reduce((sum, s) => sum + (s.focusScore || 0), 0) /
-				  filteredSessions.length
+					filteredSessions.length
 				: 0;
 
 		// Subject distribution
@@ -1325,7 +1328,7 @@ export const useStudyStore = create<StudyStore>()((set, get) => ({
 					hours: minutes / 60,
 					percentage: totalMinutes > 0 ? (minutes / totalMinutes) * 100 : 0,
 				};
-			}
+			},
 		);
 
 		const mostStudiedSubject =
@@ -1363,7 +1366,7 @@ export const useStudyStore = create<StudyStore>()((set, get) => ({
 	getDailyStats: (date) => {
 		const sessions = get().getSessionsByDate(date);
 		const flashcardsReviewed = get().flashcards.filter((c) =>
-			c.lastReviewedAt?.startsWith(date)
+			c.lastReviewedAt?.startsWith(date),
 		).length;
 		const plan = get().dailyPlans.find((p) => p.date === date);
 		const tasksCompleted = plan?.tasks.filter((t) => t.isCompleted).length || 0;
@@ -1380,7 +1383,7 @@ export const useStudyStore = create<StudyStore>()((set, get) => ({
 			focusScore:
 				sessions.length > 0
 					? sessions.reduce((sum, s) => sum + (s.focusScore || 0), 0) /
-					  sessions.length
+						sessions.length
 					: 0,
 		};
 	},
@@ -1398,13 +1401,13 @@ export const useStudyStore = create<StudyStore>()((set, get) => ({
 
 	getMonthlyStats: (month) => {
 		const sessions = get().studySessions.filter((s) =>
-			s.startTime.startsWith(month)
+			s.startTime.startsWith(month),
 		);
 		const totalMinutes = sessions.reduce((sum, s) => sum + s.duration, 0);
 		const avgFocus =
 			sessions.length > 0
 				? sessions.reduce((sum, s) => sum + (s.focusScore || 0), 0) /
-				  sessions.length
+					sessions.length
 				: 0;
 
 		return {
@@ -1420,7 +1423,7 @@ export const useStudyStore = create<StudyStore>()((set, get) => ({
 
 		const { currentStreak, longestStreak } = calculateStreak(
 			studySessions,
-			streak.lastStudyDate
+			streak.lastStudyDate,
 		);
 
 		const today = new Date().toISOString().split("T")[0];

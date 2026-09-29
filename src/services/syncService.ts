@@ -5,6 +5,8 @@ import * as FileSystem from "expo-file-system/legacy";
 import * as ImageManipulator from "expo-image-manipulator";
 import { AppState } from "react-native";
 import { supabase } from "../config/supabase";
+import { logToDbLog } from "../context/habitStoreDB";
+import { customExerciseToDb } from "../context/workoutStoreDB/helpers";
 
 // Types for sync status
 export type SyncStatus = "idle" | "syncing" | "success" | "error";
@@ -47,7 +49,7 @@ const objectToSnakeCase = (obj: any): any => {
 			if (key === "undefined") {
 				console.warn(
 					'Sync: dropping bogus "undefined" key from payload. Sibling keys:',
-					Object.keys(obj).join(", ")
+					Object.keys(obj).join(", "),
 				);
 				continue;
 			}
@@ -64,7 +66,8 @@ const objectToSnakeCase = (obj: any): any => {
 };
 
 // Helper: Validate UUID format
-const _freq = require("../utils/frequency") as typeof import("../utils/frequency");
+const _freq =
+	require("../utils/frequency") as typeof import("../utils/frequency");
 
 const isValidUUID = (id: string): boolean => {
 	if (!id || typeof id !== "string") return false;
@@ -112,13 +115,19 @@ const uuidOrNull = (value: any): string | null =>
 // Keys are the snake_case column names as they appear in the table.
 const sanitizeUUIDRefs = (
 	row: Record<string, any>,
-	columns: string[]
+	columns: string[],
 ): Record<string, any> => {
 	for (const col of columns) {
 		if (col in row) row[col] = uuidOrNull(row[col]);
 	}
 	return row;
 };
+
+// finance_transactions.account_id and recurring_transactions.account_id are
+// NOT NULL, so nulling a legacy non-UUID id there only trades a 22P02 for a
+// 23502 - and either way the whole batch fails. Such rows have to be skipped.
+const hasValidRequiredRef = (row: Record<string, any>, column: string) =>
+	isValidUUID(row[column]);
 
 // Helper: Convert snake_case to camelCase
 const toCamelCase = (str: string): string => {
@@ -144,13 +153,13 @@ const objectToCamelCase = (obj: any): any => {
 export const compressImage = async (
 	uri: string,
 	maxWidth: number = 400,
-	quality: number = 0.7
+	quality: number = 0.7,
 ): Promise<string> => {
 	try {
 		const result = await ImageManipulator.manipulateAsync(
 			uri,
 			[{ resize: { width: maxWidth } }],
-			{ compress: quality, format: ImageManipulator.SaveFormat.JPEG }
+			{ compress: quality, format: ImageManipulator.SaveFormat.JPEG },
 		);
 		return result.uri;
 	} catch (error) {
@@ -162,7 +171,7 @@ export const compressImage = async (
 // Upload image to Supabase Storage
 export const uploadAvatar = async (
 	userId: string,
-	imageUri: string
+	imageUri: string,
 ): Promise<string | null> => {
 	try {
 		// Compress the image first
@@ -212,7 +221,7 @@ export const syncProfileToCloud = async (
 		// Supabase `profiles` row shape (auto-sync passes this)
 		full_name?: string | null;
 		avatar_url?: string | null;
-	}
+	},
 ): Promise<SyncResult> => {
 	try {
 		// Accept either the local UserProfile shape or a raw `profiles` row.
@@ -258,7 +267,7 @@ export const syncProfileToCloud = async (
 };
 
 export const fetchProfileFromCloud = async (
-	userId: string
+	userId: string,
 ): Promise<{ data: any; error?: string }> => {
 	try {
 		const { data, error } = await supabase
@@ -281,7 +290,7 @@ export const syncHabitsToCloud = async (
 		habits: any[];
 		logs: any[];
 		settings?: any;
-	}
+	},
 ): Promise<SyncResult> => {
 	try {
 		// Verify user is authenticated
@@ -316,7 +325,7 @@ export const syncHabitsToCloud = async (
 				const { frequency, ...restHabit } = habit;
 				const normalizedFreq = _freq.normalizeFrequency(
 					frequency,
-					(habit as any).notificationTime
+					(habit as any).notificationTime,
 				);
 				const legacyFreq = _freq.toLegacyFrequency(normalizedFreq);
 				const flattenedHabit = {
@@ -341,7 +350,7 @@ export const syncHabitsToCloud = async (
 			});
 
 			console.log(
-				`🔄 Syncing ${habitsWithUser.length} habits for user: ${userId}`
+				`🔄 Syncing ${habitsWithUser.length} habits for user: ${userId}`,
 			);
 
 			const { error: habitsError } = await (
@@ -358,16 +367,12 @@ export const syncHabitsToCloud = async (
 
 		// Upsert logs (batch in chunks to avoid payload limits)
 		if (habitsData.logs && habitsData.logs.length > 0) {
-			const logsWithUser = habitsData.logs.map((log) => {
-				// Same reasoning as habits above: habit_logs.id is TEXT, and
-				// rewriting the id here duplicated every log exactly once. It also
-				// broke the log's habit_id association when the parent was rewritten.
-				return objectToSnakeCase({
-					...log,
-					id: log.id,
-					user_id: userId,
-				});
-			});
+			// Same reasoning as habits above: habit_logs.id is TEXT, and rewriting
+			// the id here duplicated every log exactly once. It also broke the
+			// log's habit_id association when the parent was rewritten.
+			const logsWithUser = habitsData.logs
+				.filter((log: any) => log.habitId && (log.completedAt || log.timestamp))
+				.map((log: any) => logToDbLog(log, userId));
 
 			// Batch in chunks of 500
 			const chunkSize = 500;
@@ -387,7 +392,7 @@ export const syncHabitsToCloud = async (
 				user_id: userId,
 				habits_synced_at: new Date().toISOString(),
 			},
-			{ onConflict: "user_id" }
+			{ onConflict: "user_id" },
 		);
 
 		return {
@@ -402,7 +407,7 @@ export const syncHabitsToCloud = async (
 };
 
 export const fetchHabitsFromCloud = async (
-	userId: string
+	userId: string,
 ): Promise<{ data: { habits: any[]; logs: any[] }; error?: string }> => {
 	try {
 		const { data: habits, error: habitsError } = await supabase
@@ -436,7 +441,7 @@ export const fetchHabitsFromCloud = async (
 					endTime: converted.frequencyEndTime ?? undefined,
 					intervalMinutes: converted.frequencyIntervalMinutes ?? undefined,
 				},
-				converted.notificationTime
+				converted.notificationTime,
 			);
 			// Map archived back to isArchived
 			converted.isArchived = converted.archived || false;
@@ -470,7 +475,7 @@ export const syncWorkoutsToCloud = async (
 		bodyMeasurements: any[];
 		bodyWeights: any[];
 		customExercises: any[];
-	}
+	},
 ): Promise<SyncResult> => {
 	try {
 		// Sync fitness profile
@@ -493,15 +498,24 @@ export const syncWorkoutsToCloud = async (
 			const plansWithUser = workoutData.workoutPlans
 				.filter((plan) => plan.id && isValidUUID(plan.id))
 				.map((plan) => {
-					// Only include fields that exist in the database schema
+					// An upsert on a row that does not exist yet is an INSERT, so every
+					// NOT NULL column without a default has to be present. Omitting
+					// `difficulty` here failed the whole write with a 23502.
 					return {
 						id: plan.id,
 						user_id: userId,
 						name: plan.name,
 						description: plan.description || null,
+						category: plan.category || "strength",
+						difficulty: plan.difficulty || "intermediate",
+						target_muscle_groups: plan.targetMuscleGroups || [],
+						estimated_duration: plan.estimatedDuration || 30,
 						// jsonb column - pass the array, not a stringified one.
 						exercises: plan.exercises || [],
+						is_custom: plan.isCustom ?? true,
 						is_active: plan.isActive || false,
+						color: plan.color || "#6366F1",
+						icon: plan.icon || "barbell",
 						created_at: plan.createdAt || new Date().toISOString(),
 						updated_at: plan.updatedAt || new Date().toISOString(),
 					};
@@ -534,6 +548,7 @@ export const syncWorkoutsToCloud = async (
 				duration: session.duration || 0,
 				exercises: session.exercises || [],
 				total_volume: session.totalVolume || 0,
+				photo_urls: session.photoUrls || [],
 				mood: session.mood || null,
 				energy_level: session.energyLevel || null,
 				notes: session.notes || null,
@@ -555,20 +570,31 @@ export const syncWorkoutsToCloud = async (
 
 		// Sync personal records
 		if (workoutData.personalRecords && workoutData.personalRecords.length > 0) {
-			const recordsWithUser = workoutData.personalRecords.map((record) => {
-				assignIdIfMissing(record, "id");
-				return objectToSnakeCase({
-					...record,
-					id: record.id,
-					user_id: userId,
+			// exercise_id, exercise_name, type, value and date are NOT NULL with no
+			// default; a record missing any of them would fail the whole batch, so
+			// drop it rather than lose every other record with it.
+			const recordsWithUser = workoutData.personalRecords
+				.filter(
+					(r: any) =>
+						r.exerciseId && r.exerciseName && r.type && r.value != null,
+				)
+				.map((record: any) => {
+					assignIdIfMissing(record, "id");
+					return objectToSnakeCase({
+						...record,
+						id: record.id,
+						user_id: userId,
+						date: record.date || new Date().toISOString(),
+					});
 				});
-			});
 
-			const { error: recordsError } = await (
-				supabase.from("personal_records") as any
-			).upsert(recordsWithUser, { onConflict: "id" });
+			if (recordsWithUser.length > 0) {
+				const { error: recordsError } = await (
+					supabase.from("personal_records") as any
+				).upsert(recordsWithUser, { onConflict: "id" });
 
-			if (recordsError) throw recordsError;
+				if (recordsError) throw recordsError;
+			}
 		}
 
 		// Sync body measurements
@@ -576,51 +602,57 @@ export const syncWorkoutsToCloud = async (
 			workoutData.bodyMeasurements &&
 			workoutData.bodyMeasurements.length > 0
 		) {
-			const measurementsWithUser = workoutData.bodyMeasurements.map((m) => {
-				assignIdIfMissing(m, "id");
-				return objectToSnakeCase({
-					...m,
-					id: m.id,
-					user_id: userId,
+			// date and weight are NOT NULL with no default.
+			const measurementsWithUser = workoutData.bodyMeasurements
+				.filter((m: any) => m.weight != null)
+				.map((m: any) => {
+					assignIdIfMissing(m, "id");
+					return objectToSnakeCase({
+						...m,
+						id: m.id,
+						user_id: userId,
+						date: m.date || new Date().toISOString(),
+					});
 				});
-			});
 
-			const { error: measurementsError } = await (
-				supabase.from("body_measurements") as any
-			).upsert(measurementsWithUser, { onConflict: "id" });
+			if (measurementsWithUser.length > 0) {
+				const { error: measurementsError } = await (
+					supabase.from("body_measurements") as any
+				).upsert(measurementsWithUser, { onConflict: "id" });
 
-			if (measurementsError) throw measurementsError;
+				if (measurementsError) throw measurementsError;
+			}
 		}
 
 		// Sync body weights
 		if (workoutData.bodyWeights && workoutData.bodyWeights.length > 0) {
-			const weightsWithUser = workoutData.bodyWeights.map((w) => {
-				assignIdIfMissing(w, "id");
-				return objectToSnakeCase({
-					...w,
-					id: w.id,
-					user_id: userId,
+			// date and weight are NOT NULL with no default (unit defaults to 'kg').
+			const weightsWithUser = workoutData.bodyWeights
+				.filter((w: any) => w.weight != null)
+				.map((w: any) => {
+					assignIdIfMissing(w, "id");
+					return objectToSnakeCase({
+						...w,
+						id: w.id,
+						user_id: userId,
+						date: w.date || new Date().toISOString(),
+					});
 				});
-			});
 
-			const { error: weightsError } = await (
-				supabase.from("body_weights") as any
-			).upsert(weightsWithUser, { onConflict: "id" });
+			if (weightsWithUser.length > 0) {
+				const { error: weightsError } = await (
+					supabase.from("body_weights") as any
+				).upsert(weightsWithUser, { onConflict: "id" });
 
-			if (weightsError) throw weightsError;
+				if (weightsError) throw weightsError;
+			}
 		}
 
 		// Sync custom exercises
 		if (workoutData.customExercises && workoutData.customExercises.length > 0) {
 			const exercisesWithUser = workoutData.customExercises.map((e) => {
 				assignIdIfMissing(e, "id");
-				return objectToSnakeCase({
-					...e,
-					id: e.id,
-					user_id: userId,
-					target_muscles: JSON.stringify(e.targetMuscles || []),
-					secondary_muscles: JSON.stringify(e.secondaryMuscles || []),
-				});
+				return customExerciseToDb(e, userId);
 			});
 
 			const { error: exercisesError } = await (
@@ -636,7 +668,7 @@ export const syncWorkoutsToCloud = async (
 				user_id: userId,
 				workouts_synced_at: new Date().toISOString(),
 			},
-			{ onConflict: "user_id" }
+			{ onConflict: "user_id" },
 		);
 
 		return {
@@ -651,7 +683,7 @@ export const syncWorkoutsToCloud = async (
 };
 
 export const fetchWorkoutsFromCloud = async (
-	userId: string
+	userId: string,
 ): Promise<{ data: any; error?: string }> => {
 	try {
 		const [
@@ -759,7 +791,7 @@ export const syncFinanceToCloud = async (
 		debts: any[];
 		splitGroups: any[];
 		currency: string;
-	}
+	},
 ): Promise<SyncResult> => {
 	try {
 		// Sync accounts - fix invalid UUIDs
@@ -769,7 +801,7 @@ export const syncFinanceToCloud = async (
 					...a,
 					id: assignIdIfMissing(a, "id"),
 					user_id: userId,
-				})
+				}),
 			);
 
 			const { error: accountsError } = await (
@@ -781,15 +813,18 @@ export const syncFinanceToCloud = async (
 
 		// Sync transactions (batch) - fix invalid UUIDs
 		if (financeData.transactions && financeData.transactions.length > 0) {
-			const transactionsWithUser = financeData.transactions.map((t) =>
-				objectToSnakeCase({
-					...t,
-					id: assignIdIfMissing(t, "id"),
-					user_id: userId,
-				})
-			).map((t: any) =>
-				sanitizeUUIDRefs(t, ["account_id", "to_account_id", "recurring_id"])
-			);
+			const transactionsWithUser = financeData.transactions
+				.map((t) =>
+					objectToSnakeCase({
+						...t,
+						id: assignIdIfMissing(t, "id"),
+						user_id: userId,
+					}),
+				)
+				.map((t: any) =>
+					sanitizeUUIDRefs(t, ["account_id", "to_account_id", "recurring_id"]),
+				)
+				.filter((t: any) => hasValidRequiredRef(t, "account_id"));
 
 			const chunkSize = 500;
 			for (let i = 0; i < transactionsWithUser.length; i += chunkSize) {
@@ -807,19 +842,24 @@ export const syncFinanceToCloud = async (
 			financeData.recurringTransactions &&
 			financeData.recurringTransactions.length > 0
 		) {
-			const recurringWithUser = financeData.recurringTransactions.map((r) =>
-				objectToSnakeCase({
-					...r,
-					id: assignIdIfMissing(r, "id"),
-					user_id: userId,
-				})
-			).map((r: any) => sanitizeUUIDRefs(r, ["account_id"]));
+			const recurringWithUser = financeData.recurringTransactions
+				.map((r) =>
+					objectToSnakeCase({
+						...r,
+						id: assignIdIfMissing(r, "id"),
+						user_id: userId,
+					}),
+				)
+				.map((r: any) => sanitizeUUIDRefs(r, ["account_id"]))
+				.filter((r: any) => hasValidRequiredRef(r, "account_id"));
 
-			const { error: recurringError } = await (
-				supabase.from("recurring_transactions") as any
-			).upsert(recurringWithUser, { onConflict: "id" });
+			if (recurringWithUser.length > 0) {
+				const { error: recurringError } = await (
+					supabase.from("recurring_transactions") as any
+				).upsert(recurringWithUser, { onConflict: "id" });
 
-			if (recurringError) throw recurringError;
+				if (recurringError) throw recurringError;
+			}
 		}
 
 		// Sync budgets - fix invalid UUIDs
@@ -829,7 +869,7 @@ export const syncFinanceToCloud = async (
 					...b,
 					id: assignIdIfMissing(b, "id"),
 					user_id: userId,
-				})
+				}),
 			);
 
 			const { error: budgetsError } = await (
@@ -841,13 +881,15 @@ export const syncFinanceToCloud = async (
 
 		// Sync savings goals - fix invalid UUIDs
 		if (financeData.savingsGoals && financeData.savingsGoals.length > 0) {
-			const goalsWithUser = financeData.savingsGoals.map((g) =>
-				objectToSnakeCase({
-					...g,
-					id: assignIdIfMissing(g, "id"),
-					user_id: userId,
-				})
-			).map((g: any) => sanitizeUUIDRefs(g, ["linked_account_id"]));
+			const goalsWithUser = financeData.savingsGoals
+				.map((g) =>
+					objectToSnakeCase({
+						...g,
+						id: assignIdIfMissing(g, "id"),
+						user_id: userId,
+					}),
+				)
+				.map((g: any) => sanitizeUUIDRefs(g, ["linked_account_id"]));
 
 			const { error: goalsError } = await (
 				supabase.from("savings_goals") as any
@@ -858,15 +900,17 @@ export const syncFinanceToCloud = async (
 
 		// Sync bill reminders - fix invalid UUIDs
 		if (financeData.billReminders && financeData.billReminders.length > 0) {
-			const remindersWithUser = financeData.billReminders.map((r) =>
-				objectToSnakeCase({
-					...r,
-					id: assignIdIfMissing(r, "id"),
-					user_id: userId,
-				})
-			).map((r: any) =>
-				sanitizeUUIDRefs(r, ["paid_from_account_id", "account_id"])
-			);
+			const remindersWithUser = financeData.billReminders
+				.map((r) =>
+					objectToSnakeCase({
+						...r,
+						id: assignIdIfMissing(r, "id"),
+						user_id: userId,
+					}),
+				)
+				.map((r: any) =>
+					sanitizeUUIDRefs(r, ["paid_from_account_id", "account_id"]),
+				);
 
 			const { error: remindersError } = await (
 				supabase.from("bill_reminders") as any
@@ -877,15 +921,17 @@ export const syncFinanceToCloud = async (
 
 		// Sync debts - fix invalid UUIDs
 		if (financeData.debts && financeData.debts.length > 0) {
-			const debtsWithUser = financeData.debts.map((d) =>
-				objectToSnakeCase({
-					...d,
-					id: assignIdIfMissing(d, "id"),
-					user_id: userId,
-				})
-			).map((d: any) =>
-				sanitizeUUIDRefs(d, ["linked_account_id", "linked_credit_card_id"])
-			);
+			const debtsWithUser = financeData.debts
+				.map((d) =>
+					objectToSnakeCase({
+						...d,
+						id: assignIdIfMissing(d, "id"),
+						user_id: userId,
+					}),
+				)
+				.map((d: any) =>
+					sanitizeUUIDRefs(d, ["linked_account_id", "linked_credit_card_id"]),
+				);
 
 			const { error: debtsError } = await (
 				supabase.from("finance_debts") as any
@@ -896,19 +942,21 @@ export const syncFinanceToCloud = async (
 
 		// Sync split groups - fix invalid UUIDs
 		if (financeData.splitGroups && financeData.splitGroups.length > 0) {
-			const groupsWithUser = financeData.splitGroups.map((g) =>
-				objectToSnakeCase({
-					...g,
-					id: assignIdIfMissing(g, "id"),
-					user_id: userId,
-					// members/expenses/settlements are jsonb columns — pass the
-					// arrays through. Stringifying them double-encodes, storing a
-					// JSON string inside jsonb instead of an array.
-					members: g.members || [],
-					expenses: g.expenses || [],
-					settlements: g.settlements || [],
-				})
-			).map((g: any) => sanitizeUUIDRefs(g, ["created_by"]));
+			const groupsWithUser = financeData.splitGroups
+				.map((g) =>
+					objectToSnakeCase({
+						...g,
+						id: assignIdIfMissing(g, "id"),
+						user_id: userId,
+						// members/expenses/settlements are jsonb columns — pass the
+						// arrays through. Stringifying them double-encodes, storing a
+						// JSON string inside jsonb instead of an array.
+						members: g.members || [],
+						expenses: g.expenses || [],
+						settlements: g.settlements || [],
+					}),
+				)
+				.map((g: any) => sanitizeUUIDRefs(g, ["created_by"]));
 
 			const { error: groupsError } = await (
 				supabase.from("split_groups") as any
@@ -924,7 +972,7 @@ export const syncFinanceToCloud = async (
 				finance_synced_at: new Date().toISOString(),
 				finance_currency: financeData.currency,
 			},
-			{ onConflict: "user_id" }
+			{ onConflict: "user_id" },
 		);
 
 		return {
@@ -939,7 +987,7 @@ export const syncFinanceToCloud = async (
 };
 
 export const fetchFinanceFromCloud = async (
-	userId: string
+	userId: string,
 ): Promise<{ data: any; error?: string }> => {
 	try {
 		const [
@@ -1042,7 +1090,7 @@ export const syncStudyToCloud = async (
 		mockTests: any[];
 		dailyPlans: any[];
 		studyNotes: any[];
-	}
+	},
 ): Promise<SyncResult> => {
 	try {
 		// study_subjects.goal_id, flashcards.deck_id and friends are real foreign
@@ -1069,7 +1117,7 @@ export const syncStudyToCloud = async (
 		// survive. Returns null if we can't tell, in which case we leave the
 		// reference alone rather than destroying a good association.
 		const loadParentIds = async (
-			table: string
+			table: string,
 		): Promise<Set<string> | null> => {
 			const { data, error } = await (supabase.from(table) as any)
 				.select("id")
@@ -1077,7 +1125,7 @@ export const syncStudyToCloud = async (
 			if (error) {
 				console.warn(
 					`Could not load ${table} ids for FK check:`,
-					error.message
+					error.message,
 				);
 				return null;
 			}
@@ -1086,7 +1134,7 @@ export const syncStudyToCloud = async (
 
 		const resolveRef = (
 			value: any,
-			valid: Set<string> | null
+			valid: Set<string> | null,
 		): string | null => {
 			if (!value) return null;
 			const mapped = idRemap.get(value) ?? value;
@@ -1110,11 +1158,7 @@ export const syncStudyToCloud = async (
 
 		let skipped = 0;
 
-		const prepare = (
-			table: string,
-			rows: any[],
-			specs: RefSpec[]
-		): any[] => {
+		const prepare = (table: string, rows: any[], specs: RefSpec[]): any[] => {
 			const out: any[] = [];
 			for (const r of rows) {
 				withId(r);
@@ -1316,7 +1360,7 @@ export const syncStudyToCloud = async (
 			for (let i = 0; i < rows.length; i += chunkSize) {
 				const { error } = await (supabase.from(table) as any).upsert(
 					rows.slice(i, i + chunkSize),
-					{ onConflict: "id" }
+					{ onConflict: "id" },
 				);
 				if (error) throw error;
 			}
@@ -1326,7 +1370,10 @@ export const syncStudyToCloud = async (
 
 		// Study goals (no parents)
 		if (studyData.studyGoals?.length > 0) {
-			await upsertAll("study_goals", prepare("study_goals", studyData.studyGoals, []));
+			await upsertAll(
+				"study_goals",
+				prepare("study_goals", studyData.studyGoals, []),
+			);
 		}
 		const goalIds = await loadParentIds("study_goals");
 
@@ -1336,7 +1383,7 @@ export const syncStudyToCloud = async (
 				"study_subjects",
 				prepare("study_subjects", studyData.subjects, [
 					{ column: "goal_id", valid: goalIds, required: true },
-				])
+				]),
 			);
 		}
 		const subjectIds = await loadParentIds("study_subjects");
@@ -1348,7 +1395,7 @@ export const syncStudyToCloud = async (
 				prepare("flashcard_decks", studyData.flashcardDecks, [
 					{ column: "goal_id", valid: goalIds, required: false },
 					{ column: "subject_id", valid: subjectIds, required: false },
-				])
+				]),
 			);
 		}
 		const deckIds = await loadParentIds("flashcard_decks");
@@ -1398,7 +1445,7 @@ export const syncStudyToCloud = async (
 
 		if (skipped > 0) {
 			console.warn(
-				`Study sync: skipped ${skipped} row(s) whose required parent no longer exists.`
+				`Study sync: skipped ${skipped} row(s) whose required parent no longer exists.`,
 			);
 		}
 
@@ -1407,7 +1454,7 @@ export const syncStudyToCloud = async (
 			// persist. Each one needs a migration before it will round-trip.
 			console.warn(
 				"Study sync: dropped fields with no matching column:",
-				[...droppedFields].sort().join(", ")
+				[...droppedFields].sort().join(", "),
 			);
 		}
 
@@ -1417,7 +1464,7 @@ export const syncStudyToCloud = async (
 				user_id: userId,
 				study_synced_at: new Date().toISOString(),
 			},
-			{ onConflict: "user_id" }
+			{ onConflict: "user_id" },
 		);
 
 		return {
@@ -1432,7 +1479,7 @@ export const syncStudyToCloud = async (
 };
 
 export const fetchStudyFromCloud = async (
-	userId: string
+	userId: string,
 ): Promise<{ data: any; error?: string }> => {
 	try {
 		const [
@@ -1488,7 +1535,7 @@ export const syncAllToCloud = async (
 		workouts?: any;
 		finance?: any;
 		study?: any;
-	}
+	},
 ): Promise<SyncResult[]> => {
 	const results: SyncResult[] = [];
 
@@ -1517,7 +1564,7 @@ export const syncAllToCloud = async (
 
 // ============ GET SYNC STATUS ============
 export const getSyncStatus = async (
-	userId: string
+	userId: string,
 ): Promise<{
 	habits_synced_at?: string;
 	workouts_synced_at?: string;
@@ -1575,7 +1622,7 @@ const runAutoSync = async (reason: string): Promise<void> => {
 		if (failed.length > 0) {
 			console.error(
 				`autoSync (${reason}) partial failure:`,
-				failed.map((f) => `${f.module}: ${f.error}`).join("; ")
+				failed.map((f) => `${f.module}: ${f.error}`).join("; "),
 			);
 		}
 	} catch (err) {
@@ -1620,7 +1667,7 @@ export const setAutoSyncInterval = async (minutes: number): Promise<void> => {
 		const getDataFn = autoSyncGetData;
 		stopAutoSync(false);
 		startAutoSync(userId, getDataFn, false).catch((e) =>
-			console.error("Failed to restart auto-sync after interval change:", e)
+			console.error("Failed to restart auto-sync after interval change:", e),
 		);
 	}
 };
@@ -1628,7 +1675,7 @@ export const setAutoSyncInterval = async (minutes: number): Promise<void> => {
 export const startAutoSync = async (
 	userId: string,
 	getDataFn: () => Promise<any>,
-	immediate: boolean = true
+	immediate: boolean = true,
 ): Promise<void> => {
 	if (!userId) throw new Error("userId required to start auto-sync");
 	if (!getDataFn)
@@ -1676,7 +1723,7 @@ export const startAutoSync = async (
 export const stopAutoSync = (persistPreference: boolean = true): void => {
 	if (persistPreference) {
 		AsyncStorage.setItem(AUTO_SYNC_ENABLED_KEY, "false").catch((err) =>
-			console.warn("Failed to persist auto-sync disabled flag:", err)
+			console.warn("Failed to persist auto-sync disabled flag:", err),
 		);
 	}
 	if (autoSyncTimer) {
@@ -1701,12 +1748,12 @@ export const stopAutoSync = (persistPreference: boolean = true): void => {
 // ============ DELETE ALL CLOUD DATA ============
 export const deleteAllCloudData = async (
 	userId: string,
-	module?: SyncModule
+	module?: SyncModule,
 ): Promise<SyncResult> => {
 	// CRITICAL: Validate userId to prevent accidental deletion of all data
 	if (!userId || typeof userId !== "string" || userId.trim() === "") {
 		console.error(
-			"❌ SAFETY CHECK: Invalid userId provided to deleteAllCloudData"
+			"❌ SAFETY CHECK: Invalid userId provided to deleteAllCloudData",
 		);
 		return {
 			success: false,
@@ -1716,7 +1763,7 @@ export const deleteAllCloudData = async (
 	}
 
 	console.log(
-		`🗑️ Deleting cloud data for user: ${userId}, module: ${module || "all"}`
+		`🗑️ Deleting cloud data for user: ${userId}, module: ${module || "all"}`,
 	);
 
 	try {

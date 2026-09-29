@@ -65,7 +65,7 @@ export const createSplitGroup = async (
 		description?: string;
 		color: string;
 		icon: string;
-	}
+	},
 ): Promise<{ data: SplitGroup | null; error: string | null }> => {
 	try {
 		const now = new Date().toISOString();
@@ -91,9 +91,11 @@ export const createSplitGroup = async (
 				description: groupData.description,
 				color: groupData.color,
 				icon: groupData.icon,
-				members: JSON.stringify([creatorMember]),
-				expenses: JSON.stringify([]),
-				settlements: JSON.stringify([]),
+				// jsonb columns: stringifying stores a JSON string inside the jsonb
+				// instead of an array.
+				members: [creatorMember],
+				expenses: [],
+				settlements: [],
 				total_expenses: 0,
 				created_at: now,
 				updated_at: now,
@@ -146,7 +148,7 @@ export const createSplitGroup = async (
 
 export const updateSplitGroup = async (
 	groupId: string,
-	updates: Partial<SplitGroup>
+	updates: Partial<SplitGroup>,
 ): Promise<{ error: string | null }> => {
 	try {
 		const updateData: any = {
@@ -181,7 +183,7 @@ export const updateSplitGroup = async (
 };
 
 export const deleteSplitGroup = async (
-	groupId: string
+	groupId: string,
 ): Promise<{ error: string | null }> => {
 	try {
 		// Attempt to cancel any scheduled local notifications related to this group
@@ -214,7 +216,7 @@ export const deleteSplitGroup = async (
 };
 
 export const fetchUserGroups = async (
-	userId: string
+	userId: string,
 ): Promise<{ data: SplitGroup[]; error: string | null }> => {
 	try {
 		// Fetch groups where user is a member
@@ -234,7 +236,7 @@ export const fetchUserGroups = async (
 			/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 		const validGroupIds = groupIds.filter((id: string) => uuidRegex.test(id));
 		const invalidGroupIds = groupIds.filter(
-			(id: string) => !uuidRegex.test(id)
+			(id: string) => !uuidRegex.test(id),
 		);
 
 		if (invalidGroupIds.length > 0) {
@@ -302,7 +304,7 @@ export const addNonUserMember = async (
 	groupId: string,
 	memberName: string,
 	email?: string,
-	phone?: string
+	phone?: string,
 ): Promise<{ data: GroupMember | null; error: string | null }> => {
 	try {
 		// First fetch current group data
@@ -335,7 +337,7 @@ export const addNonUserMember = async (
 		// Update group
 		const { error: updateError } = await (supabase.from("split_groups") as any)
 			.update({
-				members: JSON.stringify(members),
+				members,
 				updated_at: new Date().toISOString(),
 			})
 			.eq("id", groupId);
@@ -351,7 +353,7 @@ export const addNonUserMember = async (
 
 export const removeMember = async (
 	groupId: string,
-	memberId: string
+	memberId: string,
 ): Promise<{ error: string | null }> => {
 	try {
 		// Fetch current group data
@@ -375,7 +377,7 @@ export const removeMember = async (
 		// Update group
 		const { error: updateError } = await (supabase.from("split_groups") as any)
 			.update({
-				members: JSON.stringify(members),
+				members,
 				updated_at: new Date().toISOString(),
 			})
 			.eq("id", groupId);
@@ -399,7 +401,7 @@ export const removeMember = async (
 
 export const searchUsersByEmail = async (
 	query: string,
-	excludeUserId: string
+	excludeUserId: string,
 ): Promise<{
 	data: Array<{
 		id: string;
@@ -441,7 +443,7 @@ export const sendGroupInvitation = async (
 	invitedByName: string,
 	inviteeUserId?: string,
 	inviteeEmail?: string,
-	message?: string
+	message?: string,
 ): Promise<{ data: GroupInvitation | null; error: string | null }> => {
 	try {
 		const invitationId = generateId();
@@ -488,7 +490,7 @@ export const sendGroupInvitation = async (
 };
 
 export const fetchPendingInvitations = async (
-	userId: string
+	userId: string,
 ): Promise<{ data: GroupInvitation[]; error: string | null }> => {
 	try {
 		const { data, error } = await (
@@ -529,7 +531,7 @@ export const respondToInvitation = async (
 	userId: string,
 	userName: string,
 	userEmail: string,
-	accept: boolean
+	accept: boolean,
 ): Promise<{ error: string | null }> => {
 	try {
 		const now = new Date().toISOString();
@@ -579,7 +581,7 @@ export const respondToInvitation = async (
 					userId,
 					userName,
 					userEmail,
-					now
+					now,
 				);
 			}
 
@@ -604,7 +606,7 @@ export const respondToInvitation = async (
 				userId,
 				userName,
 				userEmail,
-				now
+				now,
 			);
 		}
 
@@ -621,7 +623,7 @@ const addUserToGroup = async (
 	userId: string,
 	userName: string,
 	userEmail: string,
-	now: string
+	now: string,
 ): Promise<void> => {
 	// Fetch current group data
 	const { data: groupData, error: fetchError } = await (
@@ -655,7 +657,7 @@ const addUserToGroup = async (
 	// Update group members
 	await (supabase.from("split_groups") as any)
 		.update({
-			members: JSON.stringify(members),
+			members,
 			updated_at: now,
 		})
 		.eq("id", groupId);
@@ -677,7 +679,7 @@ const addUserToGroup = async (
 
 export const addExpense = async (
 	groupId: string,
-	expense: Omit<SplitExpense, "id" | "groupId" | "createdAt" | "updatedAt">
+	expense: Omit<SplitExpense, "id" | "groupId" | "createdAt" | "updatedAt">,
 ): Promise<{ data: SplitExpense | null; error: string | null }> => {
 	try {
 		const now = new Date().toISOString();
@@ -710,7 +712,7 @@ export const addExpense = async (
 		// Update group
 		const { error: updateError } = await (supabase.from("split_groups") as any)
 			.update({
-				expenses: JSON.stringify(expenses),
+				expenses,
 				total_expenses: (groupData.total_expenses || 0) + expense.amount,
 				updated_at: now,
 			})
@@ -727,7 +729,7 @@ export const addExpense = async (
 
 export const deleteExpense = async (
 	groupId: string,
-	expenseId: string
+	expenseId: string,
 ): Promise<{ error: string | null }> => {
 	try {
 		// Fetch current group data
@@ -755,10 +757,10 @@ export const deleteExpense = async (
 		// Update group
 		const { error: updateError } = await (supabase.from("split_groups") as any)
 			.update({
-				expenses: JSON.stringify(expenses),
+				expenses,
 				total_expenses: Math.max(
 					0,
-					(groupData.total_expenses || 0) - expenseToDelete.amount
+					(groupData.total_expenses || 0) - expenseToDelete.amount,
 				),
 				updated_at: new Date().toISOString(),
 			})
@@ -777,7 +779,7 @@ export const deleteExpense = async (
 
 export const addSettlement = async (
 	groupId: string,
-	settlement: Omit<Settlement, "id" | "groupId" | "createdAt">
+	settlement: Omit<Settlement, "id" | "groupId" | "createdAt">,
 ): Promise<{ data: Settlement | null; error: string | null }> => {
 	try {
 		const now = new Date().toISOString();
@@ -809,7 +811,7 @@ export const addSettlement = async (
 		// Update group
 		const { error: updateError } = await (supabase.from("split_groups") as any)
 			.update({
-				settlements: JSON.stringify(settlements),
+				settlements,
 				updated_at: now,
 			})
 			.eq("id", groupId);
@@ -826,7 +828,7 @@ export const addSettlement = async (
 // ============== BALANCE CALCULATIONS ==============
 
 export const calculateGroupBalances = (
-	group: SplitGroup
+	group: SplitGroup,
 ): Array<{ memberId: string; memberName: string; balance: number }> => {
 	const balanceMap: Record<string, number> = {};
 
@@ -870,7 +872,7 @@ export const calculateGroupBalances = (
 };
 
 export const calculateSimplifiedDebts = (
-	group: SplitGroup
+	group: SplitGroup,
 ): Array<{ from: GroupMember; to: GroupMember; amount: number }> => {
 	const balances = calculateGroupBalances(group);
 
@@ -908,7 +910,7 @@ export const calculateSimplifiedDebts = (
 
 export const subscribeToGroupUpdates = (
 	groupId: string,
-	onUpdate: (group: SplitGroup) => void
+	onUpdate: (group: SplitGroup) => void,
 ) => {
 	const subscription = supabase
 		.channel(`split_group_${groupId}`)
@@ -947,7 +949,7 @@ export const subscribeToGroupUpdates = (
 					isArchived: data.is_archived,
 				};
 				onUpdate(group);
-			}
+			},
 		)
 		.subscribe();
 
@@ -958,7 +960,7 @@ export const subscribeToGroupUpdates = (
 
 export const subscribeToInvitations = (
 	userId: string,
-	onNewInvitation: (invitation: GroupInvitation) => void
+	onNewInvitation: (invitation: GroupInvitation) => void,
 ) => {
 	const subscription = supabase
 		.channel(`invitations_${userId}`)
@@ -986,7 +988,7 @@ export const subscribeToInvitations = (
 					expiresAt: data.expires_at,
 				};
 				onNewInvitation(invitation);
-			}
+			},
 		)
 		.subscribe();
 

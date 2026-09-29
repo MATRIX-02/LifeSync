@@ -240,18 +240,19 @@ export interface Database {
 					created_at: string;
 					updated_at: string;
 				};
+				// NOT NULL with no default: optional here means a runtime 23502.
 				Insert: {
 					id: string;
 					user_id: string;
 					name: string;
-					category?: ExerciseCategory;
+					category: ExerciseCategory;
 					primary_muscles: string[];
-					secondary_muscles?: string[];
+					secondary_muscles: string[];
 					target_muscles: string[];
-					equipment?: string[];
-					difficulty?: FitnessLevel;
-					description?: string | null;
-					instructions?: string[];
+					equipment: string[];
+					difficulty: FitnessLevel;
+					description: string;
+					instructions: string[];
 					tips?: string[];
 					video_url?: string | null;
 					image_url?: string | null;
@@ -299,20 +300,21 @@ export interface Database {
 					created_at: string;
 					updated_at: string;
 				};
+				// NOT NULL with no default: optional here means a runtime 23502.
 				Insert: {
 					id: string;
 					user_id: string;
 					name: string;
 					description?: string | null;
-					category?: ExerciseCategory;
-					difficulty?: FitnessLevel;
+					category: ExerciseCategory;
+					difficulty: FitnessLevel;
 					target_muscle_groups: string[];
-					estimated_duration?: number;
-					exercises?: Json;
-					is_custom?: boolean;
-					is_active?: boolean;
-					color?: string;
-					icon?: string;
+					estimated_duration: number;
+					exercises: Json;
+					is_custom: boolean;
+					is_active: boolean;
+					color: string;
+					icon: string;
 					days_per_week?: number | null;
 					schedule?: Json | null;
 					created_at?: string;

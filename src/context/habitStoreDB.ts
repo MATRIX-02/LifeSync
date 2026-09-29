@@ -177,8 +177,9 @@ const dbLogToLog = (dbLog: any): HabitLog => {
 	return log;
 };
 
-// Convert app log to DB log
-const logToDbLog = (log: HabitLog, userId: string): any => {
+// Convert app log to DB log. Exported so the sync path cannot drift: the app
+// log has no `timestamp` key, and that column is NOT NULL.
+export const logToDbLog = (log: HabitLog, userId: string): any => {
 	return objectToSnakeCase({
 		id: log.id,
 		habitId: log.habitId,

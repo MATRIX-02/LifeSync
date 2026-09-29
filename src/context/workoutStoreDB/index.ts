@@ -5,7 +5,12 @@
 import { create } from "zustand";
 import { supabase as supabaseClient } from "../../config/supabase";
 import { estimateSessionCalories } from "../../utils/calories";
-import { generateId, objectToCamelCase, objectToSnakeCase } from "./helpers";
+import {
+	customExerciseToDb,
+	generateId,
+	objectToCamelCase,
+	objectToSnakeCase,
+} from "./helpers";
 import type {
 	PersonalRecord,
 	WorkoutExercise,
@@ -122,18 +127,18 @@ export const useWorkoutStore = create<WorkoutStore>()((set, get) => ({
 			}));
 
 			const bodyMeasurements = (measurementsRes.data || []).map((m: any) =>
-				objectToCamelCase(m)
+				objectToCamelCase(m),
 			);
 			const bodyWeights = (weightsRes.data || []).map((w: any) =>
-				objectToCamelCase(w)
+				objectToCamelCase(w),
 			);
 			const customExercises = (exercisesRes.data || []).map((e: any) =>
-				objectToCamelCase(e)
+				objectToCamelCase(e),
 			);
 			const activePlan = workoutPlans.find((p: WorkoutPlan) => p.isActive);
 
 			console.log(
-				`✅ Loaded ${workoutPlans.length} plans, ${workoutSessions.length} sessions`
+				`✅ Loaded ${workoutPlans.length} plans, ${workoutSessions.length} sessions`,
 			);
 
 			set({
@@ -209,7 +214,7 @@ export const useWorkoutStore = create<WorkoutStore>()((set, get) => ({
 		}
 		set({
 			bodyMeasurements: bodyMeasurements.map((m) =>
-				m.id === id ? { ...m, ...updates } : m
+				m.id === id ? { ...m, ...updates } : m,
 			),
 		});
 	},
@@ -234,7 +239,7 @@ export const useWorkoutStore = create<WorkoutStore>()((set, get) => ({
 		const { bodyMeasurements } = get();
 		if (bodyMeasurements.length === 0) return null;
 		return bodyMeasurements.sort(
-			(a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
+			(a, b) => new Date(b.date).getTime() - new Date(a.date).getTime(),
 		)[0];
 	},
 
@@ -266,7 +271,7 @@ export const useWorkoutStore = create<WorkoutStore>()((set, get) => ({
 
 		const { error } = await supabase
 			.from("custom_exercises")
-			.insert(objectToSnakeCase({ ...exercise, user_id: userId }));
+			.insert(customExerciseToDb(exercise, userId));
 		if (error) {
 			console.error("Error adding exercise:", error);
 			return;
@@ -315,8 +320,7 @@ export const useWorkoutStore = create<WorkoutStore>()((set, get) => ({
 		if (!userId) return;
 
 		const dbUpdates: any = { ...updates, updated_at: new Date().toISOString() };
-		if (updates.exercises)
-			dbUpdates.exercises = updates.exercises;
+		if (updates.exercises) dbUpdates.exercises = updates.exercises;
 
 		const { error } = await supabase
 			.from("workout_plans")
@@ -329,7 +333,7 @@ export const useWorkoutStore = create<WorkoutStore>()((set, get) => ({
 		}
 		set({
 			workoutPlans: workoutPlans.map((p) =>
-				p.id === id ? { ...p, ...updates, updatedAt: new Date() } : p
+				p.id === id ? { ...p, ...updates, updatedAt: new Date() } : p,
 			),
 		});
 	},
@@ -418,7 +422,7 @@ export const useWorkoutStore = create<WorkoutStore>()((set, get) => ({
 				currentSession: {
 					...state.currentSession,
 					exercises: state.currentSession.exercises.filter(
-						(ex) => ex.id !== exerciseId
+						(ex) => ex.id !== exerciseId,
 					),
 				},
 			};
@@ -447,10 +451,10 @@ export const useWorkoutStore = create<WorkoutStore>()((set, get) => ({
 							? {
 									...ex,
 									sets: ex.sets.map((s) =>
-										s.id === setId ? { ...s, ...updates } : s
+										s.id === setId ? { ...s, ...updates } : s,
 									),
-							  }
-							: ex
+								}
+							: ex,
 					),
 				},
 			};
@@ -489,7 +493,7 @@ export const useWorkoutStore = create<WorkoutStore>()((set, get) => ({
 					exercises: state.currentSession.exercises.map((ex) =>
 						ex.id === exerciseId
 							? { ...ex, sets: ex.sets.filter((s) => s.id !== setId) }
-							: ex
+							: ex,
 					),
 				},
 			};
@@ -501,7 +505,8 @@ export const useWorkoutStore = create<WorkoutStore>()((set, get) => ({
 
 		const endTime = new Date();
 		const duration = Math.round(
-			(endTime.getTime() - new Date(currentSession.startTime).getTime()) / 60000
+			(endTime.getTime() - new Date(currentSession.startTime).getTime()) /
+				60000,
 		);
 		let totalVolume = 0;
 		currentSession.exercises.forEach((ex) => {
@@ -515,7 +520,7 @@ export const useWorkoutStore = create<WorkoutStore>()((set, get) => ({
 		const caloriesBurned = estimateSessionCalories(
 			{ duration, exercises: currentSession.exercises },
 			fitnessProfile?.weight,
-			fitnessProfile?.fitnessLevel
+			fitnessProfile?.fitnessLevel,
 		);
 
 		const completedSession: WorkoutSession = {
@@ -587,13 +592,13 @@ export const useWorkoutStore = create<WorkoutStore>()((set, get) => ({
 		exerciseName,
 		type,
 		value,
-		sessionId
+		sessionId,
 	) => {
 		const { personalRecords, userId } = get();
 		if (!userId) return false;
 
 		const existingPR = personalRecords.find(
-			(pr) => pr.exerciseId === exerciseId && pr.type === type
+			(pr) => pr.exerciseId === exerciseId && pr.type === type,
 		);
 		if (!existingPR || value > existingPR.value) {
 			const newPR: PersonalRecord = {
@@ -620,7 +625,7 @@ export const useWorkoutStore = create<WorkoutStore>()((set, get) => ({
 				}
 				set({
 					personalRecords: personalRecords.map((pr) =>
-						pr.exerciseId === exerciseId && pr.type === type ? newPR : pr
+						pr.exerciseId === exerciseId && pr.type === type ? newPR : pr,
 					),
 				});
 			} else {
@@ -689,14 +694,14 @@ export const useWorkoutStore = create<WorkoutStore>()((set, get) => ({
 				completedSessions.length > 0
 					? Math.round(
 							completedSessions.reduce((sum, s) => sum + s.duration, 0) /
-								completedSessions.length
-					  )
+								completedSessions.length,
+						)
 					: 0,
 			workoutsThisWeek: completedSessions.filter(
-				(s) => new Date(s.date) >= startOfWeek
+				(s) => new Date(s.date) >= startOfWeek,
 			).length,
 			workoutsThisMonth: completedSessions.filter(
-				(s) => new Date(s.date) >= startOfMonth
+				(s) => new Date(s.date) >= startOfMonth,
 			).length,
 			favoriteExercises,
 			muscleGroupDistribution: [],
@@ -714,7 +719,7 @@ export const useWorkoutStore = create<WorkoutStore>()((set, get) => ({
 	getTotalVolumeForMuscle: () => 0,
 	getExerciseHistory: (exerciseId) =>
 		get().workoutSessions.filter((s) =>
-			s.exercises.some((ex) => ex.exerciseId === exerciseId)
+			s.exercises.some((ex) => ex.exerciseId === exerciseId),
 		),
 	getRecentWorkouts: (count = 5) =>
 		get()
@@ -726,7 +731,7 @@ export const useWorkoutStore = create<WorkoutStore>()((set, get) => ({
 		startOfWeek.setDate(now.getDate() - now.getDay());
 		startOfWeek.setHours(0, 0, 0, 0);
 		return get().workoutSessions.filter(
-			(s) => s.isCompleted && new Date(s.date) >= startOfWeek
+			(s) => s.isCompleted && new Date(s.date) >= startOfWeek,
 		);
 	},
 	getStreakCount: () => get().getWorkoutStats().currentStreak,
@@ -747,7 +752,7 @@ export const useWorkoutStore = create<WorkoutStore>()((set, get) => ({
 						...p,
 						user_id: userId,
 						exercises: p.exercises || [],
-					})
+					}),
 				);
 				await supabase
 					.from("workout_plans")
@@ -759,7 +764,7 @@ export const useWorkoutStore = create<WorkoutStore>()((set, get) => ({
 						...s,
 						user_id: userId,
 						exercises: s.exercises || [],
-					})
+					}),
 				);
 				for (let i = 0; i < sessionsData.length; i += 200) {
 					await supabase
@@ -769,7 +774,7 @@ export const useWorkoutStore = create<WorkoutStore>()((set, get) => ({
 			}
 			if (data.personalRecords?.length) {
 				const recordsData = data.personalRecords.map((r) =>
-					objectToSnakeCase({ ...r, user_id: userId })
+					objectToSnakeCase({ ...r, user_id: userId }),
 				);
 				await supabase
 					.from("personal_records")
@@ -777,7 +782,7 @@ export const useWorkoutStore = create<WorkoutStore>()((set, get) => ({
 			}
 			if (data.bodyMeasurements?.length) {
 				const measData = data.bodyMeasurements.map((m) =>
-					objectToSnakeCase({ ...m, user_id: userId })
+					objectToSnakeCase({ ...m, user_id: userId }),
 				);
 				await supabase
 					.from("body_measurements")
@@ -785,7 +790,7 @@ export const useWorkoutStore = create<WorkoutStore>()((set, get) => ({
 			}
 			if (data.bodyWeights?.length) {
 				const weightsData = data.bodyWeights.map((w) =>
-					objectToSnakeCase({ ...w, user_id: userId })
+					objectToSnakeCase({ ...w, user_id: userId }),
 				);
 				await supabase
 					.from("body_weights")
@@ -793,7 +798,7 @@ export const useWorkoutStore = create<WorkoutStore>()((set, get) => ({
 			}
 			if (data.customExercises?.length) {
 				const exData = data.customExercises.map((e) =>
-					objectToSnakeCase({ ...e, user_id: userId })
+					objectToSnakeCase({ ...e, user_id: userId }),
 				);
 				await supabase
 					.from("custom_exercises")
