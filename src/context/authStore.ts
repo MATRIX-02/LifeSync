@@ -24,19 +24,23 @@ interface AuthActions {
 	initialize: () => Promise<void>;
 	signInWithEmail: (
 		email: string,
-		password: string
+		password: string,
 	) => Promise<{ error: AuthError | null }>;
 	signUpWithEmail: (
 		email: string,
 		password: string,
-		fullName?: string
+		fullName?: string,
 	) => Promise<{ error: AuthError | null }>;
 	signInWithGoogle: () => Promise<{ error: AuthError | Error | null }>;
 	signOut: () => Promise<void>;
 	resetPassword: (email: string) => Promise<{ error: AuthError | null }>;
+	verifyRecoveryOtp: (
+		email: string,
+		token: string,
+	) => Promise<{ error: AuthError | null }>;
 	updatePassword: (newPassword: string) => Promise<{ error: AuthError | null }>;
 	updateProfile: (
-		updates: Partial<Profile>
+		updates: Partial<Profile>,
 	) => Promise<{ error: Error | null }>;
 	fetchProfile: () => Promise<void>;
 	fetchSubscription: () => Promise<void>;
@@ -96,7 +100,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
 				console.log("🔐 [Initialize] Profile is_active:", profile?.is_active);
 				if (profile && !profile.is_active) {
 					console.log(
-						"⚠️ [Initialize] User account is deactivated, signing out..."
+						"⚠️ [Initialize] User account is deactivated, signing out...",
 					);
 					await get().signOut();
 					set({
@@ -124,14 +128,14 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
 						"🔔 [onAuthStateChange] Event:",
 						_event,
 						"Session:",
-						session ? "present" : "null"
+						session ? "present" : "null",
 					);
 
 					// Skip if signInWithGoogle is handling this (isLoading will be true)
 					const isCurrentlyLoading = get().isLoading;
 					if (isCurrentlyLoading && _event === "SIGNED_IN") {
 						console.log(
-							"🔔 [onAuthStateChange] Sign-in in progress, letting signInWithGoogle handle fetch"
+							"🔔 [onAuthStateChange] Sign-in in progress, letting signInWithGoogle handle fetch",
 						);
 						set({ session, user: session?.user || null });
 						return;
@@ -142,11 +146,11 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
 					const currentProfile = get().profile;
 					console.log(
 						"🔔 [onAuthStateChange] Current session:",
-						currentSession?.user?.id || "null"
+						currentSession?.user?.id || "null",
 					);
 					console.log(
 						"🔔 [onAuthStateChange] Current profile:",
-						currentProfile?.id || "null"
+						currentProfile?.id || "null",
 					);
 
 					const shouldFetch =
@@ -162,7 +166,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
 						// Only fetch if we don't already have profile data for this user
 						if (!get().profile || get().profile?.id !== session.user.id) {
 							console.log(
-								"🔔 [onAuthStateChange] Fetching profile and subscription..."
+								"🔔 [onAuthStateChange] Fetching profile and subscription...",
 							);
 							try {
 								await Promise.all([
@@ -173,7 +177,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
 							} catch (fetchError) {
 								console.error(
 									"🔴 [onAuthStateChange] Fetch error:",
-									fetchError
+									fetchError,
 								);
 							} finally {
 								// Always set isLoading to false after fetch attempt
@@ -184,7 +188,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
 							const profile = get().profile;
 							if (profile && !profile.is_active) {
 								console.log(
-									"⚠️ [onAuthStateChange] User account is deactivated, signing out..."
+									"⚠️ [onAuthStateChange] User account is deactivated, signing out...",
 								);
 								await get().signOut();
 								set({
@@ -196,12 +200,12 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
 
 							// Setup realtime listeners
 							console.log(
-								"🔔 [onAuthStateChange] Setting up realtime listeners..."
+								"🔔 [onAuthStateChange] Setting up realtime listeners...",
 							);
 							get().setupRealtimeListeners();
 						} else {
 							console.log(
-								"🔔 [onAuthStateChange] Profile already exists for user, skipping fetch"
+								"🔔 [onAuthStateChange] Profile already exists for user, skipping fetch",
 							);
 						}
 					} else if (!session) {
@@ -211,14 +215,14 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
 						set({ profile: null, subscription: null });
 					}
 					console.log("🔔 [onAuthStateChange] Handler complete");
-				}
+				},
 			);
 		} catch (error) {
 			console.error("❌ [Initialize] Auth initialization error:", error);
 			set({ error: (error as Error).message });
 		} finally {
 			console.log(
-				"🔐 [Initialize] Complete, setting isLoading=false, isInitialized=true"
+				"🔐 [Initialize] Complete, setting isLoading=false, isInitialized=true",
 			);
 			set({ isLoading: false, isInitialized: true });
 		}
@@ -266,7 +270,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
 	signUpWithEmail: async (
 		email: string,
 		password: string,
-		fullName?: string
+		fullName?: string,
 	) => {
 		set({ isLoading: true, error: null });
 		try {
@@ -293,7 +297,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
 			console.log("User created:", data.user?.id);
 			console.log("✅ Signup completed successfully");
 			console.log(
-				"Note: Profile and subscription will be created automatically"
+				"Note: Profile and subscription will be created automatically",
 			);
 
 			// Profile is created automatically by database trigger (handle_new_user)
@@ -350,11 +354,11 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
 
 			// Helper function to process tokens from URL
 			const processTokensFromUrl = async (
-				urlString: string
+				urlString: string,
 			): Promise<{ error: Error | null }> => {
 				if (tokensProcessed) {
 					console.log(
-						"🔵 [Google Sign-In] Tokens already processed, skipping..."
+						"🔵 [Google Sign-In] Tokens already processed, skipping...",
 					);
 					return { error: null };
 				}
@@ -373,7 +377,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
 						"🔵 [Google Sign-In] Tokens found - access:",
 						!!accessToken,
 						"refresh:",
-						!!refreshToken
+						!!refreshToken,
 					);
 
 					if (accessToken && refreshToken) {
@@ -389,7 +393,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
 						if (sessionError) {
 							console.log(
 								"🔴 [Google Sign-In] Session error:",
-								sessionError.message
+								sessionError.message,
 							);
 							return { error: sessionError };
 						}
@@ -397,7 +401,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
 						if (sessionData.session) {
 							console.log(
 								"🟢 [Google Sign-In] Session set! User:",
-								sessionData.session.user.email
+								sessionData.session.user.email,
 							);
 
 							// Update state with session
@@ -412,25 +416,25 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
 
 							// Now fetch profile and subscription
 							console.log(
-								"🔵 [Google Sign-In] About to fetch profile and subscription..."
+								"🔵 [Google Sign-In] About to fetch profile and subscription...",
 							);
 							console.log("🔵 [Google Sign-In] Current user:", get().user?.id);
 							try {
 								console.log("🔵 [Google Sign-In] Calling fetchProfile()...");
 								const profilePromise = get().fetchProfile();
 								console.log(
-									"🔵 [Google Sign-In] Calling fetchSubscription()..."
+									"🔵 [Google Sign-In] Calling fetchSubscription()...",
 								);
 								const subscriptionPromise = get().fetchSubscription();
 
 								await Promise.all([profilePromise, subscriptionPromise]);
 								console.log(
-									"🟢 [Google Sign-In] Profile and subscription fetched successfully!"
+									"🟢 [Google Sign-In] Profile and subscription fetched successfully!",
 								);
 							} catch (fetchErr) {
 								console.log(
 									"⚠️ [Google Sign-In] Fetch error (non-fatal):",
-									fetchErr
+									fetchErr,
 								);
 								// Don't fail sign-in if profile fetch fails - it will retry on next app load
 							}
@@ -453,7 +457,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
 			console.log("🔵 [Google Sign-In] Opening browser...");
 			const result = await WebBrowser.openAuthSessionAsync(
 				data.url,
-				appRedirectUrl
+				appRedirectUrl,
 			);
 			console.log("🔵 [Google Sign-In] Browser result type:", result.type);
 
@@ -472,7 +476,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
 				return { error: new Error("Authentication cancelled") };
 			} else if (result.type === "dismiss") {
 				console.log(
-					"🔵 [Google Sign-In] Browser dismissed, checking for session..."
+					"🔵 [Google Sign-In] Browser dismissed, checking for session...",
 				);
 
 				// Wait a moment and check if session was set
@@ -497,7 +501,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
 							get().fetchSubscription(),
 						]);
 						console.log(
-							"🟢 [Google Sign-In] Profile fetched successfully after dismiss!"
+							"🟢 [Google Sign-In] Profile fetched successfully after dismiss!",
 						);
 					} catch (fetchErr) {
 						console.log("⚠️ [Google Sign-In] Fetch error:", fetchErr);
@@ -542,12 +546,45 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
 		set({ isLoading: true, error: null });
 		try {
 			const { error } = await supabase.auth.resetPasswordForEmail(email, {
-				redirectTo: Linking.createURL("reset-password"),
+				// Must match a real expo-router route, otherwise the deep link opens
+				// the app on a blank screen.
+				redirectTo: __DEV__
+					? Linking.createURL("auth/reset-password")
+					: makeRedirectUri({
+							scheme: "lifesync",
+							path: "auth/reset-password",
+						}),
 			});
 
 			if (error) {
 				set({ error: error.message });
 				return { error };
+			}
+
+			return { error: null };
+		} finally {
+			set({ isLoading: false });
+		}
+	},
+
+	// The recovery email carries both a link and a 6-digit code; the code path
+	// avoids depending on the custom-scheme deep link surviving the mail client.
+	verifyRecoveryOtp: async (email: string, token: string) => {
+		set({ isLoading: true, error: null });
+		try {
+			const { data, error } = await supabase.auth.verifyOtp({
+				email: email.trim(),
+				token: token.trim(),
+				type: "recovery",
+			});
+
+			if (error) {
+				set({ error: error.message });
+				return { error };
+			}
+
+			if (data.session) {
+				set({ session: data.session, user: data.session.user });
 			}
 
 			return { error: null };
@@ -628,8 +665,8 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
 			const timeoutPromise = new Promise<never>((_, reject) =>
 				setTimeout(
 					() => reject(new Error("fetchProfile timeout after 10s")),
-					10000
-				)
+					10000,
+				),
 			);
 
 			const fetchPromise = supabase
@@ -647,7 +684,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
 				"🔵 [fetchProfile] Response - data:",
 				!!data,
 				"error:",
-				!!error
+				!!error,
 			);
 			if (error) throw error;
 
@@ -683,7 +720,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
 
 				if (hasGoogleAvatar || hasGoogleName) {
 					console.log(
-						"🔵 [fetchProfile] Syncing Google metadata to profile..."
+						"🔵 [fetchProfile] Syncing Google metadata to profile...",
 					);
 					const updates: Partial<Profile> = {};
 					if (hasGoogleAvatar) updates.avatar_url = googleMetadata.avatar_url;
@@ -707,7 +744,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
 					} else {
 						console.warn(
 							"⚠️ [fetchProfile] Failed to sync Google metadata:",
-							updateError
+							updateError,
 						);
 					}
 				}
@@ -717,7 +754,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
 				console.log(
 					"🔵 [fetchProfile] Profile not found for user:",
 					user.id,
-					"- Creating one automatically"
+					"- Creating one automatically",
 				);
 				// Profile doesn't exist - create one automatically
 				const newProfile = {
@@ -742,7 +779,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
 					// If it's a duplicate key error, profile was created by database trigger - fetch it
 					if (createError.code === "23505") {
 						console.log(
-							"🔵 [fetchProfile] Profile already exists (created by database trigger), retrying fetch..."
+							"🔵 [fetchProfile] Profile already exists (created by database trigger), retrying fetch...",
 						);
 
 						// Retry with backoff - the database trigger might still be running
@@ -750,7 +787,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
 						let fetchedProfile = null;
 						while (retryCount < 3 && !fetchedProfile) {
 							await new Promise((resolve) =>
-								setTimeout(resolve, Math.pow(2, retryCount) * 500)
+								setTimeout(resolve, Math.pow(2, retryCount) * 500),
 							);
 							retryCount++;
 							console.log(`🔵 [fetchProfile] Retry ${retryCount}/3...`);
@@ -765,7 +802,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
 								const existingProfileData = existingProfile as Profile;
 								console.log(
 									"🟢 [fetchProfile] Profile fetched successfully on retry",
-									retryCount
+									retryCount,
 								);
 								console.log("🟢 [fetchProfile] Retrieved profile:", {
 									full_name: existingProfileData.full_name,
@@ -782,14 +819,14 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
 							return;
 						} else {
 							console.error(
-								"🔴 [fetchProfile] Failed to fetch profile after retries"
+								"🔴 [fetchProfile] Failed to fetch profile after retries",
 							);
 						}
 					} else {
 						// Only log as error if it's NOT a duplicate key error
 						console.error(
 							"🔴 [fetchProfile] Error creating profile:",
-							createError
+							createError,
 						);
 					}
 					set({ profile: null });
@@ -798,7 +835,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
 						"🟢 [fetchProfile] Profile created successfully for user:",
 						user.id,
 						"with full_name:",
-						(createdProfile as any).full_name
+						(createdProfile as any).full_name,
 					);
 					set({ profile: createdProfile as Profile });
 				}
@@ -825,8 +862,8 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
 			const timeoutPromise = new Promise<never>((_, reject) =>
 				setTimeout(
 					() => reject(new Error("fetchSubscription timeout after 10s")),
-					10000
-				)
+					10000,
+				),
 			);
 
 			const fetchPromise = supabase
@@ -835,7 +872,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
 					`
 					*,
 					subscription_plans (*)
-				`
+				`,
 				)
 				.eq("user_id", user.id)
 				.eq("status", "active")
@@ -850,14 +887,14 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
 				"🔵 [fetchSubscription] Response - data:",
 				!!data,
 				"error:",
-				error?.code || "none"
+				error?.code || "none",
 			);
 			if (error && error.code !== "PGRST116") throw error;
 
 			set({ subscription: (data || null) as UserSubscriptionWithPlan | null });
 			console.log(
 				"🟢 [fetchSubscription] Complete, subscription:",
-				data ? "found" : "none"
+				data ? "found" : "none",
 			);
 		} catch (error) {
 			console.error("🔴 [fetchSubscription] Error:", error);
@@ -903,7 +940,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
 
 					// Update profile in state
 					set({ profile: newProfile });
-				}
+				},
 			)
 			.subscribe((status) => {
 				console.log("Profile subscription status:", status);
@@ -924,7 +961,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
 					console.log("📡 Subscription changed via realtime:", payload);
 					// Refetch subscription to get the full plan details
 					await get().fetchSubscription();
-				}
+				},
 			)
 			.subscribe((status) => {
 				console.log("Subscription channel status:", status);

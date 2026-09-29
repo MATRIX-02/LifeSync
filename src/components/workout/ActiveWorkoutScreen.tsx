@@ -26,6 +26,7 @@ import {
 	TouchableOpacity,
 	View,
 } from "react-native";
+import ExerciseDetailSheet from "./ExerciseDetailSheet";
 
 interface ActiveWorkoutScreenProps {
 	theme: Theme;
@@ -56,8 +57,9 @@ export default function ActiveWorkoutScreen({
 	const [showExerciseModal, setShowExerciseModal] = useState(false);
 	const [showFinishModal, setShowFinishModal] = useState(false);
 	const [showCustomExerciseModal, setShowCustomExerciseModal] = useState(false);
+	const [detailExercise, setDetailExercise] = useState<Exercise | null>(null);
 	const [selectedMuscle, setSelectedMuscle] = useState<MuscleGroup | "all">(
-		"all"
+		"all",
 	);
 	const [searchQuery, setSearchQuery] = useState("");
 	const [workoutNotes, setWorkoutNotes] = useState("");
@@ -202,7 +204,7 @@ export default function ActiveWorkoutScreen({
 	const toggleCustomMuscle = (muscle: MuscleGroup) => {
 		if (customExerciseMuscles.includes(muscle)) {
 			setCustomExerciseMuscles(
-				customExerciseMuscles.filter((m) => m !== muscle)
+				customExerciseMuscles.filter((m) => m !== muscle),
 			);
 		} else {
 			setCustomExerciseMuscles([...customExerciseMuscles, muscle]);
@@ -212,13 +214,13 @@ export default function ActiveWorkoutScreen({
 	const handleSetComplete = (
 		exerciseId: string,
 		setId: string,
-		completed: boolean
+		completed: boolean,
 	) => {
 		updateSetInSession(exerciseId, setId, { completed });
 		if (completed) {
 			// Auto-start rest timer
 			const exercise = currentSession?.exercises.find(
-				(e) => e.id === exerciseId
+				(e) => e.id === exerciseId,
 			);
 			if (exercise) {
 				startRestTimer(exercise.restBetweenSets);
@@ -230,7 +232,7 @@ export default function ActiveWorkoutScreen({
 		exerciseId: string,
 		setId: string,
 		field: "weight" | "reps",
-		value: string
+		value: string,
 	) => {
 		const numValue = parseFloat(value) || 0;
 		updateSetInSession(exerciseId, setId, { [field]: numValue });
@@ -239,7 +241,7 @@ export default function ActiveWorkoutScreen({
 	const handleSetTypeChange = (
 		exerciseId: string,
 		setId: string,
-		setType: SetType
+		setType: SetType,
 	) => {
 		const updates: Partial<WorkoutSet> = {
 			isWarmup: setType === "warmup",
@@ -269,7 +271,7 @@ export default function ActiveWorkoutScreen({
 						onClose();
 					},
 				},
-			]
+			],
 		);
 	};
 
@@ -301,7 +303,7 @@ export default function ActiveWorkoutScreen({
 		if (!currentSession) return 0;
 		return currentSession.exercises.reduce(
 			(total, ex) => total + ex.sets.filter((s) => s.completed).length,
-			0
+			0,
 		);
 	};
 
@@ -315,9 +317,9 @@ export default function ActiveWorkoutScreen({
 				(e) =>
 					e.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
 					e.targetMuscles.some((m: MuscleGroup) =>
-						m.toLowerCase().includes(searchQuery.toLowerCase())
-					)
-		  )
+						m.toLowerCase().includes(searchQuery.toLowerCase()),
+					),
+			)
 		: filteredExercises;
 
 	if (!currentSession) {
@@ -467,7 +469,7 @@ export default function ActiveWorkoutScreen({
 													style: "destructive",
 													onPress: () => removeExerciseFromSession(exercise.id),
 												},
-											]
+											],
 										);
 									}}
 								>
@@ -546,10 +548,10 @@ export default function ActiveWorkoutScreen({
 										const currentType = set.isWarmup
 											? "warmup"
 											: set.isDropset
-											? "dropset"
-											: set.isSuperset
-											? "superset"
-											: "normal";
+												? "dropset"
+												: set.isSuperset
+													? "superset"
+													: "normal";
 										const nextIndex =
 											(types.indexOf(currentType) + 1) % types.length;
 										handleSetTypeChange(exercise.id, set.id, types[nextIndex]);
@@ -557,7 +559,7 @@ export default function ActiveWorkoutScreen({
 									onLongPress={() => {
 										Alert.alert(
 											"Set Types",
-											"• Normal: Regular working set\n• Warm-up: Lighter weight to prepare muscles\n• Drop: Reduce weight immediately after a set\n• Superset: Paired with next exercise\n\nTap to cycle through types."
+											"• Normal: Regular working set\n• Warm-up: Lighter weight to prepare muscles\n• Drop: Reduce weight immediately after a set\n• Superset: Paired with next exercise\n\nTap to cycle through types.",
 										);
 									}}
 								>
@@ -572,10 +574,10 @@ export default function ActiveWorkoutScreen({
 										{set.isWarmup
 											? "Warmup"
 											: set.isDropset
-											? "Dropset"
-											: set.isSuperset
-											? "Superset"
-											: "Normal"}
+												? "Dropset"
+												: set.isSuperset
+													? "Superset"
+													: "Normal"}
 									</Text>
 								</TouchableOpacity>
 								<TextInput
@@ -745,11 +747,22 @@ export default function ActiveWorkoutScreen({
 										<Text style={styles.exerciseListItemMuscles}>
 											{item.targetMuscles
 												.map(
-													(m: MuscleGroup) => MUSCLE_GROUP_INFO[m]?.name || m
+													(m: MuscleGroup) => MUSCLE_GROUP_INFO[m]?.name || m,
 												)
 												.join(", ")}
 										</Text>
 									</View>
+									<TouchableOpacity
+										onPress={() => setDetailExercise(item)}
+										hitSlop={10}
+										style={styles.exerciseListItemInfo}
+									>
+										<Ionicons
+											name="information-circle-outline"
+											size={24}
+											color={theme.textSecondary}
+										/>
+									</TouchableOpacity>
 									<Ionicons
 										name="add-circle-outline"
 										size={24}
@@ -892,12 +905,12 @@ export default function ActiveWorkoutScreen({
 											{mood === 1
 												? "😫"
 												: mood === 2
-												? "😕"
-												: mood === 3
-												? "😐"
-												: mood === 4
-												? "😊"
-												: "🔥"}
+													? "😕"
+													: mood === 3
+														? "😐"
+														: mood === 4
+															? "😊"
+															: "🔥"}
 										</Text>
 									</TouchableOpacity>
 								))}
@@ -958,6 +971,16 @@ export default function ActiveWorkoutScreen({
 					</View>
 				</View>
 			</Modal>
+
+			<ExerciseDetailSheet
+				exercise={detailExercise}
+				theme={theme}
+				onClose={() => setDetailExercise(null)}
+				onAdd={(ex) => {
+					setDetailExercise(null);
+					handleAddExercise(ex);
+				}}
+			/>
 		</View>
 	);
 }
@@ -1350,6 +1373,9 @@ const createStyles = (theme: Theme) =>
 		},
 		exerciseListItemContent: {
 			flex: 1,
+		},
+		exerciseListItemInfo: {
+			paddingHorizontal: 10,
 		},
 		exerciseListItemName: {
 			fontSize: 16,

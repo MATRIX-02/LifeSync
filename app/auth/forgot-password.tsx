@@ -47,14 +47,22 @@ export default function ForgotPasswordScreen() {
 					</View>
 					<Text style={styles.successTitle}>Check Your Email</Text>
 					<Text style={styles.successText}>
-						We've sent a password reset link to{"\n"}
+						We've sent a reset code to{"\n"}
 						<Text style={styles.emailHighlight}>{email}</Text>
+					</Text>
+					<Text style={styles.spamHint}>
+						Not in your inbox? Check your spam or promotions folder.
 					</Text>
 					<TouchableOpacity
 						style={[styles.button, styles.primaryButton]}
-						onPress={() => router.replace("/auth/login")}
+						onPress={() =>
+							router.replace({
+								pathname: "/auth/reset-password",
+								params: { email },
+							})
+						}
 					>
-						<Text style={styles.buttonText}>Back to Login</Text>
+						<Text style={styles.buttonText}>Enter Code</Text>
 					</TouchableOpacity>
 					<TouchableOpacity
 						style={styles.resendButton}
@@ -290,7 +298,13 @@ const createStyles = (theme: any) =>
 			color: theme.textSecondary,
 			textAlign: "center",
 			lineHeight: 24,
-			marginBottom: 32,
+			marginBottom: 12,
+		},
+		spamHint: {
+			fontSize: 13,
+			color: theme.textMuted,
+			textAlign: "center",
+			marginBottom: 28,
 		},
 		emailHighlight: {
 			color: theme.primary,

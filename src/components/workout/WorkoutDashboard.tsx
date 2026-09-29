@@ -2,15 +2,16 @@
 
 import { Alert } from "@/src/components/CustomAlert";
 import { LoadingState } from "@/src/components/LoadingState";
-import { useModuleRefresh } from "@/src/hooks/useModuleRefresh";
 import { SubscriptionCheckResult } from "@/src/components/PremiumFeatureGate";
 import { useAuthStore } from "@/src/context/authStore";
 import { Theme } from "@/src/context/themeContext";
 import { useWorkoutStore } from "@/src/context/workoutStoreDB";
+import { CustomExercise } from "@/src/context/workoutStoreDB/types";
 import {
 	EXERCISE_DATABASE,
 	MUSCLE_GROUP_INFO,
 } from "@/src/data/exerciseDatabase";
+import { useModuleRefresh } from "@/src/hooks/useModuleRefresh";
 import { Exercise, MuscleGroup } from "@/src/types/workout";
 import { generateUUID } from "@/src/utils/uuid";
 import Ionicons from "@expo/vector-icons/Ionicons";
@@ -29,6 +30,7 @@ import {
 	View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import ExerciseDetailSheet from "./ExerciseDetailSheet";
 
 const { width } = Dimensions.get("window");
 
@@ -36,7 +38,7 @@ interface WorkoutDashboardProps {
 	theme: Theme;
 	onStartWorkout?: () => void;
 	onNavigateToTab?: (
-		tab: "dashboard" | "statistics" | "plans" | "history"
+		tab: "dashboard" | "statistics" | "plans" | "history",
 	) => void;
 	subscriptionCheck?: SubscriptionCheckResult;
 }
@@ -69,10 +71,13 @@ export default function WorkoutDashboard({
 	const [showRestTimer, setShowRestTimer] = useState(false);
 	const [showWeightLogger, setShowWeightLogger] = useState(false);
 	const [showCreateExercise, setShowCreateExercise] = useState(false);
+	const [detailExercise, setDetailExercise] = useState<
+		Exercise | CustomExercise | null
+	>(null);
 
 	// Exercise browser state
 	const [selectedMuscle, setSelectedMuscle] = useState<MuscleGroup | "all">(
-		"all"
+		"all",
 	);
 	const [selectedCategory, setSelectedCategory] = useState<
 		| "all"
@@ -111,7 +116,7 @@ export default function WorkoutDashboard({
 	// Seeded from the fitness profile; the toggle below still lets the user
 	// log a one-off entry in the other unit.
 	const [weightUnit, setWeightUnit] = useState<"kg" | "lbs">(
-		fitnessProfile?.weightUnit || "kg"
+		fitnessProfile?.weightUnit || "kg",
 	);
 
 	const stats = getWorkoutStats();
@@ -240,8 +245,8 @@ export default function WorkoutDashboard({
 				: allExercises.filter(
 						(ex) =>
 							ex.primaryMuscles.includes(selectedMuscle) ||
-							ex.secondaryMuscles?.includes(selectedMuscle)
-				  );
+							ex.secondaryMuscles?.includes(selectedMuscle),
+					);
 
 		// Filter by category
 		if (selectedCategory !== "all") {
@@ -253,7 +258,7 @@ export default function WorkoutDashboard({
 			exercises = exercises.filter(
 				(ex) =>
 					ex.name.toLowerCase().includes(query) ||
-					ex.primaryMuscles.some((m) => m.toLowerCase().includes(query))
+					ex.primaryMuscles.some((m) => m.toLowerCase().includes(query)),
 			);
 		}
 		return exercises;
@@ -271,7 +276,7 @@ export default function WorkoutDashboard({
 		setShowWeightLogger(false);
 		Alert.alert(
 			"Weight Logged! 📊",
-			`${weight} ${weightUnit} has been recorded.`
+			`${weight} ${weightUnit} has been recorded.`,
 		);
 	};
 
@@ -311,14 +316,14 @@ export default function WorkoutDashboard({
 		setShowCreateExercise(false);
 		Alert.alert(
 			"Success! 💪",
-			`${newExercise.name} has been added to your exercises.`
+			`${newExercise.name} has been added to your exercises.`,
 		);
 	};
 
 	const toggleCustomMuscle = (muscle: MuscleGroup) => {
 		if (customExerciseMuscles.includes(muscle)) {
 			setCustomExerciseMuscles(
-				customExerciseMuscles.filter((m) => m !== muscle)
+				customExerciseMuscles.filter((m) => m !== muscle),
 			);
 		} else {
 			setCustomExerciseMuscles([...customExerciseMuscles, muscle]);
@@ -848,13 +853,14 @@ export default function WorkoutDashboard({
 								item.difficulty === "beginner"
 									? theme.success
 									: item.difficulty === "intermediate"
-									? theme.warning
-									: theme.error;
+										? theme.warning
+										: theme.error;
 
 							return (
 								<TouchableOpacity
 									style={styles.exerciseCard}
 									activeOpacity={0.7}
+									onPress={() => setDetailExercise(item)}
 								>
 									{/* Exercise Icon */}
 									<View
@@ -969,6 +975,12 @@ export default function WorkoutDashboard({
 						}
 						ItemSeparatorComponent={() => <View style={{ height: 12 }} />}
 						showsVerticalScrollIndicator={false}
+					/>
+
+					<ExerciseDetailSheet
+						exercise={detailExercise}
+						theme={theme}
+						onClose={() => setDetailExercise(null)}
 					/>
 				</SafeAreaView>
 			</Modal>

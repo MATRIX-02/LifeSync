@@ -4,7 +4,6 @@ import { Alert } from "@/src/components/CustomAlert";
 import { SubscriptionCheckResult } from "@/src/components/PremiumFeatureGate";
 import { Theme } from "@/src/context/themeContext";
 import { useWorkoutStore } from "@/src/context/workoutStoreDB";
-import { generateUUID } from "@/src/utils/uuid";
 import {
 	EXERCISE_DATABASE,
 	getExercisesByMuscle,
@@ -16,6 +15,7 @@ import {
 	WorkoutExercise,
 	WorkoutPlan,
 } from "@/src/types/workout";
+import { generateUUID } from "@/src/utils/uuid";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import React, { useCallback, useMemo, useState } from "react";
 import {
@@ -28,6 +28,7 @@ import {
 	TouchableOpacity,
 	View,
 } from "react-native";
+import ExerciseDetailSheet from "./ExerciseDetailSheet";
 
 interface WorkoutPlansProps {
 	theme: Theme;
@@ -61,13 +62,14 @@ export default function WorkoutPlans({
 	const [planName, setPlanName] = useState("");
 	const [planDescription, setPlanDescription] = useState("");
 	const [selectedExercises, setSelectedExercises] = useState<WorkoutExercise[]>(
-		[]
+		[],
 	);
 	const [selectedMuscleFilter, setSelectedMuscleFilter] = useState<
 		MuscleGroup | "all"
 	>("all");
 	const [searchQuery, setSearchQuery] = useState("");
 	const [expandedExercise, setExpandedExercise] = useState<string | null>(null);
+	const [detailExercise, setDetailExercise] = useState<Exercise | null>(null);
 
 	const styles = createStyles(theme);
 
@@ -159,20 +161,20 @@ export default function WorkoutPlans({
 					style: "destructive",
 					onPress: () => deleteWorkoutPlan(plan.id),
 				},
-			]
+			],
 		);
 	};
 
 	const toggleExerciseInPlan = (exercise: Exercise) => {
 		// Check if exercise is already selected
 		const existingIndex = selectedExercises.findIndex(
-			(e) => e.exerciseId === exercise.id
+			(e) => e.exerciseId === exercise.id,
 		);
 
 		if (existingIndex >= 0) {
 			// Remove exercise if already selected
 			setSelectedExercises(
-				selectedExercises.filter((e) => e.exerciseId !== exercise.id)
+				selectedExercises.filter((e) => e.exerciseId !== exercise.id),
 			);
 		} else {
 			// Add exercise if not selected
@@ -239,7 +241,7 @@ export default function WorkoutPlans({
 								completed: false,
 								isWarmup: false,
 								isDropset: false,
-							})
+							}),
 						);
 						return {
 							...e,
@@ -256,7 +258,7 @@ export default function WorkoutPlans({
 					}
 				}
 				return e;
-			})
+			}),
 		);
 	};
 
@@ -268,22 +270,27 @@ export default function WorkoutPlans({
 			(fitnessProfile?.injuries || [])
 				.map((i) => i.trim().toLowerCase())
 				.filter(Boolean),
-		[fitnessProfile?.injuries]
+		[fitnessProfile?.injuries],
 	);
 
 	const injuryWarningFor = useCallback(
-		(exercise: { name: string; targetMuscles: MuscleGroup[] }): string | null => {
+		(exercise: {
+			name: string;
+			targetMuscles: MuscleGroup[];
+		}): string | null => {
 			if (injuryTerms.length === 0) return null;
 			const haystack = [
 				exercise.name.toLowerCase(),
-				...exercise.targetMuscles.map((m) => m.toLowerCase().replace(/_/g, " ")),
+				...exercise.targetMuscles.map((m) =>
+					m.toLowerCase().replace(/_/g, " "),
+				),
 			];
 			const hit = injuryTerms.find((term: string) =>
-				haystack.some((h) => h.includes(term) || term.includes(h))
+				haystack.some((h) => h.includes(term) || term.includes(h)),
 			);
 			return hit || null;
 		},
-		[injuryTerms]
+		[injuryTerms],
 	);
 
 	// (5) Which exercises suit the user's stated goals. Strength/muscle goals
@@ -293,7 +300,8 @@ export default function WorkoutPlans({
 		const goals = fitnessProfile?.goals || [];
 		const cats = new Set<string>();
 		goals.forEach((g) => {
-			if (g === "build_muscle" || g === "increase_strength") cats.add("strength");
+			if (g === "build_muscle" || g === "increase_strength")
+				cats.add("strength");
 			if (g === "lose_weight" || g === "improve_endurance") {
 				cats.add("cardio");
 				cats.add("hiit");
@@ -319,9 +327,9 @@ export default function WorkoutPlans({
 				(e) =>
 					e.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
 					e.targetMuscles.some((m: MuscleGroup) =>
-						m.toLowerCase().includes(searchQuery.toLowerCase())
-					)
-		  )
+						m.toLowerCase().includes(searchQuery.toLowerCase()),
+					),
+			)
 		: filteredExercises;
 
 	// (5) Narrow to exercises that match the user's goals and level.
@@ -341,7 +349,7 @@ export default function WorkoutPlans({
 						!userLevel ||
 						levelOrder.indexOf(e.difficulty) <= levelOrder.indexOf(userLevel);
 					return categoryOk && levelOk;
-			  })
+				})
 			: searchedExercises;
 
 	// Template exercise mappings
@@ -576,7 +584,7 @@ export default function WorkoutPlans({
 				const sets = Array.from({ length: count }, (_, i) => ({
 					id: String(i + 1),
 					setNumber: i + 1,
-					reps: durations ? undefined : reps?.[i] ?? 10,
+					reps: durations ? undefined : (reps?.[i] ?? 10),
 					duration: durations?.[i],
 					weight: 0,
 					completed: false,
@@ -603,7 +611,7 @@ export default function WorkoutPlans({
 	const getMuscleTargets = (plan: WorkoutPlan) => {
 		const muscles = new Set<MuscleGroup>();
 		plan.exercises.forEach((e) =>
-			e.targetMuscles.forEach((m: MuscleGroup) => muscles.add(m))
+			e.targetMuscles.forEach((m: MuscleGroup) => muscles.add(m)),
 		);
 		return Array.from(muscles).slice(0, 4);
 	};
@@ -613,7 +621,7 @@ export default function WorkoutPlans({
 		exerciseId: string,
 		setId: string,
 		field: "reps" | "weight",
-		value: number
+		value: number,
 	) => {
 		setSelectedExercises(
 			selectedExercises.map((ex) => {
@@ -621,12 +629,12 @@ export default function WorkoutPlans({
 					return {
 						...ex,
 						sets: ex.sets.map((s) =>
-							s.id === setId ? { ...s, [field]: value } : s
+							s.id === setId ? { ...s, [field]: value } : s,
 						),
 					};
 				}
 				return ex;
-			})
+			}),
 		);
 	};
 
@@ -653,7 +661,7 @@ export default function WorkoutPlans({
 					};
 				}
 				return ex;
-			})
+			}),
 		);
 	};
 
@@ -675,7 +683,7 @@ export default function WorkoutPlans({
 					};
 				}
 				return ex;
-			})
+			}),
 		);
 	};
 
@@ -867,7 +875,10 @@ export default function WorkoutPlans({
 											{ name: "Sciatica Daily Relief", icon: "medkit" },
 											{ name: "Back Extension (McKenzie)", icon: "arrow-up" },
 											{ name: "Back Flexion Relief", icon: "arrow-down" },
-											{ name: "Lumbar Core Stability", icon: "shield-checkmark" },
+											{
+												name: "Lumbar Core Stability",
+												icon: "shield-checkmark",
+											},
 											{ name: "Nerve Glides & Mobility", icon: "pulse" },
 											{ name: "Hip & Glute Support", icon: "body" },
 										].map((template) => (
@@ -949,7 +960,7 @@ export default function WorkoutPlans({
 													setExpandedExercise(
 														expandedExercise === exercise.id
 															? null
-															: exercise.id
+															: exercise.id,
 													)
 												}
 											>
@@ -1006,7 +1017,7 @@ export default function WorkoutPlans({
 																	exercise.id,
 																	set.id,
 																	"reps",
-																	parseInt(v) || 0
+																	parseInt(v) || 0,
 																)
 															}
 														/>
@@ -1019,7 +1030,7 @@ export default function WorkoutPlans({
 																	exercise.id,
 																	set.id,
 																	"weight",
-																	parseFloat(v) || 0
+																	parseFloat(v) || 0,
 																)
 															}
 														/>
@@ -1193,7 +1204,7 @@ export default function WorkoutPlans({
 										keyExtractor={(item) => item.id}
 										renderItem={({ item }) => {
 											const isSelected = selectedExercises.some(
-												(e) => e.exerciseId === item.id
+												(e) => e.exerciseId === item.id,
 											);
 											const injury = injuryWarningFor(item);
 											return (
@@ -1228,6 +1239,17 @@ export default function WorkoutPlans({
 															</View>
 														)}
 													</View>
+													<TouchableOpacity
+														onPress={() => setDetailExercise(item)}
+														hitSlop={10}
+														style={styles.exerciseInfoButton}
+													>
+														<Ionicons
+															name="information-circle-outline"
+															size={24}
+															color={theme.textSecondary}
+														/>
+													</TouchableOpacity>
 													<Ionicons
 														name={
 															isSelected
@@ -1245,6 +1267,17 @@ export default function WorkoutPlans({
 									/>
 								</View>
 							</View>
+
+							<ExerciseDetailSheet
+								exercise={detailExercise}
+								theme={theme}
+								onClose={() => setDetailExercise(null)}
+								onAdd={(ex) => {
+									setDetailExercise(null);
+									toggleExerciseInPlan(ex);
+								}}
+								addLabel="Add to Plan"
+							/>
 						</Modal>
 					</View>
 				</View>
@@ -1901,6 +1934,9 @@ const createStyles = (theme: Theme) =>
 		},
 		exerciseInfo: {
 			flex: 1,
+		},
+		exerciseInfoButton: {
+			paddingHorizontal: 10,
 		},
 		exerciseName: {
 			fontSize: 14,

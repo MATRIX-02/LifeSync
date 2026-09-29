@@ -225,11 +225,14 @@ function RootLayoutNav() {
 
 		const inAuthGroup = segments[0] === "auth";
 		const inAdminGroup = segments[0] === "admin";
+		// The recovery link establishes a real session, so without this the guard
+		// would bounce the user into the app before they set a new password.
+		const onResetPassword = segments[1] === "reset-password";
 
 		if (!user && !inAuthGroup) {
 			// Redirect to login if not authenticated
 			router.replace("/auth/login");
-		} else if (user && profile && inAuthGroup) {
+		} else if (user && profile && inAuthGroup && !onResetPassword) {
 			// Redirect to home if authenticated WITH profile loaded and trying to access auth screens
 			// Wait for profile to be loaded before navigating away from auth screens
 			router.replace(useModuleStore.getState().getDefaultModuleRoute() as any);
