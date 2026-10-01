@@ -92,7 +92,7 @@ export function isBankSms(sender: string): boolean {
 /**
  * Get bank name from sender
  */
-function getBankName(sender: string): string | undefined {
+export function getBankName(sender: string): string | undefined {
 	const normalizedSender = sender.replace(/[^A-Za-z]/g, "").toUpperCase();
 
 	for (const [key, name] of Object.entries(BANK_NAMES)) {
@@ -225,7 +225,7 @@ export function isTransactionSms(sms: SmsData): boolean {
 	) {
 		// Allow if it also contains transaction keywords
 		const hasTransactionKeyword = [...DEBIT_KEYWORDS, ...CREDIT_KEYWORDS].some(
-			(k) => text.includes(k)
+			(k) => text.includes(k),
 		);
 		if (!hasTransactionKeyword) {
 			return false;
@@ -234,7 +234,7 @@ export function isTransactionSms(sms: SmsData): boolean {
 
 	// Must contain transaction keywords and amount
 	const hasTransactionKeyword = [...DEBIT_KEYWORDS, ...CREDIT_KEYWORDS].some(
-		(k) => text.includes(k)
+		(k) => text.includes(k),
 	);
 	const hasAmount = AMOUNT_PATTERNS.some((p) => p.test(sms.body));
 
@@ -283,6 +283,6 @@ export function parseBankSms(sms: SmsData): ParsedBankSms | null {
  */
 export function filterTransactionSms(smsList: SmsData[]): SmsData[] {
 	return smsList.filter(
-		(sms) => isBankSms(sms.address) && isTransactionSms(sms)
+		(sms) => isBankSms(sms.address) && isTransactionSms(sms),
 	);
 }

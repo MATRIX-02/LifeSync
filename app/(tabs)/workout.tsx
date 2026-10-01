@@ -1,10 +1,10 @@
 // Workout Tracker Main Screen - Tab-based navigation
 
-import { useSubscriptionCheck } from "@/src/components/PremiumFeatureGate";
-import { SafeAreaView } from "react-native-safe-area-context";
 import {
-	SharedDrawer,
-} from "@/src/components/SharedDrawer";
+	PremiumFeatureGate,
+	useSubscriptionCheck,
+} from "@/src/components/PremiumFeatureGate";
+import { SharedDrawer } from "@/src/components/SharedDrawer";
 import {
 	ActiveWorkoutScreen,
 	NutriPlan,
@@ -13,6 +13,7 @@ import {
 	WorkoutPlans,
 	WorkoutStatistics,
 } from "@/src/components/workout";
+import WorkoutAIInsights from "@/src/components/workout/WorkoutAIInsights";
 import { useAuthStore } from "@/src/context/authStore";
 import { useModuleStore } from "@/src/context/moduleContext";
 import { Theme, useColors, useTheme } from "@/src/context/themeContext";
@@ -32,10 +33,17 @@ import {
 	TouchableOpacity,
 	View,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 
 const { width } = Dimensions.get("window");
 
-type TabType = "dashboard" | "nutrition" | "statistics" | "plans" | "history";
+type TabType =
+	| "dashboard"
+	| "nutrition"
+	| "statistics"
+	| "plans"
+	| "history"
+	| "insights";
 
 const tabs: { key: TabType; label: string; icon: string }[] = [
 	{ key: "dashboard", label: "Dashboard", icon: "home" },
@@ -43,6 +51,7 @@ const tabs: { key: TabType; label: string; icon: string }[] = [
 	{ key: "statistics", label: "Stats", icon: "stats-chart" },
 	{ key: "plans", label: "Plans", icon: "clipboard" },
 	{ key: "history", label: "History", icon: "time" },
+	{ key: "insights", label: "Insights", icon: "sparkles" },
 ];
 
 export default function WorkoutTrackerScreen() {
@@ -65,7 +74,7 @@ export default function WorkoutTrackerScreen() {
 	// Persist active tab locally
 	const [activeTab, setActiveTab, tabLoaded] = useTabPersistence<TabType>(
 		"workout",
-		"dashboard"
+		"dashboard",
 	);
 	const [tabIndicatorAnim] = useState(new Animated.Value(0));
 	const [showActiveWorkout, setShowActiveWorkout] = useState(false);
@@ -146,7 +155,7 @@ export default function WorkoutTrackerScreen() {
 		if (!subscriptionCheck.canLogWorkout(monthlyCount)) {
 			subscriptionCheck.showUpgradeAlert(
 				"Workout Limit Reached",
-				`Your plan allows ${subscriptionCheck.limits.maxWorkouts} workouts per month. Upgrade for unlimited workouts.`
+				`Your plan allows ${subscriptionCheck.limits.maxWorkouts} workouts per month. Upgrade for unlimited workouts.`,
 			);
 			return;
 		}
@@ -188,6 +197,12 @@ export default function WorkoutTrackerScreen() {
 				return (
 					<WorkoutHistory theme={theme} subscriptionCheck={subscriptionCheck} />
 				);
+			case "insights":
+				return (
+					<PremiumFeatureGate feature="AI Insights" requiredPlan="pro">
+						<WorkoutAIInsights theme={theme} />
+					</PremiumFeatureGate>
+				);
 			default:
 				return (
 					<WorkoutDashboard
@@ -212,7 +227,6 @@ export default function WorkoutTrackerScreen() {
 				barStyle={isDark ? "light-content" : "dark-content"}
 				backgroundColor={theme.background}
 			/>
-
 
 			{/* Drawer Overlay */}
 			{drawerOpen && (

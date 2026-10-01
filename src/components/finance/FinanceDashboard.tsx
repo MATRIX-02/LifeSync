@@ -3,6 +3,7 @@ import { Alert } from "@/src/components/CustomAlert";
 import AddTransactionModal from "@/src/components/finance/AddTransactionModal";
 import { LoadingState } from "@/src/components/LoadingState";
 import { SubscriptionCheckResult } from "@/src/components/PremiumFeatureGate";
+import { useFinancePrefsStore } from "@/src/context/financePrefsStore";
 import { useFinanceStore } from "@/src/context/financeStoreDB";
 import { Theme } from "@/src/context/themeContext";
 import { useModuleRefresh } from "@/src/hooks/useModuleRefresh";
@@ -86,7 +87,7 @@ export default function FinanceDashboard({
 	// rest of the form.
 	const [transactionType, setTransactionType] =
 		useState<TransactionType>("expense");
-	const [hideBalance, setHideBalance] = useState(false);
+	const { hideBalance, toggleHideBalance } = useFinancePrefsStore();
 
 	// Add Account Form State
 	const [accountName, setAccountName] = useState("");
@@ -289,7 +290,7 @@ export default function FinanceDashboard({
 					</View>
 					<TouchableOpacity
 						style={styles.eyeButton}
-						onPress={() => setHideBalance(!hideBalance)}
+						onPress={toggleHideBalance}
 					>
 						<Ionicons
 							name={hideBalance ? "eye-off-outline" : "eye-outline"}

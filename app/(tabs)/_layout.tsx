@@ -17,6 +17,7 @@ export default function TabLayout() {
 			<Stack.Screen name="study" />
 			<Stack.Screen name="profile" />
 			<Stack.Screen name="statistics" />
+			<Stack.Screen name="habit-insights" />
 		</Stack>
 	);
 }

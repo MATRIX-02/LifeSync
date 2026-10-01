@@ -6,6 +6,12 @@ import { ModuleType, useModuleStore } from "@/src/context/moduleContext";
 import { useStudyStore } from "@/src/context/studyStoreDB/index";
 import { Theme, useColors, useTheme } from "@/src/context/themeContext";
 import { useWorkoutStore } from "@/src/context/workoutStoreDB";
+import {
+	describeDailyReset,
+	getQuotaSnapshot,
+	QuotaSnapshot,
+	subscribeToQuota,
+} from "@/src/services/insights/quota";
 import { NotificationService } from "@/src/services/notificationService";
 import { buildSyncPayload } from "@/src/services/syncPayload";
 import {
@@ -23,6 +29,10 @@ import {
 	syncStudyToCloud,
 	syncWorkoutsToCloud,
 } from "@/src/services/syncService";
+import {
+	isAiSmsFallbackEnabled,
+	setAiSmsFallbackEnabled,
+} from "@/src/services/transactionDetection/aiSmsFallback";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system/legacy";
@@ -310,6 +320,37 @@ export default function SettingsScreen() {
 	const [scheduledNotifications, setScheduledNotifications] = useState<any[]>(
 		[],
 	);
+	const [aiQuota, setAiQuota] = useState<QuotaSnapshot | null>(null);
+	const [aiSmsEnabled, setAiSmsEnabled] = useState(false);
+
+	useEffect(() => {
+		getQuotaSnapshot().then(setAiQuota);
+		isAiSmsFallbackEnabled().then(setAiSmsEnabled);
+		return subscribeToQuota(setAiQuota);
+	}, []);
+
+	const handleToggleAiSms = (next: boolean) => {
+		if (!next) {
+			setAiSmsEnabled(false);
+			setAiSmsFallbackEnabled(false);
+			return;
+		}
+
+		Alert.alert(
+			"Send SMS text to AI?",
+			"Only bank messages LifeSync cannot read on its own will be sent to Groq, an external AI service, to extract the amount and merchant.\n\nLong digit runs are masked to the last 4 first. Messages are not stored by LifeSync, but they do leave your device.\n\nLeave this off if you would rather no message text leave your phone.",
+			[
+				{ text: "Cancel", style: "cancel" },
+				{
+					text: "Enable",
+					onPress: () => {
+						setAiSmsEnabled(true);
+						setAiSmsFallbackEnabled(true);
+					},
+				},
+			],
+		);
+	};
 
 	// Cloud sync states
 	const [isSyncing, setIsSyncing] = useState<SyncModule | null>(null);
@@ -2324,6 +2365,99 @@ export default function SettingsScreen() {
 					</View>
 				)}
 
+				{/* AI Usage Section */}
+				<View style={styles.section}>
+					<Text style={styles.sectionTitle}>AI USAGE</Text>
+
+					<View style={styles.settingCard}>
+						{aiQuota ? (
+							<>
+								<SettingRow
+									icon="sparkles-outline"
+									iconColor={theme.primary}
+									iconBg={theme.primary + "20"}
+									label="Analyses Left Today"
+									description={
+										aiQuota.remainingRequests !== undefined &&
+										aiQuota.limitRequests !== undefined
+											? `${aiQuota.remainingRequests.toLocaleString()} of ${aiQuota.limitRequests.toLocaleString()} · ${describeDailyReset()}`
+											: "Not reported"
+									}
+									theme={theme}
+								/>
+
+								<View style={styles.divider} />
+
+								<SettingRow
+									icon="speedometer-outline"
+									iconColor={theme.accent}
+									iconBg={theme.accent + "20"}
+									label="Token Budget"
+									description={
+										aiQuota.remainingTokens !== undefined &&
+										aiQuota.limitTokens !== undefined
+											? `${aiQuota.remainingTokens.toLocaleString()} of ${aiQuota.limitTokens.toLocaleString()} this minute`
+											: "Not reported"
+									}
+									theme={theme}
+								/>
+
+								<View style={styles.divider} />
+
+								<SettingRow
+									icon="time-outline"
+									iconColor={theme.textSecondary}
+									iconBg={theme.textSecondary + "20"}
+									label="Last Checked"
+									description={new Date(aiQuota.capturedAt).toLocaleString()}
+									theme={theme}
+								/>
+							</>
+						) : (
+							<SettingRow
+								icon="sparkles-outline"
+								iconColor={theme.textMuted}
+								iconBg={theme.textMuted + "20"}
+								label="Analyses Left Today"
+								description="Run an AI analysis to see your remaining quota"
+								theme={theme}
+							/>
+						)}
+					</View>
+
+					<Text style={styles.quotaNote}>
+						The AI allowance is shared across everyone using LifeSync, not
+						reserved per account.
+					</Text>
+
+					<View style={[styles.settingCard, { marginTop: 16 }]}>
+						<SettingRow
+							icon="chatbox-ellipses-outline"
+							iconColor={theme.warning}
+							iconBg={theme.warning + "20"}
+							label="AI Reading of Bank SMS"
+							description="Send unreadable bank messages to AI to detect transactions"
+							theme={theme}
+							rightElement={
+								<Switch
+									value={aiSmsEnabled}
+									onValueChange={handleToggleAiSms}
+									trackColor={{
+										false: theme.border,
+										true: theme.primary + "80",
+									}}
+									thumbColor={aiSmsEnabled ? theme.primary : theme.textMuted}
+								/>
+							}
+						/>
+					</View>
+
+					<Text style={styles.quotaNote}>
+						Off by default. When on, only messages LifeSync cannot parse itself
+						are sent to an external AI service, with long digit runs masked.
+					</Text>
+				</View>
+
 				{/* About Section */}
 				<View style={styles.section}>
 					<Text style={styles.sectionTitle}>ABOUT</Text>
@@ -2671,6 +2805,13 @@ const createStyles = (theme: Theme) =>
 			color: theme.textMuted,
 			marginBottom: 12,
 			letterSpacing: 1.2,
+		},
+		quotaNote: {
+			fontSize: 11,
+			color: theme.textMuted,
+			lineHeight: 16,
+			marginTop: 8,
+			paddingHorizontal: 4,
 		},
 
 		// Setting Cards

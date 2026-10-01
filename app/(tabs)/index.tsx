@@ -28,20 +28,24 @@ import {
 } from "react-native";
 import Svg, { Circle } from "react-native-svg";
 
+import { PerDaySection } from "@/src/components/habits/PerDaySection";
+import { LoadingState } from "@/src/components/LoadingState";
 import { useSubscriptionCheck } from "@/src/components/PremiumFeatureGate";
-import {
-	SharedDrawer,
-} from "@/src/components/SharedDrawer";
+import { SharedDrawer } from "@/src/components/SharedDrawer";
 import { useAuthStore } from "@/src/context/authStore";
 import { useHabitStore } from "@/src/context/habitStoreDB";
 import { useModuleStore } from "@/src/context/moduleContext";
 import { Theme, useColors, useTheme } from "@/src/context/themeContext";
 import { useWorkoutStore } from "@/src/context/workoutStoreDB";
-import { NotificationService } from "@/src/services/notificationService";
-import { LoadingState } from "@/src/components/LoadingState";
 import { useModuleRefresh } from "@/src/hooks/useModuleRefresh";
-import { generateUUID } from "@/src/utils/uuid";
-import { PerDaySection } from "@/src/components/habits/PerDaySection";
+import { NotificationService } from "@/src/services/notificationService";
+import {
+	FrequencyType,
+	Habit,
+	HabitLog,
+	HabitType,
+	TargetType,
+} from "@/src/types";
 import {
 	Frequency,
 	PerDay,
@@ -50,13 +54,7 @@ import {
 	expandDayTimes,
 	normalizeFrequency,
 } from "@/src/utils/frequency";
-import {
-	FrequencyType,
-	Habit,
-	HabitLog,
-	HabitType,
-	TargetType,
-} from "@/src/types";
+import { generateUUID } from "@/src/utils/uuid";
 import { useRouter } from "expo-router";
 
 const { width, height } = Dimensions.get("window");
@@ -210,7 +208,7 @@ export default function DashboardScreen() {
 				: limits.maxHabits.toString();
 			showUpgradeAlert(
 				"Habit Limit Reached",
-				`Your plan allows up to ${limitText} active habits. Upgrade your plan to restore this one.`
+				`Your plan allows up to ${limitText} active habits. Upgrade your plan to restore this one.`,
 			);
 			return;
 		}
@@ -241,7 +239,7 @@ export default function DashboardScreen() {
 						deleteHabit(habit.id);
 					},
 				},
-			]
+			],
 		);
 	};
 
@@ -274,7 +272,7 @@ export default function DashboardScreen() {
 				// Newest first
 				return habitsToSort.sort(
 					(a, b) =>
-						new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+						new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
 				);
 			case "manual":
 			default:
@@ -316,11 +314,11 @@ export default function DashboardScreen() {
 			// Calculate percentage (unique days completed / total days in month)
 			const progress = Math.min(
 				100,
-				Math.round((completedDays.size / daysInMonth) * 100)
+				Math.round((completedDays.size / daysInMonth) * 100),
 			);
 			return progress;
 		},
-		[logs]
+		[logs],
 	);
 
 	const handleCompleteHabit = useCallback(
@@ -328,7 +326,7 @@ export default function DashboardScreen() {
 			logHabitCompletion(habitId);
 			calculateStats(habitId);
 		},
-		[logHabitCompletion, calculateStats]
+		[logHabitCompletion, calculateStats],
 	);
 
 	// Animate drawer
@@ -433,7 +431,7 @@ export default function DashboardScreen() {
 	const getCompletionRate = () => {
 		if (activeHabits.length === 0) return 0;
 		const completed = activeHabits.filter((h: Habit) =>
-			isHabitCompletedOnDate(h.id, today)
+			isHabitCompletedOnDate(h.id, today),
 		).length;
 		return Math.round((completed / activeHabits.length) * 100);
 	};
@@ -451,7 +449,6 @@ export default function DashboardScreen() {
 				barStyle={isDark ? "light-content" : "dark-content"}
 				backgroundColor={theme.background}
 			/>
-
 
 			{/* Drawer Overlay */}
 			{drawerOpen && (
@@ -500,6 +497,11 @@ export default function DashboardScreen() {
 							</TouchableOpacity>
 							<TouchableOpacity onPress={() => setModalVisible(true)}>
 								<Ionicons name="add" size={24} color={theme.text} />
+							</TouchableOpacity>
+							<TouchableOpacity
+								onPress={() => router.push("/(tabs)/habit-insights")}
+							>
+								<Ionicons name="sparkles" size={21} color={theme.text} />
 							</TouchableOpacity>
 							<View>
 								<TouchableOpacity
@@ -756,7 +758,11 @@ export default function DashboardScreen() {
 										style={styles.archivedAction}
 										onPress={() => handleDeleteArchivedHabit(habit)}
 									>
-										<Ionicons name="trash-outline" size={20} color={theme.error} />
+										<Ionicons
+											name="trash-outline"
+											size={20}
+											color={theme.error}
+										/>
 									</TouchableOpacity>
 								</View>
 							))}
@@ -845,7 +851,7 @@ export default function DashboardScreen() {
 							: limits.maxHabits.toString();
 						showUpgradeAlert(
 							"Habit Limit Reached",
-							`Your plan allows up to ${limitText} habits. Upgrade your plan for more habits.`
+							`Your plan allows up to ${limitText} habits. Upgrade your plan for more habits.`,
 						);
 						return;
 					}
@@ -854,11 +860,10 @@ export default function DashboardScreen() {
 					// Schedule reminders if enabled
 					if (habit.notificationEnabled && habit.notificationTime) {
 						try {
-							const ids = await NotificationService.scheduleHabitReminders(
-								habit
-							);
+							const ids =
+								await NotificationService.scheduleHabitReminders(habit);
 							console.log(
-								`✅ ${ids.length} reminder(s) scheduled for ${habit.name}`
+								`✅ ${ids.length} reminder(s) scheduled for ${habit.name}`,
 							);
 						} catch (error) {
 							console.error("Failed to schedule notification:", error);
@@ -963,7 +968,7 @@ interface HabitRowItemProps {
 	isHabitCompletedOnDate: (habitId: string, date: Date) => boolean;
 	getProgressForDate: (
 		habitId: string,
-		date: Date
+		date: Date,
 	) => { done: number; target: number };
 	logsLength: number; // Used to trigger re-render when logs change
 	onToggleDate: (date: Date) => void;
@@ -992,7 +997,7 @@ const HabitRowItem: React.FC<HabitRowItemProps> = ({
 		if (validDates.length === 0) return 0;
 
 		const completedCount = validDates.filter((date) =>
-			isHabitCompletedOnDate(habit.id, date)
+			isHabitCompletedOnDate(habit.id, date),
 		).length;
 
 		return Math.round((completedCount / validDates.length) * 100);
@@ -1106,7 +1111,7 @@ interface HabitGridItemProps {
 	isHabitCompletedOnDate: (habitId: string, date: Date) => boolean;
 	getProgressForDate: (
 		habitId: string,
-		date: Date
+		date: Date,
 	) => { done: number; target: number };
 	logsLength: number; // Used to trigger re-render when logs change
 	onToggleDate: (date: Date) => void;
@@ -1175,7 +1180,7 @@ const HabitGridItem: React.FC<HabitGridItemProps> = ({
 	// Base number of weeks that fit on screen
 	const baseWeeks = Math.max(
 		4,
-		Math.floor((availableWidth + cellGap) / (cellSize + cellGap))
+		Math.floor((availableWidth + cellGap) / (cellSize + cellGap)),
 	);
 
 	// Total weeks including extra loaded weeks
@@ -1288,7 +1293,7 @@ const HabitGridItem: React.FC<HabitGridItemProps> = ({
 		}
 
 		const completedCount = last30Days.filter((date) =>
-			isHabitCompletedOnDate(habit.id, date)
+			isHabitCompletedOnDate(habit.id, date),
 		).length;
 
 		return Math.round((completedCount / 30) * 100);
@@ -1471,7 +1476,7 @@ const CreateHabitModal: React.FC<CreateHabitModalProps> = ({
 	const [showTimePicker, setShowTimePicker] = useState(false);
 	const [selectedColor, setSelectedColor] = useState("#A78BFA");
 	const [selectedIcon, setSelectedIcon] = useState<string | undefined>(
-		undefined
+		undefined,
 	);
 	const [showIconPicker, setShowIconPicker] = useState(false);
 	const [notificationEnabled, setNotificationEnabled] = useState(true);
@@ -1502,17 +1507,17 @@ const CreateHabitModal: React.FC<CreateHabitModalProps> = ({
 			frequencyType === "specific_days"
 				? { kind: "weekdays", days: selectedDays }
 				: { kind: "daily" },
-		[frequencyType, selectedDays]
+		[frequencyType, selectedDays],
 	);
 
 	const frequency = useMemo(
 		(): Frequency => normalizeFrequency({ schedule, perDay }),
-		[schedule, perDay]
+		[schedule, perDay],
 	);
 
 	const dayTimes = useMemo(
 		() => expandDayTimes(perDay, formatTimeForStorage(selectedTime)),
-		[perDay, selectedTime]
+		[perDay, selectedTime],
 	);
 
 	// Slide to dismiss animation
@@ -1546,7 +1551,7 @@ const CreateHabitModal: React.FC<CreateHabitModalProps> = ({
 					}).start();
 				}
 			},
-		})
+		}),
 	).current;
 
 	const toggleDay = (dayIndex: number) => {
@@ -1736,7 +1741,7 @@ const CreateHabitModal: React.FC<CreateHabitModalProps> = ({
 		if (habitType === "measurable" && (!unit.trim() || !target.trim())) {
 			Alert.alert(
 				"Missing Information",
-				"Please enter unit and target for measurable habit"
+				"Please enter unit and target for measurable habit",
 			);
 			return;
 		}
@@ -2373,29 +2378,29 @@ const CreateHabitModal: React.FC<CreateHabitModalProps> = ({
 									</TouchableOpacity>
 								</View>
 							)}
-						{/* HOW MANY TIMES a day - the second, independent axis. Any
+							{/* HOW MANY TIMES a day - the second, independent axis. Any
 						    schedule above can be combined with any of these. */}
-						<Text
-							style={{
-								fontSize: 14,
-								fontWeight: "600",
-								color: theme.textSecondary,
-								marginBottom: 8,
-							}}
-						>
-							Times per day
-						</Text>
-						<View style={{ marginBottom: 20 }}>
-							<PerDaySection
-								value={perDay}
-								onChange={setPerDay}
-								accent={selectedColor}
-								activeDayCount={
-									frequencyType === "specific_days" ? selectedDays.length : 7
-								}
-								fallbackTime={formatTimeForStorage(selectedTime)}
-							/>
-						</View>
+							<Text
+								style={{
+									fontSize: 14,
+									fontWeight: "600",
+									color: theme.textSecondary,
+									marginBottom: 8,
+								}}
+							>
+								Times per day
+							</Text>
+							<View style={{ marginBottom: 20 }}>
+								<PerDaySection
+									value={perDay}
+									onChange={setPerDay}
+									accent={selectedColor}
+									activeDayCount={
+										frequencyType === "specific_days" ? selectedDays.length : 7
+									}
+									fallbackTime={formatTimeForStorage(selectedTime)}
+								/>
+							</View>
 							{/* With more than one time a day the reminders come from the
 							    Times per day section, so a single time would be ignored. */}
 							{perDay.target <= 1 && (

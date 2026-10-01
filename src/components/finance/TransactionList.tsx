@@ -3,6 +3,7 @@
 import { Alert } from "@/src/components/CustomAlert";
 import AddTransactionModal from "@/src/components/finance/AddTransactionModal";
 import { SubscriptionCheckResult } from "@/src/components/PremiumFeatureGate";
+import { useFinancePrefsStore } from "@/src/context/financePrefsStore";
 import { useFinanceStore } from "@/src/context/financeStoreDB";
 import {
 	ExpenseCategory,
@@ -97,6 +98,7 @@ export default function TransactionList({
 }: TransactionListProps) {
 	const { transactions, accounts, deleteTransaction, deleteTransactions } =
 		useFinanceStore();
+	const { hideBalance, toggleHideBalance } = useFinancePrefsStore();
 
 	const styles = createStyles(theme);
 	const { refreshing, onRefresh } = useModuleRefresh("finance");
@@ -292,6 +294,7 @@ export default function TransactionList({
 	};
 
 	const formatAmount = (value: number) => {
+		if (hideBalance) return "••••";
 		return value.toLocaleString("en-IN", {
 			minimumFractionDigits: 0,
 			maximumFractionDigits: 2,
@@ -547,6 +550,16 @@ export default function TransactionList({
 						</TouchableOpacity>
 					)}
 				</View>
+				<TouchableOpacity
+					style={styles.filterButton}
+					onPress={toggleHideBalance}
+				>
+					<Ionicons
+						name={hideBalance ? "eye-off-outline" : "eye-outline"}
+						size={20}
+						color={theme.text}
+					/>
+				</TouchableOpacity>
 				<TouchableOpacity
 					style={[
 						styles.filterButton,
@@ -827,10 +840,7 @@ export default function TransactionList({
 												>
 													{selectedTransaction.type === "income" ? "+" : "-"}
 													{currency}
-													{selectedTransaction.amount.toLocaleString("en-IN", {
-														minimumFractionDigits: 0,
-														maximumFractionDigits: 2,
-													})}
+													{formatAmount(selectedTransaction.amount)}
 												</Text>
 												<Text style={styles.detailDescription}>
 													{selectedTransaction.description}

@@ -1,8 +1,10 @@
 // Insights Tab Component
+import { PremiumFeatureGate } from "@/src/components/PremiumFeatureGate";
 import { Theme } from "@/src/context/themeContext";
 import Ionicons from "@expo/vector-icons/Ionicons";
-import React from "react";
-import { ScrollView, Text, View } from "react-native";
+import React, { useState } from "react";
+import { Modal, ScrollView, Text, TouchableOpacity, View } from "react-native";
+import NutritionAIInsights from "./NutritionAIInsights";
 
 interface InsightsTabProps {
 	theme: Theme;
@@ -24,6 +26,7 @@ export const InsightsTab = ({
 	insights,
 }: InsightsTabProps) => {
 	const weeklyAvg = store.getWeeklyAverages();
+	const [showAiAnalysis, setShowAiAnalysis] = useState(false);
 
 	return (
 		<ScrollView showsVerticalScrollIndicator={false}>
@@ -381,8 +384,7 @@ export const InsightsTab = ({
 							paddingHorizontal: 20,
 						}}
 					>
-						Track your nutrition for a few days to get AI-powered
-						recommendations
+						Track your nutrition for a few days to see trends here
 					</Text>
 				</View>
 			) : (
@@ -392,29 +394,29 @@ export const InsightsTab = ({
 							insight.type === "success"
 								? theme.success + "15"
 								: insight.type === "warning"
-								? theme.warning + "15"
-								: insight.type === "tip"
-								? "#9C27B0" + "15"
-								: theme.primary + "15";
+									? theme.warning + "15"
+									: insight.type === "tip"
+										? "#9C27B0" + "15"
+										: theme.primary + "15";
 
 						const iconColor =
 							insight.type === "success"
 								? theme.success
 								: insight.type === "warning"
-								? theme.warning
-								: insight.type === "tip"
-								? "#9C27B0"
-								: theme.primary;
+									? theme.warning
+									: insight.type === "tip"
+										? "#9C27B0"
+										: theme.primary;
 
 						const iconName =
 							insight.icon ||
 							(insight.type === "success"
 								? "checkmark-circle"
 								: insight.type === "warning"
-								? "alert-circle"
-								: insight.type === "tip"
-								? "bulb"
-								: "information-circle");
+									? "alert-circle"
+									: insight.type === "tip"
+										? "bulb"
+										: "information-circle");
 
 						return (
 							<View
@@ -474,6 +476,75 @@ export const InsightsTab = ({
 					})}
 				</View>
 			)}
+
+			{/* AI Deep Analysis */}
+			<TouchableOpacity
+				style={[
+					styles.card,
+					{
+						marginTop: 16,
+						flexDirection: "row",
+						alignItems: "center",
+						gap: 14,
+					},
+				]}
+				onPress={() => setShowAiAnalysis(true)}
+			>
+				<View
+					style={{
+						width: 44,
+						height: 44,
+						borderRadius: 22,
+						alignItems: "center",
+						justifyContent: "center",
+						backgroundColor: theme.primary + "20",
+					}}
+				>
+					<Ionicons name="sparkles" size={22} color={theme.primary} />
+				</View>
+				<View style={{ flex: 1 }}>
+					<Text style={{ fontSize: 16, fontWeight: "700", color: theme.text }}>
+						AI Deep Analysis
+					</Text>
+					<Text style={{ fontSize: 12, color: theme.textMuted, marginTop: 3 }}>
+						Macro balance, gut patterns and fasting, scored
+					</Text>
+				</View>
+				<Ionicons name="chevron-forward" size={20} color={theme.textMuted} />
+			</TouchableOpacity>
+
+			<Modal
+				visible={showAiAnalysis}
+				animationType="slide"
+				onRequestClose={() => setShowAiAnalysis(false)}
+			>
+				<View style={{ flex: 1, backgroundColor: theme.background }}>
+					<View
+						style={{
+							flexDirection: "row",
+							alignItems: "center",
+							gap: 12,
+							paddingHorizontal: 16,
+							paddingTop: 50,
+							paddingBottom: 10,
+						}}
+					>
+						<TouchableOpacity onPress={() => setShowAiAnalysis(false)}>
+							<Ionicons name="arrow-back" size={22} color={theme.text} />
+						</TouchableOpacity>
+						<Text
+							style={{ fontSize: 20, fontWeight: "700", color: theme.text }}
+						>
+							Nutrition Insights
+						</Text>
+					</View>
+					<View style={{ flex: 1 }}>
+						<PremiumFeatureGate feature="AI Insights" requiredPlan="pro">
+							<NutritionAIInsights theme={theme} />
+						</PremiumFeatureGate>
+					</View>
+				</View>
+			</Modal>
 
 			{/* Nutrition Tips */}
 			<View style={[styles.card, { marginTop: 16 }]}>

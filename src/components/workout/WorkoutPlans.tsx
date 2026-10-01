@@ -9,6 +9,7 @@ import {
 	getExercisesByMuscle,
 	MUSCLE_GROUP_INFO,
 } from "@/src/data/exerciseDatabase";
+import { suggestWorkoutPlan } from "@/src/services/insights/planSuggestion";
 import {
 	Exercise,
 	MuscleGroup,
@@ -19,6 +20,7 @@ import { generateUUID } from "@/src/utils/uuid";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import React, { useCallback, useMemo, useState } from "react";
 import {
+	ActivityIndicator,
 	FlatList,
 	Modal,
 	ScrollView,
@@ -52,7 +54,10 @@ export default function WorkoutPlans({
 		activePlanId,
 		startWorkout,
 		fitnessProfile,
+		workoutSessions,
 	} = useWorkoutStore();
+
+	const [isSuggesting, setIsSuggesting] = useState(false);
 
 	const [isEditing, setIsEditing] = useState(false);
 	const [showExerciseModal, setShowExerciseModal] = useState(false);
@@ -218,6 +223,71 @@ export default function WorkoutPlans({
 			};
 			setSelectedExercises([...selectedExercises, newExercise]);
 		}
+	};
+
+	const handleSuggestPlan = async () => {
+		setIsSuggesting(true);
+
+		const result = await suggestWorkoutPlan({
+			profile: fitnessProfile,
+			recentSessions: workoutSessions,
+			exercises: EXERCISE_DATABASE,
+			focusMuscle:
+				selectedMuscleFilter === "all" ? undefined : selectedMuscleFilter,
+		});
+
+		setIsSuggesting(false);
+
+		if (!result.ok) {
+			Alert.error("Could not build a plan", result.message);
+			return;
+		}
+
+		const { plan } = result;
+
+		const built: WorkoutExercise[] = plan.exercises.map((s, index) => {
+			const source = EXERCISE_DATABASE.find((e) => e.id === s.exerciseId);
+			return {
+				id: `${Date.now()}_${index}`,
+				exerciseId: s.exerciseId,
+				exerciseName: s.name,
+				targetMuscles: source?.targetMuscles ?? [],
+				sets: Array.from({ length: s.sets }, (_, i) => ({
+					id: `${i + 1}`,
+					setNumber: i + 1,
+					reps: s.reps,
+					weight: 0,
+					completed: false,
+					isWarmup: false,
+					isDropset: false,
+				})),
+				targetSets: s.sets,
+				targetReps: s.reps,
+				restBetweenSets: s.restSeconds,
+				order: index,
+			};
+		});
+
+		const avoidedNote =
+			plan.avoided.length > 0 ? `\n\nAvoided: ${plan.avoided.join("; ")}` : "";
+
+		Alert.alert(
+			plan.name,
+			`${plan.rationale}\n\n${plan.exercises
+				.map((e) => `• ${e.name} — ${e.sets}×${e.reps}`)
+				.join("\n")}${avoidedNote}`,
+			[
+				{ text: "Discard", style: "cancel" },
+				{
+					text: "Use Plan",
+					onPress: () => {
+						if (!planName.trim()) setPlanName(plan.name);
+						setSelectedExercises(built);
+						setShowExerciseModal(false);
+					},
+				},
+			],
+		);
 	};
 
 	const removeExerciseFromPlan = (exerciseId: string) => {
@@ -1174,30 +1244,50 @@ export default function WorkoutPlans({
 									</ScrollView>
 
 									{/* Exercise List */}
-									{(goalCategories.size > 0 ||
-										!!fitnessProfile?.fitnessLevel) && (
-										<TouchableOpacity
-											style={[
-												styles.suggestToggle,
-												suggestedOnly && styles.suggestToggleActive,
-											]}
-											onPress={() => setSuggestedOnly(!suggestedOnly)}
-										>
-											<Ionicons
-												name={suggestedOnly ? "sparkles" : "sparkles-outline"}
-												size={16}
-												color={suggestedOnly ? "#FFF" : theme.primary}
-											/>
-											<Text
+									<View style={styles.suggestRow}>
+										{(goalCategories.size > 0 ||
+											!!fitnessProfile?.fitnessLevel) && (
+											<TouchableOpacity
 												style={[
-													styles.suggestToggleText,
-													suggestedOnly && styles.suggestToggleTextActive,
+													styles.suggestToggle,
+													{ flex: 1 },
+													suggestedOnly && styles.suggestToggleActive,
 												]}
+												onPress={() => setSuggestedOnly(!suggestedOnly)}
 											>
-												Suggested for my goals
-											</Text>
+												<Ionicons
+													name={suggestedOnly ? "funnel" : "funnel-outline"}
+													size={16}
+													color={suggestedOnly ? "#FFF" : theme.primary}
+												/>
+												<Text
+													style={[
+														styles.suggestToggleText,
+														suggestedOnly && styles.suggestToggleTextActive,
+													]}
+												>
+													Suggested for my goals
+												</Text>
+											</TouchableOpacity>
+										)}
+
+										<TouchableOpacity
+											style={styles.aiPlanButton}
+											onPress={handleSuggestPlan}
+											disabled={isSuggesting}
+										>
+											{isSuggesting ? (
+												<ActivityIndicator size="small" color="#FFF" />
+											) : (
+												<>
+													<Ionicons name="sparkles" size={16} color="#FFF" />
+													<Text style={styles.aiPlanButtonText}>
+														Build with AI
+													</Text>
+												</>
+											)}
 										</TouchableOpacity>
-									)}
+									</View>
 
 									<FlatList
 										data={visibleExercises}
@@ -1903,6 +1993,28 @@ const createStyles = (theme: Theme) =>
 			color: theme.primary,
 		},
 		suggestToggleTextActive: {
+			color: "#FFF",
+		},
+		suggestRow: {
+			flexDirection: "row",
+			alignItems: "flex-start",
+			gap: 8,
+		},
+		aiPlanButton: {
+			flexDirection: "row",
+			alignItems: "center",
+			justifyContent: "center",
+			gap: 6,
+			paddingHorizontal: 14,
+			paddingVertical: 8,
+			borderRadius: 20,
+			backgroundColor: theme.primary,
+			marginBottom: 10,
+			minWidth: 120,
+		},
+		aiPlanButtonText: {
+			fontSize: 13,
+			fontWeight: "600",
 			color: "#FFF",
 		},
 		injuryFlag: {

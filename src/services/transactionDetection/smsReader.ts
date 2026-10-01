@@ -7,8 +7,14 @@
  */
 
 import { PermissionsAndroid, Platform } from "react-native";
-import { isBankSms, isTransactionSms, parseBankSms } from "./bankSmsParser";
-import { DetectedTransaction, SmsData } from "./types";
+import { parseSmsWithAi } from "./aiSmsFallback";
+import {
+	getBankName,
+	isBankSms,
+	isTransactionSms,
+	parseBankSms,
+} from "./bankSmsParser";
+import { DetectedTransaction, ParsedBankSms, SmsData } from "./types";
 
 // We'll use dynamic imports for the native module
 let SmsAndroid: any = null;
@@ -43,7 +49,7 @@ export async function checkSmsPermission(): Promise<boolean> {
 
 	try {
 		const granted = await PermissionsAndroid.check(
-			PermissionsAndroid.PERMISSIONS.READ_SMS
+			PermissionsAndroid.PERMISSIONS.READ_SMS,
 		);
 		return granted;
 	} catch (error) {
@@ -70,7 +76,7 @@ export async function requestSmsPermission(): Promise<boolean> {
 				buttonNeutral: "Ask Me Later",
 				buttonNegative: "Cancel",
 				buttonPositive: "OK",
-			}
+			},
 		);
 		return granted === PermissionsAndroid.RESULTS.GRANTED;
 	} catch (error) {
@@ -130,7 +136,7 @@ export async function readSmsMessages(options?: {
 					console.error("Error parsing SMS:", error);
 					resolve([]);
 				}
-			}
+			},
 		);
 	});
 }
@@ -165,30 +171,45 @@ export async function getRecentTransactionSms(options?: {
 	// Filter to transaction SMS and parse
 	const transactions: DetectedTransaction[] = [];
 
+	const toTransaction = (
+		sms: SmsData,
+		parsed: ParsedBankSms,
+	): DetectedTransaction => ({
+		id: `sms_${sms.id}_${Date.now()}`,
+		source: "sms",
+		type: parsed.type === "credit" ? "income" : "expense",
+		amount: parsed.amount,
+		merchant: parsed.merchant,
+		accountNumber: parsed.accountLastDigits,
+		bankName: parsed.bankName,
+		referenceId: parsed.referenceId,
+		timestamp: new Date(sms.date),
+		rawText: sms.body,
+		isProcessed: false,
+		isDismissed: false,
+	});
+
+	const unparsed: SmsData[] = [];
+
 	for (const sms of bankSms) {
-		if (!isTransactionSms(sms)) {
-			continue;
-		}
+		const parsed = isTransactionSms(sms) ? parseBankSms(sms) : null;
 
-		const parsed = parseBankSms(sms);
-		if (!parsed) {
-			continue;
+		if (parsed) {
+			transactions.push(toTransaction(sms, parsed));
+		} else {
+			unparsed.push(sms);
 		}
+	}
 
-		transactions.push({
-			id: `sms_${sms.id}_${Date.now()}`,
-			source: "sms",
-			type: parsed.type === "credit" ? "income" : "expense",
-			amount: parsed.amount,
-			merchant: parsed.merchant,
-			accountNumber: parsed.accountLastDigits,
-			bankName: parsed.bankName,
-			referenceId: parsed.referenceId,
-			timestamp: new Date(sms.date),
-			rawText: sms.body,
-			isProcessed: false,
-			isDismissed: false,
-		});
+	// Opt-in only; returns an empty map unless the user enabled it.
+	if (unparsed.length > 0) {
+		const aiResults = await parseSmsWithAi(unparsed, (sms) =>
+			getBankName(sms.address),
+		);
+		for (const sms of unparsed) {
+			const parsed = aiResults.get(sms.id);
+			if (parsed) transactions.push(toTransaction(sms, parsed));
+		}
 	}
 
 	// Sort by date, newest first
@@ -208,7 +229,7 @@ let smsCallback: ((transaction: DetectedTransaction) => void) | null = null;
 
 export function startSmsWatcher(
 	callback: (transaction: DetectedTransaction) => void,
-	intervalMs: number = 30000 // Check every 30 seconds
+	intervalMs: number = 30000, // Check every 30 seconds
 ): void {
 	if (Platform.OS !== "android") {
 		return;
@@ -231,7 +252,7 @@ export function startSmsWatcher(
 
 			// Filter to only new transactions (after last check)
 			const newTransactions = transactions.filter(
-				(t) => t.timestamp.getTime() > lastCheckedTime
+				(t) => t.timestamp.getTime() > lastCheckedTime,
 			);
 
 			// Update last checked time

@@ -1,9 +1,10 @@
 // Finance Tracker - Main Screen
 
-import { useSubscriptionCheck } from "@/src/components/PremiumFeatureGate";
 import {
-	SharedDrawer,
-} from "@/src/components/SharedDrawer";
+	PremiumFeatureGate,
+	useSubscriptionCheck,
+} from "@/src/components/PremiumFeatureGate";
+import { SharedDrawer } from "@/src/components/SharedDrawer";
 import { useFinanceStore } from "@/src/context/financeStoreDB";
 import { useModuleStore } from "@/src/context/moduleContext";
 import { Theme, useColors, useTheme } from "@/src/context/themeContext";
@@ -26,6 +27,7 @@ import {
 
 import AccountManager from "@/src/components/finance/AccountManager";
 import BudgetManager from "@/src/components/finance/BudgetManager";
+import FinanceAIInsights from "@/src/components/finance/FinanceAIInsights";
 import FinanceAnalytics from "@/src/components/finance/FinanceAnalytics";
 import FinanceDashboard from "@/src/components/finance/FinanceDashboard";
 import SplitWise from "@/src/components/finance/SplitWiseNew";
@@ -39,7 +41,8 @@ type FinanceTab =
 	| "transactions"
 	| "budgets"
 	| "split"
-	| "analytics";
+	| "analytics"
+	| "insights";
 
 export default function FinanceScreen() {
 	const router = useRouter();
@@ -70,7 +73,7 @@ export default function FinanceScreen() {
 	// Persist active tab locally
 	const [activeTab, setActiveTab, tabLoaded] = useTabPersistence<FinanceTab>(
 		"finance",
-		"dashboard"
+		"dashboard",
 	);
 	const [drawerOpen, setDrawerOpen] = useState(false);
 	const [drawerAnim] = useState(new Animated.Value(-width * 0.8));
@@ -136,6 +139,7 @@ export default function FinanceScreen() {
 		{ id: "budgets", label: "Budgets", icon: "pie-chart" },
 		{ id: "split", label: "Split", icon: "people" },
 		{ id: "analytics", label: "Analytics", icon: "stats-chart" },
+		{ id: "insights", label: "Insights", icon: "sparkles" },
 	];
 
 	const openDrawer = () => setDrawerOpen(true);
@@ -200,6 +204,16 @@ export default function FinanceScreen() {
 						onOpenDrawer={openDrawer}
 						subscriptionCheck={subscriptionCheck}
 					/>
+				);
+			case "insights":
+				return (
+					<PremiumFeatureGate feature="AI Insights" requiredPlan="pro">
+						<FinanceAIInsights
+							theme={theme}
+							currency={currency}
+							onOpenDrawer={openDrawer}
+						/>
+					</PremiumFeatureGate>
 				);
 			default:
 				return (
