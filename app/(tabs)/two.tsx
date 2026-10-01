@@ -10,6 +10,7 @@ import {
 	describeDailyReset,
 	getQuotaSnapshot,
 	QuotaSnapshot,
+	refreshQuota,
 	subscribeToQuota,
 } from "@/src/services/insights/quota";
 import { NotificationService } from "@/src/services/notificationService";
@@ -321,6 +322,7 @@ export default function SettingsScreen() {
 		[],
 	);
 	const [aiQuota, setAiQuota] = useState<QuotaSnapshot | null>(null);
+	const [isCheckingQuota, setIsCheckingQuota] = useState(false);
 	const [aiSmsEnabled, setAiSmsEnabled] = useState(false);
 
 	useEffect(() => {
@@ -328,6 +330,19 @@ export default function SettingsScreen() {
 		isAiSmsFallbackEnabled().then(setAiSmsEnabled);
 		return subscribeToQuota(setAiQuota);
 	}, []);
+
+	const handleCheckQuota = async () => {
+		setIsCheckingQuota(true);
+		const snapshot = await refreshQuota();
+		setIsCheckingQuota(false);
+
+		if (!snapshot) {
+			Alert.error(
+				"Could not check usage",
+				"The AI service could not be reached. Check your connection and try again.",
+			);
+		}
+	};
 
 	const handleToggleAiSms = (next: boolean) => {
 		if (!next) {
@@ -2419,15 +2434,48 @@ export default function SettingsScreen() {
 								iconColor={theme.textMuted}
 								iconBg={theme.textMuted + "20"}
 								label="Analyses Left Today"
-								description="Run an AI analysis to see your remaining quota"
+								description="Tap Check Usage below to see your remaining quota"
 								theme={theme}
 							/>
 						)}
+
+						<View style={styles.divider} />
+
+						<TouchableOpacity
+							style={styles.settingRow}
+							onPress={handleCheckQuota}
+							disabled={isCheckingQuota}
+						>
+							<View
+								style={[
+									styles.settingIcon,
+									{ backgroundColor: theme.primary + "20" },
+								]}
+							>
+								{isCheckingQuota ? (
+									<ActivityIndicator size="small" color={theme.primary} />
+								) : (
+									<Ionicons name="refresh" size={20} color={theme.primary} />
+								)}
+							</View>
+							<View style={styles.settingContent}>
+								<Text style={styles.settingLabel}>Check Usage</Text>
+								<Text style={styles.settingDescription}>
+									{isCheckingQuota ? "Checking…" : "Fetch the latest quota"}
+								</Text>
+							</View>
+							<Ionicons
+								name="chevron-forward"
+								size={18}
+								color={theme.textMuted}
+							/>
+						</TouchableOpacity>
 					</View>
 
 					<Text style={styles.quotaNote}>
 						The AI allowance is shared across everyone using LifeSync, not
-						reserved per account.
+						reserved per account. Checking uses one request of your daily
+						allowance.
 					</Text>
 
 					<View style={[styles.settingCard, { marginTop: 16 }]}>

@@ -6,6 +6,10 @@
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
+// Declared here rather than imported from core.ts, which imports this module.
+export const GROQ_ENDPOINT = "https://api.groq.com/openai/v1/chat/completions";
+export const GROQ_MODEL = "qwen/qwen3.8-27b";
+
 const STORAGE_KEY = "ai_quota_snapshot";
 
 export interface QuotaSnapshot {
@@ -72,6 +76,43 @@ export function subscribeToQuota(
 ): () => void {
 	listeners.add(listener);
 	return () => listeners.delete(listener);
+}
+
+/**
+ * Groq only reports quota in the headers of a completion call — /models returns
+ * none — so this sends the smallest possible one. It costs 1 request and 1
+ * output token out of 1000/day.
+ */
+export async function refreshQuota(): Promise<QuotaSnapshot | null> {
+	const apiKey = process.env.EXPO_PUBLIC_GROQ_API_KEY;
+	if (!apiKey) return null;
+
+	const controller = new AbortController();
+	const timer = setTimeout(() => controller.abort(), 15000);
+
+	try {
+		const response = await fetch(GROQ_ENDPOINT, {
+			method: "POST",
+			headers: {
+				Authorization: `Bearer ${apiKey}`,
+				"Content-Type": "application/json",
+			},
+			body: JSON.stringify({
+				model: GROQ_MODEL,
+				max_completion_tokens: 1,
+				messages: [{ role: "user", content: "." }],
+			}),
+			signal: controller.signal,
+		});
+
+		// A 429 still carries the headers, which is exactly what we want to show.
+		captureQuotaFromHeaders(response.headers);
+		return cached;
+	} catch {
+		return null;
+	} finally {
+		clearTimeout(timer);
+	}
 }
 
 /** Groq's daily request allowance resets at midnight UTC. */

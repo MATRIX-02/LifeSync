@@ -6,10 +6,9 @@
  * results in the UI and gate the feature behind a subscription check.
  */
 
-import { captureQuotaFromHeaders } from "./quota";
+import { captureQuotaFromHeaders, GROQ_ENDPOINT, GROQ_MODEL } from "./quota";
 
-const GROQ_ENDPOINT = "https://api.groq.com/openai/v1/chat/completions";
-export const GROQ_MODEL = "qwen/qwen3.8-27b";
+export { GROQ_MODEL };
 
 const REQUEST_TIMEOUT_MS = 45000;
 
