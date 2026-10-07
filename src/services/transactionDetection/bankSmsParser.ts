@@ -12,7 +12,9 @@ const AMOUNT_PATTERNS = [
 	/([\d,]+(?:\.\d{2})?)\s*(?:Rs\.?|INR|₹)?\s*(?:debited|credited|withdrawn|deposited)/i,
 ];
 
-const ACCOUNT_PATTERN = /(?:a\/c|ac|acct|account)[:\s]*[xX*]*(\d{4})/i;
+// "A/c XX1234", "acct *1234", "Card XX1234", "card ending 1234".
+const ACCOUNT_PATTERN =
+	/(?:a\/c|\bac\b|acct|account|card)(?:\s*(?:no\.?|number|ending(?:\s+in)?|ending\s+with))?[:\s]*[xX*.]*\s*(\d{4})\b/i;
 const BALANCE_PATTERN =
 	/(?:bal(?:ance)?|avl bal|available)[:\s]*(?:Rs\.?|INR|₹)?\s*([\d,]+(?:\.\d{2})?)/i;
 const REFERENCE_PATTERN = /(?:ref(?:erence)?|txn|utr|rrn)[:\s#]*([A-Z0-9]+)/i;
@@ -79,6 +81,9 @@ const BANK_NAMES: Record<string, string> = {
  */
 export function isBankSms(sender: string): boolean {
 	const normalizedSender = sender.replace(/[^A-Za-z]/g, "").toUpperCase();
+	// A phone number normalises to "" (and a short name to "AU"), which every
+	// bank ID "includes" - so the reverse check needs a real sender ID.
+	if (normalizedSender.length < 4) return false;
 
 	return BANK_SENDER_IDS.some((bankId) => {
 		const normalizedBankId = bankId.toUpperCase();
@@ -121,26 +126,56 @@ function extractAmount(text: string): number | null {
 	return null;
 }
 
+// Verbs that say which way the money moved. The FIRST one in the message
+// wins: "Rs 250 debited from A/c XX1234 and credited to SWIGGY" is a debit
+// for the user, though it contains "credited". Checking credit words first
+// (the old behaviour) read every such message, and any "credit card" spend,
+// as income.
+const DEBIT_VERBS =
+	/\b(debited|spent|withdrawn|paid|sent|purchase[d]?|transferred|deducted|used at|charged)\b/i;
+const CREDIT_VERBS =
+	/\b(credited|received|deposited|refund(?:ed)?|cashback|reversed|added to)\b/i;
+
+/** "debit" | "credit" by whichever direction verb appears first. */
+export function detectDirection(text: string): "credit" | "debit" | null {
+	// "credit card" / "debit card" name the instrument, not the direction.
+	const t = text.replace(/\b(credit|debit)\s+card\b/gi, "card");
+	const d = t.search(DEBIT_VERBS);
+	const c = t.search(CREDIT_VERBS);
+	if (d === -1 && c === -1) return null;
+	if (d === -1) return "credit";
+	if (c === -1) return "debit";
+	return d < c ? "debit" : "credit";
+}
+
+/** Card payments report as card spends rather than bank transfers. */
+export function extractCardType(
+	text: string,
+): "credit_card" | "debit_card" | undefined {
+	if (/\bcredit\s+card\b/i.test(text)) return "credit_card";
+	if (/\bdebit\s+card\b/i.test(text)) return "debit_card";
+	return undefined;
+}
+
+// Alerts that mention money but aren't a completed transaction.
+const NOT_COMPLETED =
+	/\b(will be (?:debited|credited|deducted)|is due|due (?:on|by|date)|requested|request(?:ing)? (?:money|payment|rs|₹|inr)|collect request|declined|failed|unsuccessful|reversal initiated|otp|one time password|verification code|e-?mandate|autopay (?:set|registered)|minimum amount due|total amount due|statement)\b/i;
+
+/** True for "will be debited", payment requests, failures, bills due, OTPs. */
+export function isNotCompletedTransaction(text: string): boolean {
+	return NOT_COMPLETED.test(text);
+}
+
 /**
  * Determine if transaction is credit or debit
  */
 function getTransactionType(text: string): "credit" | "debit" | null {
+	const direction = detectDirection(text);
+	if (direction) return direction;
+	// Weaker nouns ("txn", "pos", "atm") only when no verb said otherwise.
 	const lowerText = text.toLowerCase();
-
-	// Check for credit keywords
-	for (const keyword of CREDIT_KEYWORDS) {
-		if (lowerText.includes(keyword)) {
-			return "credit";
-		}
-	}
-
-	// Check for debit keywords
-	for (const keyword of DEBIT_KEYWORDS) {
-		if (lowerText.includes(keyword)) {
-			return "debit";
-		}
-	}
-
+	if (CREDIT_KEYWORDS.some((k) => lowerText.includes(k))) return "credit";
+	if (DEBIT_KEYWORDS.some((k) => lowerText.includes(k))) return "debit";
 	return null;
 }
 
@@ -181,6 +216,9 @@ function extractReferenceId(text: string): string | undefined {
 function extractMerchant(text: string): string | undefined {
 	// Common patterns for merchant extraction
 	const patterns = [
+		// "from rahul@okaxis", "to VPA swiggy@icici" - a UPI ID beats the
+		// generic pattern below, which stops at the "@".
+		/(?:from|to)\s+(?:VPA\s+)?([a-zA-Z0-9._-]+@[a-zA-Z0-9]+)/i,
 		/(?:to|at|for|@)\s+([A-Za-z0-9\s]+?)(?:\s+on|\s+ref|\s+upi|\s+via|\.\s|$)/i,
 		/(?:from)\s+([A-Za-z0-9\s]+?)(?:\s+on|\s+ref|\.\s|$)/i,
 		/VPA\s+([a-zA-Z0-9._-]+@[a-zA-Z0-9]+)/i,
@@ -189,9 +227,9 @@ function extractMerchant(text: string): string | undefined {
 	for (const pattern of patterns) {
 		const match = text.match(pattern);
 		if (match && match[1]) {
-			const merchant = match[1].trim();
+			const merchant = cleanMerchant(match[1]);
 			// Filter out common non-merchant words
-			if (merchant.length > 2 && merchant.length < 50) {
+			if (merchant && merchant.length > 2 && merchant.length < 50) {
 				return merchant;
 			}
 		}
@@ -201,19 +239,24 @@ function extractMerchant(text: string): string | undefined {
 }
 
 /**
+ * "swiggy@icici" -> "swiggy"; "VPA zomato.order@hdfc" -> "zomato order".
+ * A UPI ID's handle is the bank, not the payee, so keep the local part.
+ */
+export function cleanMerchant(raw: string): string | undefined {
+	let m = raw.trim().replace(/^VPA\s+/i, "");
+	if (m.includes("@")) m = m.split("@")[0].replace(/[._-]+/g, " ");
+	m = m.replace(/\s+/g, " ").trim();
+	return m || undefined;
+}
+
+/**
  * Check if this is a transaction SMS (not OTP/promotional)
  */
 export function isTransactionSms(sms: SmsData): boolean {
 	const text = sms.body.toLowerCase();
 
-	// Skip OTP messages
-	if (
-		text.includes("otp") ||
-		text.includes("one time password") ||
-		text.includes("verification code")
-	) {
-		return false;
-	}
+	// OTPs, payment requests, failed/declined, "will be debited", bills due.
+	if (isNotCompletedTransaction(text)) return false;
 
 	// Skip promotional messages
 	if (

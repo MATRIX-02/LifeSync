@@ -9,6 +9,7 @@
 import { PermissionsAndroid, Platform } from "react-native";
 import { parseSmsWithAi } from "./aiSmsFallback";
 import {
+	extractCardType,
 	getBankName,
 	isBankSms,
 	isTransactionSms,
@@ -175,7 +176,8 @@ export async function getRecentTransactionSms(options?: {
 		sms: SmsData,
 		parsed: ParsedBankSms,
 	): DetectedTransaction => ({
-		id: `sms_${sms.id}_${Date.now()}`,
+		// Stable per SMS, so re-scanning the inbox recognises what it has seen.
+		id: `sms_${sms.id}`,
 		source: "sms",
 		type: parsed.type === "credit" ? "income" : "expense",
 		amount: parsed.amount,
@@ -187,6 +189,7 @@ export async function getRecentTransactionSms(options?: {
 		rawText: sms.body,
 		isProcessed: false,
 		isDismissed: false,
+		cardType: extractCardType(sms.body),
 	});
 
 	const unparsed: SmsData[] = [];
@@ -218,62 +221,6 @@ export async function getRecentTransactionSms(options?: {
 	return transactions;
 }
 
-/**
- * Watch for new SMS messages
- * Note: This requires a background service which may not work in Expo
- * For production, consider using a native module or headless JS
- */
-let smsWatchInterval: ReturnType<typeof setInterval> | null = null;
-let lastCheckedTime: number = Date.now();
-let smsCallback: ((transaction: DetectedTransaction) => void) | null = null;
-
-export function startSmsWatcher(
-	callback: (transaction: DetectedTransaction) => void,
-	intervalMs: number = 30000, // Check every 30 seconds
-): void {
-	if (Platform.OS !== "android") {
-		return;
-	}
-
-	smsCallback = callback;
-	lastCheckedTime = Date.now();
-
-	// Clear existing interval
-	if (smsWatchInterval) {
-		clearInterval(smsWatchInterval);
-	}
-
-	smsWatchInterval = setInterval(async () => {
-		try {
-			const transactions = await getRecentTransactionSms({
-				maxCount: 20,
-				hoursBack: 1,
-			});
-
-			// Filter to only new transactions (after last check)
-			const newTransactions = transactions.filter(
-				(t) => t.timestamp.getTime() > lastCheckedTime,
-			);
-
-			// Update last checked time
-			lastCheckedTime = Date.now();
-
-			// Call callback for each new transaction
-			for (const transaction of newTransactions) {
-				if (smsCallback) {
-					smsCallback(transaction);
-				}
-			}
-		} catch (error) {
-			console.error("Error watching SMS:", error);
-		}
-	}, intervalMs);
-}
-
-export function stopSmsWatcher(): void {
-	if (smsWatchInterval) {
-		clearInterval(smsWatchInterval);
-		smsWatchInterval = null;
-	}
-	smsCallback = null;
-}
+// Live detection is the notification listener (see notificationListener.ts):
+// each bank SMS shows up as a Messages notification, even with the app closed.
+// getRecentTransactionSms above is the catch-up scan run when the app opens.

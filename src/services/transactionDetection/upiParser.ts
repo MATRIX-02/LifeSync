@@ -4,6 +4,11 @@
  */
 
 import {
+	cleanMerchant,
+	detectDirection,
+	isNotCompletedTransaction,
+} from "./bankSmsParser";
+import {
 	NotificationData,
 	ParsedUpiTransaction,
 	UPI_APP_PACKAGES,
@@ -97,6 +102,10 @@ function extractAmount(text: string): number | null {
  * Determine if transaction is credit or debit
  */
 function getTransactionType(text: string): "credit" | "debit" {
+	// First direction verb wins (see detectDirection) - "paid ... cashback
+	// received" is a payment, not income.
+	const direction = detectDirection(text);
+	if (direction) return direction;
 	const lowerText = text.toLowerCase();
 
 	// Check for credit keywords first (refunds, cashback)
@@ -131,7 +140,7 @@ function extractMerchant(text: string): string | undefined {
 	for (const pattern of patterns) {
 		const match = text.match(pattern);
 		if (match && match[1]) {
-			const merchant = match[1].trim();
+			const merchant = cleanMerchant(match[1]) ?? "";
 			// Filter out common non-merchant words
 			if (
 				merchant.length > 1 &&
@@ -167,6 +176,8 @@ function extractReferenceId(text: string): string | undefined {
 export function parseUpiNotification(
 	notification: NotificationData
 ): ParsedUpiTransaction | null {
+	// Title and body are separate sentences - keep them apart, or "paid to
+	// Netflix" + "You also won ..." reads as one merchant name.
 	const fullText = [
 		notification.title,
 		notification.text,
@@ -174,7 +185,7 @@ export function parseUpiNotification(
 		notification.subText,
 	]
 		.filter(Boolean)
-		.join(" ");
+		.join(". ");
 
 	// Skip non-transaction notifications
 	const skipKeywords = [
@@ -191,6 +202,9 @@ export function parseUpiNotification(
 		"rate us",
 		"feedback",
 	];
+
+	// Collect requests ("X requested ₹500"), failures and reminders.
+	if (isNotCompletedTransaction(fullText)) return null;
 
 	const lowerText = fullText.toLowerCase();
 	if (skipKeywords.some((keyword) => lowerText.includes(keyword))) {
@@ -234,6 +248,8 @@ export function isTransactionNotification(
 		.filter(Boolean)
 		.join(" ")
 		.toLowerCase();
+
+	if (isNotCompletedTransaction(fullText)) return false;
 
 	// Must contain amount
 	const hasAmount = AMOUNT_PATTERNS.some((p) => p.test(fullText));

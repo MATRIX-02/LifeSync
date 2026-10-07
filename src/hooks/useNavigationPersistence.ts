@@ -23,7 +23,11 @@ const IGNORED_ROUTES = ["/modal", "/auth", "/admin", "/subscription"];
  * Hook to open the first enabled module at startup and persist current routes.
  * Call this in your root layout.
  */
-export function useNavigationPersistence(readyForStartupRoute = true) {
+export function useNavigationPersistence(
+	readyForStartupRoute = true,
+	/** Opened from a notification that targets a screen: start there instead. */
+	startupRouteOverride?: string | null,
+) {
 	const pathname = usePathname();
 	const router = useRouter();
 	const rootNavigationState = useRootNavigationState();
@@ -45,7 +49,7 @@ export function useNavigationPersistence(readyForStartupRoute = true) {
 			return;
 		}
 		hasRestored.current = true;
-		const route = getDefaultModuleRoute();
+		const route = startupRouteOverride ?? getDefaultModuleRoute();
 		const timeout = setTimeout(() => router.replace(route as any), 100);
 		return () => clearTimeout(timeout);
 	}, [

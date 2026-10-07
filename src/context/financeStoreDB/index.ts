@@ -21,12 +21,20 @@ import type {
 // Cast to any to bypass strict TS type checking for Supabase queries
 const supabase = supabaseClient as any;
 
-// PostgREST schema-cache error for savings_goals.category, i.e. the
-// 20261007_finance_category_columns.sql migration hasn't been run.
-const isMissingCategoryColumn = (error: any) =>
+// PostgREST schema-cache error for a column a pending migration adds - e.g.
+// savings_goals.category (20261007_finance_category_columns.sql) or
+// finance_accounts.linked_digits (20261008_account_linked_digits.sql).
+// Callers retry without the column so the rest of the write still lands.
+const isMissingColumn = (error: any, column: string) =>
 	!!error &&
 	(error.code === "PGRST204" || /schema cache/i.test(error.message || "")) &&
-	/'category'/.test(error.message || "");
+	(error.message || "").includes(`'${column}'`);
+const isMissingCategoryColumn = (error: any) => isMissingColumn(error, "category");
+
+const withoutKey = (row: Record<string, any>, key: string) => {
+	const { [key]: _omit, ...rest } = row;
+	return rest;
+};
 
 export type { FinanceStore } from "./storeInterface";
 export * from "./types";
@@ -371,9 +379,13 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
 			createdAt: new Date().toISOString(),
 			updatedAt: new Date().toISOString(),
 		};
-		const { error } = await supabase
-			.from("finance_accounts")
-			.insert(objectToSnakeCase({ ...newAccount, user_id: userId }));
+		const row = objectToSnakeCase({ ...newAccount, user_id: userId });
+		let { error } = await supabase.from("finance_accounts").insert(row);
+		if (isMissingColumn(error, "linked_digits")) {
+			({ error } = await supabase
+				.from("finance_accounts")
+				.insert(withoutKey(row, "linked_digits")));
+		}
 		if (error) {
 			console.error("Error adding account:", error);
 			return;
@@ -389,11 +401,16 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
 			...updates,
 			updated_at: new Date().toISOString(),
 		});
-		const { error } = await supabase
-			.from("finance_accounts")
-			.update(dbData)
-			.eq("id", id)
-			.eq("user_id", userId);
+		const run = (data: any) =>
+			supabase
+				.from("finance_accounts")
+				.update(data)
+				.eq("id", id)
+				.eq("user_id", userId);
+		let { error } = await run(dbData);
+		if (isMissingColumn(error, "linked_digits")) {
+			({ error } = await run(withoutKey(dbData, "linked_digits")));
+		}
 		if (error) {
 			console.error("Error updating account:", error);
 			return;

@@ -27,6 +27,7 @@ import {
 
 import AccountManager from "@/src/components/finance/AccountManager";
 import BudgetManager from "@/src/components/finance/BudgetManager";
+import DetectedTransactions from "@/src/components/finance/DetectedTransactions";
 import FinanceAIInsights from "@/src/components/finance/FinanceAIInsights";
 import FinanceAnalytics from "@/src/components/finance/FinanceAnalytics";
 import FinanceDashboard from "@/src/components/finance/FinanceDashboard";
@@ -282,6 +283,13 @@ export default function FinanceScreen() {
 					</TouchableOpacity>
 				</View>
 			</View>
+
+			{/* Auto-detected payments waiting for review */}
+			<DetectedTransactions
+				theme={theme}
+				currency={currency}
+				hasAccounts={accounts.length > 0}
+			/>
 
 			{/* Bottom Tab Bar */}
 			<View style={styles.tabBar}>

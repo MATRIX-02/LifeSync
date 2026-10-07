@@ -33,6 +33,26 @@ module.exports = function withNotificationListener(config) {
 			application.$["tools:replace"] += ",android:allowBackup";
 		}
 
+		// Remove the library's BootUpReceiver. On boot it calls
+		// startForegroundService() on the NotificationListenerService, which
+		// never calls startForeground() - so Android kills the app with an ANR
+		// ("Context.startForegroundService() did not then call
+		// Service.startForeground()"). It isn't needed: Android binds an enabled
+		// notification listener on its own, including after a reboot.
+		const BOOT_RECEIVER =
+			"com.lesimoes.androidnotificationlistener.BootUpReceiver";
+		application.receiver = application.receiver ?? [];
+		const existing = application.receiver.find(
+			(r) => r.$?.["android:name"] === BOOT_RECEIVER,
+		);
+		if (existing) {
+			existing.$["tools:node"] = "remove";
+		} else {
+			application.receiver.push({
+				$: { "android:name": BOOT_RECEIVER, "tools:node": "remove" },
+			});
+		}
+
 		return config;
 	});
 };

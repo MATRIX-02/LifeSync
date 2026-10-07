@@ -1,12 +1,18 @@
 /**
- * Transaction Detection Store
- * Zustand store for managing detected transactions from notifications and SMS
+ * Transaction Detection Store - UI layer over the shared detection queue.
+ *
+ * Detection itself runs in the background headless task
+ * (services/transactionDetection/headlessTask.ts), which writes to an
+ * AsyncStorage queue. This store mirrors that queue for the UI, handles
+ * permissions, and runs the SMS inbox catch-up scan when the app opens.
+ *
+ * Not persisted with zustand: the queue in AsyncStorage is the single source
+ * of truth, shared with the headless task.
  */
 
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import { Platform } from "react-native";
+import { AppState, Platform } from "react-native";
 import { create } from "zustand";
-import { createJSONStorage, persist } from "zustand/middleware";
+import { NotificationService } from "../services/notificationService";
 import {
 	checkNotificationPermission,
 	checkSmsPermission,
@@ -14,291 +20,142 @@ import {
 	getRecentTransactionSms,
 	requestNotificationPermission,
 	requestSmsPermission,
-	startNotificationListener,
-	startSmsWatcher,
-	stopNotificationListener,
-	stopSmsWatcher,
 } from "../services/transactionDetection";
+import {
+	clearPending as clearQueue,
+	DetectionSettings,
+	enqueue,
+	getDetectionSettings,
+	listPending,
+	markHandled,
+	updateDetectionSettings,
+} from "../services/transactionDetection/detectionQueue";
+
+/** Don't rescan the SMS inbox more often than this. */
+const INBOX_SCAN_INTERVAL_MS = 15 * 60 * 1000;
 
 interface TransactionDetectionState {
-	// Detected transactions pending user action
 	pendingTransactions: DetectedTransaction[];
+	settings: DetectionSettings;
+	notificationAccess: boolean;
+	smsAccess: boolean;
+	/** Set when the app was opened from a detection notification. */
+	focusId: string | null;
 
-	// Processed transaction IDs (to avoid duplicates)
-	processedIds: string[];
-
-	// Dismissed transaction IDs
-	dismissedIds: string[];
-
-	// Settings
-	settings: {
-		notificationListenerEnabled: boolean;
-		smsReaderEnabled: boolean;
-		autoShowPrompt: boolean;
-		notificationPermissionGranted: boolean;
-		smsPermissionGranted: boolean;
-	};
-
-	// Service status
-	isListening: boolean;
-	isSmsWatching: boolean;
-
-	// Actions
-	addDetectedTransaction: (transaction: DetectedTransaction) => void;
-	markAsProcessed: (id: string) => void;
-	dismissTransaction: (id: string) => void;
-	clearPending: () => void;
-
-	// Permission & service management
-	checkPermissions: () => Promise<void>;
-	requestNotificationAccess: () => Promise<boolean>;
+	/** Reload queue, settings and permission status. */
+	refresh: () => Promise<void>;
+	setEnabled: (enabled: boolean) => Promise<void>;
+	setNotify: (notify: boolean) => Promise<void>;
+	requestNotificationAccess: () => Promise<void>;
 	requestSmsAccess: () => Promise<boolean>;
-	startListening: () => Promise<void>;
-	stopListening: () => void;
-	scanRecentSms: () => Promise<DetectedTransaction[]>;
-
-	// Settings
-	toggleNotificationListener: (enabled: boolean) => void;
-	toggleSmsReader: (enabled: boolean) => void;
-	toggleAutoShowPrompt: (enabled: boolean) => void;
+	/** Catch-up: scan recent bank SMS for anything the listener missed. */
+	scanRecentSms: (force?: boolean) => Promise<number>;
+	markAsProcessed: (id: string) => Promise<void>;
+	dismissTransaction: (id: string) => Promise<void>;
+	clearPending: () => Promise<void>;
+	setFocusId: (id: string | null) => void;
 }
 
 export const useTransactionDetectionStore = create<TransactionDetectionState>()(
-	persist(
-		(set, get) => ({
-			pendingTransactions: [],
-			processedIds: [],
-			dismissedIds: [],
-			settings: {
-				notificationListenerEnabled: true,
-				smsReaderEnabled: true,
-				autoShowPrompt: true,
-				notificationPermissionGranted: false,
-				smsPermissionGranted: false,
-			},
-			isListening: false,
-			isSmsWatching: false,
+	(set, get) => ({
+		pendingTransactions: [],
+		settings: { enabled: false, notify: true, lastInboxScan: 0 },
+		notificationAccess: false,
+		smsAccess: false,
+		focusId: null,
 
-			addDetectedTransaction: (transaction) => {
-				const { processedIds, dismissedIds, pendingTransactions } = get();
-
-				// Skip if already processed or dismissed
-				if (
-					processedIds.includes(transaction.id) ||
-					dismissedIds.includes(transaction.id)
-				) {
-					return;
-				}
-
-				// Check for duplicate by reference ID
-				if (transaction.referenceId) {
-					const hasDuplicate = pendingTransactions.some(
-						(t) => t.referenceId === transaction.referenceId,
-					);
-					if (hasDuplicate) {
-						return;
-					}
-				}
-
-				// Check for very similar transaction (same amount and close timestamp)
-				const twoMinutes = 2 * 60 * 1000;
-				const hasSimilar = pendingTransactions.some(
-					(t) =>
-						t.amount === transaction.amount &&
-						Math.abs(t.timestamp.getTime() - transaction.timestamp.getTime()) <
-							twoMinutes,
-				);
-				if (hasSimilar) {
-					return;
-				}
-
-				set({
-					pendingTransactions: [transaction, ...pendingTransactions].slice(
-						0,
-						50,
-					), // Keep max 50
-				});
-			},
-
-			markAsProcessed: (id) => {
-				const { pendingTransactions, processedIds } = get();
-				set({
-					pendingTransactions: pendingTransactions.filter((t) => t.id !== id),
-					processedIds: [...processedIds, id].slice(-200), // Keep last 200
-				});
-			},
-
-			dismissTransaction: (id) => {
-				const { pendingTransactions, dismissedIds } = get();
-				set({
-					pendingTransactions: pendingTransactions.filter((t) => t.id !== id),
-					dismissedIds: [...dismissedIds, id].slice(-200),
-				});
-			},
-
-			clearPending: () => {
-				set({ pendingTransactions: [] });
-			},
-
-			checkPermissions: async () => {
-				if (Platform.OS !== "android") return;
-
-				const notificationPermission = await checkNotificationPermission();
-				const smsPermission = await checkSmsPermission();
-
-				set({
-					settings: {
-						...get().settings,
-						notificationPermissionGranted: notificationPermission,
-						smsPermissionGranted: smsPermission,
-					},
-				});
-			},
-
-			requestNotificationAccess: async () => {
-				if (Platform.OS !== "android") return false;
-
-				await requestNotificationPermission();
-				// Check again after returning from settings
-				const granted = await checkNotificationPermission();
-
-				set({
-					settings: {
-						...get().settings,
-						notificationPermissionGranted: granted,
-					},
-				});
-
-				return granted;
-			},
-
-			requestSmsAccess: async () => {
-				if (Platform.OS !== "android") return false;
-
-				const granted = await requestSmsPermission();
-
-				set({
-					settings: {
-						...get().settings,
-						smsPermissionGranted: granted,
-					},
-				});
-
-				return granted;
-			},
-
-			startListening: async () => {
-				if (Platform.OS !== "android") return;
-
-				const { settings, addDetectedTransaction, isListening, isSmsWatching } =
-					get();
-
-				// Start notification listener
-				if (
-					!isListening &&
-					settings.notificationListenerEnabled &&
-					settings.notificationPermissionGranted
-				) {
-					const started = await startNotificationListener((transaction) => {
-						addDetectedTransaction(transaction);
-					});
-					if (started) {
-						set({ isListening: true });
-					}
-				}
-
-				// Start SMS watcher
-				if (
-					!isSmsWatching &&
-					settings.smsReaderEnabled &&
-					settings.smsPermissionGranted
-				) {
-					startSmsWatcher((transaction) => {
-						addDetectedTransaction(transaction);
-					}, 30000);
-					set({ isSmsWatching: true });
-				}
-			},
-
-			stopListening: () => {
-				stopNotificationListener();
-				stopSmsWatcher();
-				set({ isListening: false, isSmsWatching: false });
-			},
-
-			scanRecentSms: async () => {
-				if (Platform.OS !== "android") return [];
-
-				const { settings, addDetectedTransaction } = get();
-
-				if (!settings.smsPermissionGranted) {
-					return [];
-				}
-
-				const transactions = await getRecentTransactionSms({
-					maxCount: 50,
-					hoursBack: 48, // Last 48 hours
-				});
-
-				// Add to pending
-				for (const t of transactions) {
-					addDetectedTransaction(t);
-				}
-
-				return transactions;
-			},
-
-			toggleNotificationListener: (enabled) => {
-				set({
-					settings: {
-						...get().settings,
-						notificationListenerEnabled: enabled,
-					},
-				});
-
-				// Restart services if needed
-				if (enabled) {
-					get().startListening();
-				} else {
-					stopNotificationListener();
-					set({ isListening: false });
-				}
-			},
-
-			toggleSmsReader: (enabled) => {
-				set({
-					settings: {
-						...get().settings,
-						smsReaderEnabled: enabled,
-					},
-				});
-
-				// Restart services if needed
-				if (enabled) {
-					get().startListening();
-				} else {
-					stopSmsWatcher();
-					set({ isSmsWatching: false });
-				}
-			},
-
-			toggleAutoShowPrompt: (enabled) => {
-				set({
-					settings: {
-						...get().settings,
-						autoShowPrompt: enabled,
-					},
-				});
-			},
-		}),
-		{
-			name: "transaction-detection-storage",
-			storage: createJSONStorage(() => AsyncStorage),
-			partialize: (state) => ({
-				processedIds: state.processedIds,
-				dismissedIds: state.dismissedIds,
-				settings: state.settings,
-			}),
+		refresh: async () => {
+			if (Platform.OS !== "android") return;
+			const [pendingTransactions, settings, notificationAccess, smsAccess] =
+				await Promise.all([
+					listPending(),
+					getDetectionSettings(),
+					checkNotificationPermission(),
+					checkSmsPermission(),
+				]);
+			set({ pendingTransactions, settings, notificationAccess, smsAccess });
 		},
-	),
+
+		setEnabled: async (enabled) => {
+			const settings = await updateDetectionSettings({ enabled });
+			set({ settings });
+			if (enabled) await get().scanRecentSms(true);
+		},
+
+		setNotify: async (notify) => {
+			set({ settings: await updateDetectionSettings({ notify }) });
+		},
+
+		requestNotificationAccess: async () => {
+			// Opens system settings; refreshed when the app returns (AppState).
+			await requestNotificationPermission();
+		},
+
+		requestSmsAccess: async () => {
+			const granted = await requestSmsPermission();
+			set({ smsAccess: granted });
+			if (granted && get().settings.enabled) await get().scanRecentSms(true);
+			return granted;
+		},
+
+		scanRecentSms: async (force = false) => {
+			if (Platform.OS !== "android") return 0;
+			const settings = await getDetectionSettings();
+			if (!settings.enabled || !(await checkSmsPermission())) return 0;
+			if (!force && Date.now() - settings.lastInboxScan < INBOX_SCAN_INTERVAL_MS) {
+				return 0;
+			}
+			await updateDetectionSettings({ lastInboxScan: Date.now() });
+
+			let added = 0;
+			try {
+				const found = await getRecentTransactionSms({ maxCount: 100, hoursBack: 48 });
+				for (const tx of found) if (await enqueue(tx)) added++;
+			} catch (error) {
+				console.warn("SMS catch-up scan failed:", error);
+			}
+			set({ pendingTransactions: await listPending() });
+			return added;
+		},
+
+		markAsProcessed: async (id) => {
+			await markHandled(id, "added");
+			void NotificationService.cancelDetectedTransaction(id);
+			set({ pendingTransactions: await listPending() });
+		},
+
+		dismissTransaction: async (id) => {
+			await markHandled(id, "ignored");
+			void NotificationService.cancelDetectedTransaction(id);
+			set({ pendingTransactions: await listPending() });
+		},
+
+		clearPending: async () => {
+			const ids = get().pendingTransactions.map((t) => t.id);
+			await clearQueue();
+			ids.forEach((id) => void NotificationService.cancelDetectedTransaction(id));
+			set({ pendingTransactions: [] });
+		},
+
+		setFocusId: (focusId) => set({ focusId }),
+	}),
 );
+
+/**
+ * Keep the store in step with the background task: refresh (and run the
+ * throttled inbox catch-up) whenever the app comes to the foreground.
+ * Call once from the root layout; returns an unsubscribe.
+ */
+export function watchDetectionQueue(): () => void {
+	if (Platform.OS !== "android") return () => {};
+	const store = useTransactionDetectionStore.getState();
+	const sync = async () => {
+		await store.refresh();
+		await store.scanRecentSms();
+	};
+	void sync();
+	const sub = AppState.addEventListener("change", (state) => {
+		if (state === "active") void sync();
+	});
+	return () => sub.remove();
+}

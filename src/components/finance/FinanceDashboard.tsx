@@ -1,5 +1,10 @@
 // Finance Dashboard - Main overview with quick actions
 import { Alert } from "@/src/components/CustomAlert";
+import AccountDigitsField from "@/src/components/finance/AccountDigitsField";
+import {
+	formatDigits,
+	parseDigitsInput,
+} from "@/src/services/transactionDetection/accountLinks";
 import AddTransactionModal from "@/src/components/finance/AddTransactionModal";
 import { LoadingState } from "@/src/components/LoadingState";
 import { SubscriptionCheckResult } from "@/src/components/PremiumFeatureGate";
@@ -92,6 +97,7 @@ export default function FinanceDashboard({
 	const [accountType, setAccountType] = useState<Account["type"]>("bank");
 	const [accountBalance, setAccountBalance] = useState("");
 	const [accountColor, setAccountColor] = useState(COLORS[0]);
+	const [accountDigits, setAccountDigits] = useState("");
 
 	// Editing Account State
 	const [editingAccount, setEditingAccount] = useState<Account | null>(null);
@@ -100,12 +106,27 @@ export default function FinanceDashboard({
 		type: Account["type"];
 		balance: string;
 		color: string;
+		digits: string;
 	}>({
 		name: "",
 		type: "bank",
 		balance: "",
 		color: COLORS[0],
+		digits: "",
 	});
+
+	// One set of digits belongs to one account: saving them here takes them
+	// off any other account that listed them.
+	const releaseDigitsFromOthers = (accountId: string | null, digits: string[]) => {
+		if (digits.length === 0) return;
+		for (const acc of accounts) {
+			if (acc.id === accountId || !acc.linkedDigits?.length) continue;
+			const kept = acc.linkedDigits.filter((d) => !digits.includes(d));
+			if (kept.length !== acc.linkedDigits.length) {
+				void updateAccount(acc.id, { linkedDigits: kept });
+			}
+		}
+	};
 
 	// Analytics
 	const today = new Date().toISOString().split("T")[0];
@@ -147,6 +168,8 @@ export default function FinanceDashboard({
 						: "wallet",
 			isDefault: accounts.length === 0,
 		};
+		const digits = parseDigitsInput(accountDigits);
+		if (digits.length > 0) accountData.linkedDigits = digits;
 
 		// For credit card, use creditLimit; for other types, use balance
 		if (accountType === "credit_card") {
@@ -158,10 +181,12 @@ export default function FinanceDashboard({
 			accountData.balance = parseFloat(accountBalance) || 0;
 		}
 
+		releaseDigitsFromOthers(null, digits);
 		addAccount(accountData);
 
 		setAccountName("");
 		setAccountBalance("");
+		setAccountDigits("");
 		setAccountType("bank");
 		setShowAddAccount(false);
 		Alert.alert("Success", "Account added successfully!");
@@ -192,6 +217,7 @@ export default function FinanceDashboard({
 					? String(account.creditLimit || 0)
 					: String(account.balance),
 			color: account.color,
+			digits: formatDigits(account.linkedDigits),
 		});
 	};
 
@@ -202,12 +228,14 @@ export default function FinanceDashboard({
 			name: editForm.name,
 			type: editForm.type as Account["type"],
 			color: editForm.color,
+			linkedDigits: parseDigitsInput(editForm.digits),
 		};
 		if (editForm.type === "credit_card") {
 			updated.creditLimit = parseFloat(editForm.balance) || 0;
 		} else {
 			updated.balance = parseFloat(editForm.balance) || 0;
 		}
+		releaseDigitsFromOthers(updated.id, updated.linkedDigits ?? []);
 		updateAccount(updated.id, updated);
 		setEditingAccount(null);
 	};
@@ -913,6 +941,16 @@ export default function FinanceDashboard({
 								</View>
 							</View>
 
+							<AccountDigitsField
+								value={accountDigits}
+								onChange={setAccountDigits}
+								theme={theme}
+								accountType={accountType}
+								groupStyle={styles.formGroup}
+								labelStyle={styles.formLabel}
+								inputStyle={styles.formInput}
+							/>
+
 							<TouchableOpacity
 								style={styles.submitButton}
 								onPress={handleAddAccount}
@@ -1043,6 +1081,15 @@ export default function FinanceDashboard({
 										))}
 									</View>
 								</View>
+								<AccountDigitsField
+									value={editForm.digits}
+									onChange={(digits) => setEditForm({ ...editForm, digits })}
+									theme={theme}
+									accountType={editForm.type}
+									groupStyle={styles.formGroup}
+									labelStyle={styles.formLabel}
+									inputStyle={styles.formInput}
+								/>
 								<TouchableOpacity
 									style={styles.submitButton}
 									onPress={handleSave}

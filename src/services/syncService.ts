@@ -805,9 +805,23 @@ export const syncFinanceToCloud = async (
 				}),
 			);
 
-			const { error: accountsError } = await (
+			let { error: accountsError } = await (
 				supabase.from("finance_accounts") as any
 			).upsert(accountsWithUser, { onConflict: "id" });
+
+			// linked_digits needs 20261008_account_linked_digits.sql; until it is
+			// run, sync the accounts without it rather than failing the whole sync.
+			if (
+				accountsError &&
+				(accountsError.message || "").includes("'linked_digits'")
+			) {
+				({ error: accountsError } = await (
+					supabase.from("finance_accounts") as any
+				).upsert(
+					accountsWithUser.map(({ linked_digits: _d, ...rest }: any) => rest),
+					{ onConflict: "id" },
+				));
+			}
 
 			if (accountsError) throw accountsError;
 		}

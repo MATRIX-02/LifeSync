@@ -26,6 +26,10 @@ import { useAuthStore } from "@/src/context/authStore";
 import { useHabitStore } from "@/src/context/habitStoreDB";
 import { useModuleStore } from "@/src/context/moduleContext";
 import { ThemeProvider, useTheme } from "@/src/context/themeContext";
+import {
+	useTransactionDetectionStore,
+	watchDetectionQueue,
+} from "@/src/context/transactionDetectionStore";
 import { useNavigationPersistence } from "@/src/hooks/useNavigationPersistence";
 import { useSyncManager } from "@/src/hooks/useSyncManager";
 import { AudioService } from "@/src/services/audioService";
@@ -172,9 +176,29 @@ function RootLayoutNav() {
 	const navigatorReady = !!rootNavigationState?.key;
 	const [isInitialized, setIsInitialized] = useState(false);
 
+	// Cold start from a "Tap to add" detection: read the launching tap once,
+	// before the startup route is chosen, so the app opens on Money Hub with
+	// that payment's review sheet instead of the default module. (A push from
+	// an effect here gets overwritten by the startup route.)
+	const [launchDetectionId] = useState<string | null>(() => {
+		try {
+			const data = Notifications.getLastNotificationResponse()?.notification.request
+				.content.data;
+			if (data?.type === "detected_transaction" && typeof data.id === "string") {
+				Notifications.clearLastNotificationResponse();
+				useTransactionDetectionStore.getState().setFocusId(data.id);
+				return data.id;
+			}
+		} catch {
+			// No notification module (web) - nothing to do.
+		}
+		return null;
+	});
+
 	// Persist and restore navigation state
 	useNavigationPersistence(
 		isInitialized && (!isSupabaseConfigured() || (!!user && !!profile)),
+		launchDetectionId ? "/(tabs)/finance" : null,
 	);
 
 	// Initialize sync manager - handles fetching/syncing data with Supabase
@@ -191,11 +215,28 @@ function RootLayoutNav() {
 		init();
 	}, []);
 
+	// Detected payments: mirror the background queue whenever the app is
+	// foregrounded (and run the SMS inbox catch-up).
+	useEffect(() => watchDetectionQueue(), []);
+
+	// Tapping a "Tap to add" detection opens Money Hub on its review sheet.
+	const openDetectedTransaction = (id: string) => {
+		const detection = useTransactionDetectionStore.getState();
+		detection.setFocusId(id);
+		void detection.refresh();
+		router.push("/(tabs)/finance");
+	};
+
 	// Set up notification response listener (when user taps notification)
 	useEffect(() => {
 		const subscription = Notifications.addNotificationResponseReceivedListener(
 			(response) => {
 				const data = response.notification.request.content.data;
+
+				if (data?.type === "detected_transaction" && typeof data.id === "string") {
+					openDetectedTransaction(data.id);
+					return;
+				}
 
 				// Handle group invitation notification
 				if (data?.type === "group_invitation") {

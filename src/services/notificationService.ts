@@ -1104,6 +1104,66 @@ export class NotificationService {
 		return notifId;
 	}
 
+	// ---- Detected transactions ("Ask first") ----
+	//
+	// Posted by the headless notification-listener task when a payment is
+	// detected. Tapping it opens Money Hub on a pre-filled review sheet
+	// (routed in app/_layout.tsx by data.type). Cancelled by payload id.
+
+	static async showDetectedTransaction(tx: {
+		id: string;
+		type: "income" | "expense" | "transfer";
+		amount: number;
+		merchant?: string;
+		bankName?: string;
+		accountNumber?: string;
+		sourceApp?: string;
+	}, currency = "₹"): Promise<void> {
+		try {
+			if (Platform.OS === "android") {
+				await Notifications.setNotificationChannelAsync("transaction-detection", {
+					name: "Detected Payments",
+					description: "Payments detected from bank SMS and UPI apps",
+					importance: Notifications.AndroidImportance.DEFAULT,
+				});
+			}
+			const amount = `${currency}${tx.amount.toLocaleString("en-IN", {
+				maximumFractionDigits: 2,
+			})}`;
+			const who = tx.merchant ? ` ${tx.type === "income" ? "from" : "at"} ${tx.merchant}` : "";
+			const title =
+				tx.type === "income" ? `${amount} received${who}` : `${amount} spent${who}`;
+			const via = [
+				tx.bankName ?? tx.sourceApp,
+				tx.accountNumber ? `••${tx.accountNumber}` : null,
+			]
+				.filter(Boolean)
+				.join(" ");
+			await Notifications.scheduleNotificationAsync({
+				identifier: `detected_${tx.id}`,
+				content: {
+					title,
+					body: `${via ? `${via} · ` : ""}Tap to add to Money Hub`,
+					data: { type: "detected_transaction", id: tx.id },
+				},
+				// The Android channel goes on the trigger in this expo-notifications
+				// version; on `content` it is ignored and the fallback channel is used.
+				trigger:
+					Platform.OS === "android" ? { channelId: "transaction-detection" } : null,
+			});
+		} catch (error) {
+			console.warn("Could not show detected transaction:", error);
+		}
+	}
+
+	static async cancelDetectedTransaction(id: string): Promise<void> {
+		try {
+			await Notifications.dismissNotificationAsync(`detected_${id}`);
+		} catch {
+			// Already gone - nothing to do.
+		}
+	}
+
 	// ---- Workout timers (timed sets and rest) ----
 	//
 	// Backup alerts for when the phone is locked or the user is in another app.
@@ -1134,11 +1194,12 @@ export class NotificationService {
 					body,
 					data: { type: "workout_timer", kind },
 					sound: "default",
-					...(Platform.OS === "android" && { channelId: "workout-timer" }),
 				},
 				trigger: {
 					type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
 					seconds: Math.max(1, Math.round(seconds)),
+					// Channel belongs on the trigger (ignored on content).
+					...(Platform.OS === "android" && { channelId: "workout-timer" }),
 				},
 			});
 		} catch (error) {

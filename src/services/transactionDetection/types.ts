@@ -18,6 +18,8 @@ export interface DetectedTransaction {
 	rawText: string;
 	isProcessed: boolean;
 	isDismissed: boolean;
+	/** Set when the alert names a card, so the payment method can match. */
+	cardType?: "credit_card" | "debit_card";
 }
 
 export interface NotificationData {
@@ -123,3 +125,27 @@ export const BANK_SENDER_IDS = [
 ];
 
 export type UpiAppKey = keyof typeof UPI_APP_PACKAGES;
+
+// SMS apps. Each incoming bank SMS shows up as a notification from one of
+// these, so the notification listener sees bank alerts live without needing
+// SMS permission. Title is the sender, text/bigText is the message body.
+export const SMS_APP_PACKAGES = [
+	"com.google.android.apps.messaging", // Google Messages
+	"com.samsung.android.messaging", // Samsung Messages
+	"com.android.mms", // AOSP / Xiaomi / many OEMs
+	"com.oneplus.mms", // OnePlus
+	"com.truecaller", // Truecaller as SMS app
+	"com.microsoft.android.smsorganizer", // SMS Organizer (popular in India)
+] as const;
+
+// Bank apps that post their own transaction alerts.
+export const BANK_APP_PACKAGES: Record<string, string> = {
+	"com.snapwork.hdfc": "HDFC Bank",
+	"com.sbi.lotusintouch": "State Bank of India",
+	"com.sbi.SBIFreedomPlus": "State Bank of India",
+	"com.csam.icici.bank.imobile": "ICICI Bank",
+	"com.axis.mobile": "Axis Bank",
+	"com.msf.kbank.mobile": "Kotak Bank",
+	"com.idfcfirstbank.optimus": "IDFC First Bank",
+	"com.yesbank": "Yes Bank",
+};

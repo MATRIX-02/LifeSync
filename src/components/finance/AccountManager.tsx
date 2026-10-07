@@ -1,4 +1,9 @@
 // AccountManager - Edit and delete accounts modal
+import AccountDigitsField from "@/src/components/finance/AccountDigitsField";
+import {
+	formatDigits,
+	parseDigitsInput,
+} from "@/src/services/transactionDetection/accountLinks";
 import { Account, COLORS } from "@/src/types/finance";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import React, { useState } from "react";
@@ -36,11 +41,13 @@ export default function AccountManager({
 		type: Account["type"];
 		balance: string;
 		color: string;
+		digits: string;
 	}>({
 		name: "",
 		type: "bank",
 		balance: "",
 		color: COLORS[0],
+		digits: "",
 	});
 
 	const startEdit = (account: Account) => {
@@ -53,6 +60,7 @@ export default function AccountManager({
 					? String(account.creditLimit || 0)
 					: String(account.balance),
 			color: account.color,
+			digits: formatDigits(account.linkedDigits),
 		});
 	};
 
@@ -63,11 +71,21 @@ export default function AccountManager({
 			name: editForm.name,
 			type: editForm.type,
 			color: editForm.color,
+			linkedDigits: parseDigitsInput(editForm.digits),
 		};
 		if (editForm.type === "credit_card") {
 			updated.creditLimit = parseFloat(editForm.balance) || 0;
 		} else {
 			updated.balance = parseFloat(editForm.balance) || 0;
+		}
+		// One set of digits belongs to one account: take them off any other.
+		const digits = updated.linkedDigits ?? [];
+		for (const acc of accounts) {
+			if (acc.id === updated.id || !acc.linkedDigits?.length) continue;
+			const kept = acc.linkedDigits.filter((d) => !digits.includes(d));
+			if (kept.length !== acc.linkedDigits.length) {
+				onEdit?.({ ...acc, linkedDigits: kept });
+			}
 		}
 		onEdit && onEdit(updated);
 		setEditingAccount(null);
@@ -171,6 +189,20 @@ export default function AccountManager({
 									/>
 								))}
 							</View>
+							<AccountDigitsField
+								value={editForm.digits}
+								onChange={(digits) => setEditForm({ ...editForm, digits })}
+								theme={theme}
+								accountType={editForm.type}
+								groupStyle={{ marginBottom: 12 }}
+								labelStyle={{
+									fontSize: 13,
+									fontWeight: "600",
+									color: theme.textSecondary,
+									marginBottom: 6,
+								}}
+								inputStyle={styles(theme).input}
+							/>
 							<TouchableOpacity
 								style={styles(theme).saveBtn}
 								onPress={handleSave}

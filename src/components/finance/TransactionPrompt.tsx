@@ -9,6 +9,14 @@ import { Theme, useTheme } from "@/src/context/themeContext";
 import { useTransactionDetectionStore } from "@/src/context/transactionDetectionStore";
 import { useFinanceCategories } from "@/src/hooks/useFinanceCategories";
 import { DetectedTransaction } from "@/src/services/transactionDetection";
+import {
+	getAccountLinks,
+	learnCategory,
+	linkDigits,
+	resolveAccount,
+	suggestCategory,
+} from "@/src/services/transactionDetection/accountLinks";
+import type { PaymentMethod } from "@/src/types/finance";
 import { Ionicons } from "@expo/vector-icons";
 import React, { useEffect, useState } from "react";
 import {
@@ -40,7 +48,7 @@ export function TransactionPrompt({
 	const { theme } = useTheme();
 	const styles = createStyles(theme);
 	const financeCategories = useFinanceCategories();
-	const { accounts, addTransaction } = useFinanceStore();
+	const { accounts, addTransaction, updateAccount } = useFinanceStore();
 	const { markAsProcessed, dismissTransaction } =
 		useTransactionDetectionStore();
 
@@ -52,26 +60,40 @@ export function TransactionPrompt({
 	const [transactionType, setTransactionType] = useState<"income" | "expense">(
 		"expense"
 	);
+	// Offer to remember "••1234 is this account" for next time.
+	const [needsLink, setNeedsLink] = useState(false);
+	const [rememberLink, setRememberLink] = useState(true);
+	const [saving, setSaving] = useState(false);
 
-	// Update form when transaction changes
+	// Pre-fill from the detection: linked account, suggested category.
+	// Re-runs only for a different detection, not on every store update.
 	useEffect(() => {
-		if (transaction) {
-			setAmount(transaction.amount.toString());
-			setDescription(transaction.merchant || "");
-			setTransactionType(transaction.type === "income" ? "income" : "expense");
-			setSelectedCategory(transaction.type === "income" ? "other" : "shopping");
-
-			// Try to find matching account by last 4 digits
-			if (transaction.accountNumber) {
-				const matchingAccount = accounts.find((acc) =>
-					acc.name.includes(transaction.accountNumber!)
-				);
-				if (matchingAccount) {
-					setSelectedAccountId(matchingAccount.id);
-				}
-			}
-		}
-	}, [transaction, accounts]);
+		if (!transaction) return;
+		let cancelled = false;
+		const type = transaction.type === "income" ? "income" : "expense";
+		setAmount(transaction.amount.toString());
+		setDescription(transaction.merchant || "");
+		setTransactionType(type);
+		setRememberLink(true);
+		setSaving(false);
+		(async () => {
+			const links = await getAccountLinks();
+			const resolved = resolveAccount(transaction, accounts, links);
+			const allowed = (
+				type === "income"
+					? financeCategories.incomeOptions
+					: financeCategories.expenseOptions
+			).map((c) => c.key);
+			const category = await suggestCategory(transaction, allowed);
+			if (cancelled) return;
+			setSelectedAccountId(resolved.accountId);
+			setNeedsLink(resolved.needsLink);
+			setSelectedCategory(category);
+		})();
+		return () => {
+			cancelled = true;
+		};
+	}, [transaction?.id, accounts.length]);
 
 	if (!transaction) return null;
 
@@ -81,39 +103,80 @@ export function TransactionPrompt({
 			: financeCategories.incomeOptions
 	).map((c) => ({ ...c, label: c.name }));
 
-	const handleAdd = () => {
+	const handleAdd = async () => {
 		const amountNum = parseFloat(amount);
 		if (isNaN(amountNum) || amountNum <= 0) {
 			Alert.alert("Error", "Please enter a valid amount");
 			return;
 		}
+		if (!selectedAccountId) {
+			Alert.alert("Pick an account", "Choose which account this payment belongs to.");
+			return;
+		}
 
-		const today = new Date().toISOString().split("T")[0];
+		// When the payment happened, in local time - not when it was reviewed.
+		const at = new Date(transaction.timestamp);
+		const pad = (n: number) => String(n).padStart(2, "0");
+		const date = `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}`;
+		const time = `${pad(at.getHours())}:${pad(at.getMinutes())}:${pad(at.getSeconds())}`;
 
-		addTransaction({
-			type: transactionType,
-			amount: amountNum,
-			category: selectedCategory,
-			description: description.trim() || "",
-			date: today,
-			time: new Date().toTimeString().split(" ")[0],
-			accountId: selectedAccountId || "",
-			paymentMethod: "upi",
-			isRecurring: false,
-			note: `Auto-detected from ${
-				transaction.source === "notification"
-					? transaction.sourceApp
-					: "bank SMS"
-			}`,
-		});
+		const fromUpiApp =
+			transaction.source === "notification" &&
+			!!transaction.sourceApp &&
+			!["SMS", "Test"].includes(transaction.sourceApp) &&
+			!transaction.bankName;
+		const paymentMethod: PaymentMethod =
+			transaction.cardType ??
+			(fromUpiApp || /\bupi\b/i.test(transaction.rawText) ? "upi" : "net_banking");
 
-		markAsProcessed(transaction.id);
-		onAdd();
-		Alert.alert("Success", "Transaction added to tracker!");
+		setSaving(true);
+		try {
+			await addTransaction({
+				type: transactionType,
+				amount: amountNum,
+				category: selectedCategory,
+				description: description.trim() || "",
+				date,
+				time,
+				accountId: selectedAccountId,
+				paymentMethod,
+				isRecurring: false,
+				note: `Auto-detected from ${
+					fromUpiApp ? transaction.sourceApp : `${transaction.bankName ?? "bank"} alert`
+				}`,
+			});
+			if (needsLink && rememberLink && transaction.accountNumber) {
+				const digits = transaction.accountNumber;
+				// Saved on the account itself (database, syncs across devices) and
+				// moved off any other account that listed the same digits...
+				for (const acc of accounts) {
+					const has = acc.linkedDigits?.includes(digits) ?? false;
+					if (acc.id === selectedAccountId && !has) {
+						await updateAccount(acc.id, {
+							linkedDigits: [...(acc.linkedDigits ?? []), digits],
+						});
+					} else if (acc.id !== selectedAccountId && has) {
+						await updateAccount(acc.id, {
+							linkedDigits: acc.linkedDigits!.filter((d) => d !== digits),
+						});
+					}
+				}
+				// ...and on this phone, which still works before the
+				// linked_digits migration has been run.
+				await linkDigits(digits, selectedAccountId);
+			}
+			await learnCategory({ ...transaction, type: transactionType }, selectedCategory);
+			await markAsProcessed(transaction.id);
+			onAdd();
+		} catch (error: any) {
+			Alert.error("Couldn't add", error?.message || "Please try again.");
+		} finally {
+			setSaving(false);
+		}
 	};
 
-	const handleDismiss = () => {
-		dismissTransaction(transaction.id);
+	const handleDismiss = async () => {
+		await dismissTransaction(transaction.id);
 		onClose();
 	};
 
@@ -378,25 +441,6 @@ export function TransactionPrompt({
 										showsHorizontalScrollIndicator={false}
 										style={styles.accountScroll}
 									>
-										<TouchableOpacity
-											style={[
-												styles.accountChip,
-												!selectedAccountId && {
-													backgroundColor: theme.primary + "20",
-													borderColor: theme.primary,
-												},
-											]}
-											onPress={() => setSelectedAccountId("")}
-										>
-											<Text
-												style={[
-													styles.accountChipText,
-													!selectedAccountId && { color: theme.primary },
-												]}
-											>
-												None
-											</Text>
-										</TouchableOpacity>
 										{accounts.map((acc) => (
 											<TouchableOpacity
 												key={acc.id}
@@ -431,6 +475,21 @@ export function TransactionPrompt({
 											</TouchableOpacity>
 										))}
 									</ScrollView>
+									{needsLink && transaction.accountNumber && selectedAccountId ? (
+										<TouchableOpacity
+											style={styles.linkRow}
+											onPress={() => setRememberLink((v) => !v)}
+										>
+											<Ionicons
+												name={rememberLink ? "checkbox" : "square-outline"}
+												size={20}
+												color={rememberLink ? theme.primary : theme.textMuted}
+											/>
+											<Text style={styles.linkText}>
+												Always use this account for ••{transaction.accountNumber}
+											</Text>
+										</TouchableOpacity>
+									) : null}
 								</View>
 							)}
 						</View>
@@ -447,11 +506,17 @@ export function TransactionPrompt({
 								size={20}
 								color={theme.textMuted}
 							/>
-							<Text style={styles.dismissButtonText}>Dismiss</Text>
+							<Text style={styles.dismissButtonText}>Ignore</Text>
 						</TouchableOpacity>
-						<TouchableOpacity style={styles.addButton} onPress={handleAdd}>
+						<TouchableOpacity
+							style={[styles.addButton, saving && { opacity: 0.6 }]}
+							onPress={handleAdd}
+							disabled={saving}
+						>
 							<Ionicons name="add" size={20} color="#fff" />
-							<Text style={styles.addButtonText}>Add Transaction</Text>
+							<Text style={styles.addButtonText}>
+								{saving ? "Adding..." : "Add Transaction"}
+							</Text>
 						</TouchableOpacity>
 					</View>
 				</View>
@@ -709,6 +774,17 @@ const createStyles = (theme: Theme) =>
 		accountChipText: {
 			fontSize: 13,
 			color: theme.textMuted,
+		},
+		linkRow: {
+			flexDirection: "row",
+			alignItems: "center",
+			gap: 8,
+			marginTop: 10,
+		},
+		linkText: {
+			fontSize: 13,
+			color: theme.textSecondary,
+			flex: 1,
 		},
 		actions: {
 			flexDirection: "row",

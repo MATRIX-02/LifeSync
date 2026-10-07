@@ -1,288 +1,109 @@
-# Transaction Auto-Detection Setup
+# Auto-detect Payments (Android)
 
-This document explains how to set up the automatic transaction detection feature that reads UPI app notifications and bank SMS to help users track their expenses.
+LifeSync spots payments from bank SMS, bank apps and UPI apps - **even when the
+app is closed** - and asks the user to add them ("₹250 spent at Swiggy · Tap to
+add"). Nothing is saved until the user confirms. Android only.
 
-## Features
+User-facing switch: **Settings → Finance → Auto-detect Payments**.
 
-1. **Notification Listener (Android Only)**
-   - Reads notifications from UPI apps (PhonePe, Google Pay, Paytm, BharatPe, CRED, etc.)
-   - Parses transaction details (amount, merchant, UPI ID)
-   - Shows a prompt to add the transaction to the finance tracker
+## How it works
 
-2. **SMS Reader (Android Only)**
-   - Reads SMS from banks (SBI, HDFC, ICICI, Axis, Kotak, etc.)
-   - Parses transaction details from bank alerts
-   - Detects both debits and credits
+```
+Payment happens
+  │
+  ├─ UPI app notification (GPay, PhonePe, Paytm…)
+  ├─ Bank app notification
+  └─ Bank SMS ──▶ shown as a notification by the SMS app (Messages, Samsung…)
+        │
+        ▼
+NotificationListenerService          (react-native-android-notification-listener,
+  bound by Android, runs while the    native; declared by the library's manifest)
+  app is closed
+        │ starts headless JS for every notification
+        ▼
+index.js → headlessTask.ts           handleIncomingNotification
+        │  parseNotification()        notificationListener.ts (+ bankSmsParser / upiParser)
+        │  enqueue() + dedupe         detectionQueue.ts  (AsyncStorage)
+        ▼
+"₹250 spent at Swiggy · Tap to add"  NotificationService.showDetectedTransaction
+        │ tap
+        ▼
+app/_layout.tsx → Money Hub          DetectedTransactions → TransactionPrompt
+  pre-filled review sheet             account by card digits, suggested category
+        │ Add
+        ▼
+financeStore.addTransaction          (normal RPC write, balances updated)
+```
 
-## Required Packages
+This is the same mechanism Truecaller-style apps use: **Notification access**
+lets an app read notifications as they are posted. Every bank SMS also appears
+as a notification from the SMS app, so live detection needs no SMS permission.
 
-Install the following packages:
+**SMS permission is the catch-up net**: when the app opens (at most every
+15 min), the inbox from the last 48 h is scanned for anything the listener
+missed - phone was off, notification swiped away, detection just turned on.
+
+### Key files
+
+| File | Role |
+|---|---|
+| `index.js` | App entry: `expo-router/entry` + registers the headless task |
+| `src/services/transactionDetection/notificationListener.ts` | Permission helpers; `parseNotification` (UPI apps, bank apps, SMS apps) |
+| `src/services/transactionDetection/headlessTask.ts` | Background handler: parse → queue → "Tap to add" notification |
+| `src/services/transactionDetection/detectionQueue.ts` | AsyncStorage queue shared by headless task and UI; dedupe; settings |
+| `src/services/transactionDetection/bankSmsParser.ts` / `upiParser.ts` | Text parsing (amount, direction, account digits, merchant) |
+| `src/services/transactionDetection/accountLinks.ts` | Card/account digits → account; merchant → category suggestions |
+| `src/services/transactionDetection/smsReader.ts` | SMS inbox catch-up scan |
+| `src/context/transactionDetectionStore.ts` | UI mirror of the queue, permissions |
+| `src/components/finance/DetectedTransactions.tsx` | Money Hub banner, review flow, first-run nudge |
+| `src/components/finance/TransactionPrompt.tsx` | Review sheet |
+| `src/components/finance/TransactionDetectionSettings.tsx` | Settings screen |
+
+### Rules worth knowing
+
+- **Direction** is decided by the *first* money verb: "Rs 250 debited from A/c XX1234 and credited to SWIGGY" is a debit. "Credit card" / "debit card" name the instrument, not the direction.
+- **Not transactions:** OTPs, "will be debited", payment/collect requests, declined/failed, bills due, statements, autopay setup.
+- **SMS from people** are ignored: an SMS needs a bank/business sender ID (`AX-HDFCBK`) or an account/card number.
+- **Dedupe:** one payment usually triggers a UPI notification *and* a bank SMS. Same reference ID, or same amount + direction within 10 min, is one payment; the richer detection (account digits, merchant) wins. Added/ignored payments are remembered (last 300) so the inbox scan doesn't bring them back.
+- **Accounts:** digits linked once in the review sheet ("Always use this account for ••1234") map automatically after that; otherwise the default account.
+- **Categories:** learned per merchant on confirm; keyword rules (Swiggy → Food, Uber → Transport, …) otherwise. Hidden categories are never suggested.
+
+## Requirements
+
+- A **dev build** or release APK - not Expo Go (native modules).
+- The user grants **Notification access** (system settings page; the app links there) and optionally **SMS** (runtime prompt).
+- `READ_SMS`/`RECEIVE_SMS` come from `plugins/withSmsPermission.js`; the listener service, boot receiver and headless service come from the library's own manifest.
+
+## Testing with adb
+
+Debug builds also accept notifications posted by the shell, so a fake bank
+alert can be sent with the app **closed**:
 
 ```bash
-npx expo install react-native-android-notification-listener react-native-get-sms-android
+adb shell cmd notification post -S bigtext -t "AX-HDFCBK" test1 \
+  "Rs.250.00 debited from a/c XX1234 on 07-10-26 to SWIGGY. UPI Ref 412345678901"
 ```
 
-**Note:** These packages require a development build (not Expo Go).
-
-## Expo Configuration
-
-### 1. Create Development Build
-
-Since this feature uses native modules, you need to create a development build:
+Expect "₹250 spent at SWIGGY · Tap to add" within a few seconds. On an
+emulator, a real SMS (exercises the Messages path and the inbox scan):
 
 ```bash
-# Install EAS CLI
-npm install -g eas-cli
-
-# Login to Expo
-eas login
-
-# Create development build
-eas build --profile development --platform android
+adb emu sms send AXHDFCBK "Rs 500 credited to a/c XX1234 from rahul@okaxis. Ref 777"
 ```
 
-### 2. Update app.json
-
-Add the following permissions to your `app.json`:
-
-```json
-{
-  "expo": {
-    "android": {
-      "permissions": [
-        "android.permission.READ_SMS",
-        "android.permission.RECEIVE_SMS",
-        "android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"
-      ]
-    },
-    "plugins": [
-      [
-        "react-native-android-notification-listener",
-        {
-          "notificationListenerName": "LifeSync Transaction Listener",
-          "notificationListenerDescription": "Listens for UPI payment notifications to help track expenses"
-        }
-      ]
-    ]
-  }
-}
-```
-
-### 3. Create Config Plugin for SMS Permission
-
-Create a file `plugins/withSmsPermission.js`:
-
-```javascript
-const { withAndroidManifest } = require("@expo/config-plugins");
-
-module.exports = function withSmsPermission(config) {
-  return withAndroidManifest(config, async (config) => {
-    const manifest = config.modResults.manifest;
-
-    // Add SMS permissions
-    if (!manifest["uses-permission"]) {
-      manifest["uses-permission"] = [];
-    }
-
-    const permissions = [
-      "android.permission.READ_SMS",
-      "android.permission.RECEIVE_SMS",
-    ];
-
-    permissions.forEach((permission) => {
-      if (
-        !manifest["uses-permission"].some(
-          (p) => p.$["android:name"] === permission
-        )
-      ) {
-        manifest["uses-permission"].push({
-          $: { "android:name": permission },
-        });
-      }
-    });
-
-    return config;
-  });
-};
-```
-
-Add to `app.json` plugins:
-
-```json
-{
-  "plugins": [
-    "./plugins/withSmsPermission"
-  ]
-}
-```
-
-## Usage
-
-### 1. Initialize in App
-
-In your main finance component or app entry:
-
-```tsx
-import { useEffect } from "react";
-import { useTransactionDetectionStore } from "@/src/context/transactionDetectionStore";
-
-function App() {
-  const { checkPermissions, startListening } = useTransactionDetectionStore();
-
-  useEffect(() => {
-    // Check permissions on app start
-    checkPermissions();
-  }, []);
-
-  // Start listening when permissions are granted
-  // ...
-}
-```
-
-### 2. Add Settings UI
-
-Include the settings component in your profile or settings page:
-
-```tsx
-import TransactionDetectionSettings from "@/src/components/finance/TransactionDetectionSettings";
-
-function SettingsScreen() {
-  return (
-    <View>
-      <TransactionDetectionSettings />
-    </View>
-  );
-}
-```
-
-### 3. Show Transaction Prompts
-
-Add the prompt component to your finance screen:
-
-```tsx
-import { useState, useEffect } from "react";
-import { TransactionPrompt, PendingTransactionsBadge } from "@/src/components/finance/TransactionPrompt";
-import { useTransactionDetectionStore } from "@/src/context/transactionDetectionStore";
-
-function FinanceScreen() {
-  const { pendingTransactions, settings } = useTransactionDetectionStore();
-  const [showPrompt, setShowPrompt] = useState(false);
-  const [currentTransaction, setCurrentTransaction] = useState(null);
-
-  // Auto-show prompt when new transaction detected
-  useEffect(() => {
-    if (settings.autoShowPrompt && pendingTransactions.length > 0) {
-      setCurrentTransaction(pendingTransactions[0]);
-      setShowPrompt(true);
-    }
-  }, [pendingTransactions, settings.autoShowPrompt]);
-
-  return (
-    <View>
-      {/* Your finance content */}
-
-      <PendingTransactionsBadge
-        onPress={() => {
-          if (pendingTransactions.length > 0) {
-            setCurrentTransaction(pendingTransactions[0]);
-            setShowPrompt(true);
-          }
-        }}
-      />
-
-      <TransactionPrompt
-        visible={showPrompt}
-        transaction={currentTransaction}
-        onClose={() => setShowPrompt(false)}
-        onAdd={() => {
-          setShowPrompt(false);
-          // Show next pending transaction if any
-          if (pendingTransactions.length > 1) {
-            setCurrentTransaction(pendingTransactions[1]);
-            setShowPrompt(true);
-          }
-        }}
-      />
-    </View>
-  );
-}
-```
-
-## Supported UPI Apps
-
-The notification listener supports these UPI apps:
-- PhonePe
-- Google Pay (GPay)
-- Paytm
-- BharatPe
-- Amazon Pay
-- CRED
-- MobiKwik
-- Freecharge
-- WhatsApp Pay
-
-## Supported Banks (SMS)
-
-The SMS reader supports all major Indian banks including:
-- State Bank of India (SBI)
-- HDFC Bank
-- ICICI Bank
-- Axis Bank
-- Kotak Mahindra Bank
-- Yes Bank
-- Punjab National Bank
-- Bank of Baroda
-- Canara Bank
-- Union Bank of India
-- IDFC First Bank
-- IndusInd Bank
-- Federal Bank
-- RBL Bank
-- AU Small Finance Bank
-- Paytm Payments Bank
-
-## Privacy & Security
-
-- **All data stays on device**: Transaction data is never sent to any server
-- **User control**: Users can enable/disable detection at any time
-- **Selective parsing**: Only transaction-related notifications/SMS are processed
-- **No sensitive data storage**: Raw notification/SMS content is only stored temporarily
-
-## Google Play Compliance
-
-If publishing to Google Play, note that:
-
-1. **SMS Permission**: Google has strict policies on SMS access. You need to:
-   - Submit a declaration form explaining the use case
-   - Ensure SMS is only used for this specific feature
-   - Provide clear user disclosure
-
-2. **Notification Access**: This is generally allowed but:
-   - Must be clearly disclosed to users
-   - Should only read relevant notifications
-   - User must manually enable in settings
+Logs: `adb logcat | grep -i -E "ReactNativeJS|NotificationListener"`.
 
 ## Troubleshooting
 
-### Notification Listener Not Working
+| Symptom | Check |
+|---|---|
+| Nothing detected | Settings → Auto-detect: Notification access "Allowed" and *Detect payments* on. Rebuild if `index.js` was just added. |
+| Stops after a while | Battery optimisation killed the listener - set LifeSync's battery usage to *Unrestricted*. Toggling Notification access off/on rebinds the service. |
+| A bank isn't recognised | Add its sender ID to `BANK_SENDER_IDS` (`types.ts`) and app package to `BANK_APP_PACKAGES`; check its wording against `bankSmsParser.ts`. Optional: *AI Reading of Bank SMS* (Settings) parses messages the rules miss. |
+| Wrong direction/amount | Add the message to a parser test and adjust `detectDirection` / `AMOUNT_PATTERNS`. |
 
-1. Check if "Notification Access" is enabled in phone Settings
-2. Ensure the app has been added to the list of notification listeners
-3. Try restarting the phone
-4. Make sure you're using a development build, not Expo Go
+## Play Store note
 
-### SMS Not Being Detected
-
-1. Check if SMS permission is granted
-2. Verify the bank SMS sender ID is in the supported list
-3. Some phones have additional SMS permissions in battery/memory settings
-4. Check if the SMS contains the expected transaction keywords
-
-### Transactions Being Duplicated
-
-The system has deduplication logic based on:
-- Reference/transaction ID
-- Same amount within 2 minutes
-- Already processed transaction IDs
-
-If duplicates still occur, they may be from different sources (notification + SMS).
+LifeSync is distributed as an APK. Publishing to Google Play would require
+the SMS permissions declaration form and a prominent disclosure for
+Notification access.

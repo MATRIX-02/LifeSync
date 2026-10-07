@@ -1,6 +1,8 @@
 import { Alert } from "@/src/components/CustomAlert";
 import { useAuthStore } from "@/src/context/authStore";
 import FinanceCategorySettings from "@/src/components/finance/FinanceCategorySettings";
+import TransactionDetectionSettings from "@/src/components/finance/TransactionDetectionSettings";
+import { useTransactionDetectionStore } from "@/src/context/transactionDetectionStore";
 import { useFinanceStore } from "@/src/context/financeStoreDB";
 import { useHabitStore } from "@/src/context/habitStoreDB";
 import { ModuleType, useModuleStore } from "@/src/context/moduleContext";
@@ -312,6 +314,8 @@ export default function SettingsScreen() {
 
 	const [notificationsEnabled, setNotificationsEnabled] = useState(true);
 	const [showCategorySettings, setShowCategorySettings] = useState(false);
+	const [showDetectionSettings, setShowDetectionSettings] = useState(false);
+	const detectionEnabled = useTransactionDetectionStore((s) => s.settings.enabled);
 	const [soundEnabled, setSoundEnabled] = useState(true);
 	const [vibrationEnabled, setVibrationEnabled] = useState(true);
 	const [showDeveloper, setShowDeveloper] = useState(false);
@@ -910,6 +914,35 @@ export default function SettingsScreen() {
 							</TouchableOpacity>
 						</View>
 
+						{Platform.OS === "android" && (
+							<View style={[styles.settingCard, { marginTop: 12 }]}>
+								<TouchableOpacity
+									activeOpacity={0.7}
+									onPress={() => setShowDetectionSettings(true)}
+								>
+									<SettingRow
+										icon="flash"
+										iconColor={theme.success}
+										iconBg={theme.success + "20"}
+										label="Auto-detect Payments"
+										description={
+											detectionEnabled
+												? "On - payments from bank SMS and UPI apps are offered for review"
+												: "Spot payments from bank SMS and UPI apps, even when the app is closed"
+										}
+										theme={theme}
+										rightElement={
+											<Ionicons
+												name="chevron-forward"
+												size={20}
+												color={theme.textMuted}
+											/>
+										}
+									/>
+								</TouchableOpacity>
+							</View>
+						)}
+
 						<View style={[styles.settingCard, { marginTop: 12 }]}>
 							<SettingRow
 								icon="chatbox-ellipses-outline"
@@ -941,6 +974,11 @@ export default function SettingsScreen() {
 						<FinanceCategorySettings
 							visible={showCategorySettings}
 							onClose={() => setShowCategorySettings(false)}
+							theme={theme}
+						/>
+						<TransactionDetectionSettings
+							visible={showDetectionSettings}
+							onClose={() => setShowDetectionSettings(false)}
 							theme={theme}
 						/>
 					</SettingsSection>

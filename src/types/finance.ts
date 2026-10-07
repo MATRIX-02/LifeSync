@@ -62,6 +62,10 @@ export interface Account {
 	creditLimit?: number; // Only for credit_card type
 	creditUsed?: number; // Amount currently spent on credit card
 	isSettled?: boolean; // For credit cards that have been settled/paid off
+	// Last 4 digits of the account number / cards ("1234"), used to match
+	// auto-detected bank alerts. Column: finance_accounts.linked_digits
+	// (20261008_account_linked_digits.sql).
+	linkedDigits?: string[];
 	createdAt: string;
 	updatedAt: string;
 }
