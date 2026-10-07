@@ -1,4 +1,4 @@
-// Finance Tracker - Main Screen
+// Money Hub (finance) - Main Screen
 
 import {
 	PremiumFeatureGate,
@@ -254,7 +254,7 @@ export default function FinanceScreen() {
 				onCloseDrawer={() => setDrawerOpen(false)}
 			/>
 			<View style={styles.header}>
-				<Text style={styles.headerTitle}>Finance Tracker</Text>
+				<Text style={styles.headerTitle}>Money Hub</Text>
 				<View style={styles.headerActions}>
 					<TouchableOpacity
 						onPress={() =>

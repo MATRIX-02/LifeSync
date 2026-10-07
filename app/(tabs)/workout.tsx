@@ -1,4 +1,4 @@
-// Workout Tracker Main Screen - Tab-based navigation
+// FitZone (workouts) Main Screen - Tab-based navigation
 
 import {
 	PremiumFeatureGate,
@@ -249,7 +249,7 @@ export default function WorkoutTrackerScreen() {
 
 			{/* Header - Same style as Habits page */}
 			<View style={styles.header}>
-				<Text style={styles.headerTitle}>Workout Tracker</Text>
+				<Text style={styles.headerTitle}>FitZone</Text>
 				<View style={styles.headerActions}>
 					<TouchableOpacity
 						onPress={() =>

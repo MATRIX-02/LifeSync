@@ -1227,7 +1227,7 @@ export default function SettingsScreen() {
 													color={theme.primary}
 												/>
 												<View>
-													<Text style={styles.moduleLabel}>Habits</Text>
+													<Text style={styles.moduleLabel}>Daily Rituals</Text>
 													<Text style={styles.syncTimeText}>
 														{formatSyncTime(syncStatus.habits_synced_at)}
 													</Text>
@@ -1348,7 +1348,7 @@ export default function SettingsScreen() {
 													color={theme.warning}
 												/>
 												<View>
-													<Text style={styles.moduleLabel}>Finance</Text>
+													<Text style={styles.moduleLabel}>Money Hub</Text>
 													<Text style={styles.syncTimeText}>
 														{formatSyncTime(syncStatus.finance_synced_at)}
 													</Text>

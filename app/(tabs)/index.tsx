@@ -485,7 +485,7 @@ export default function DashboardScreen() {
 				<View style={styles.habitsSection}>
 					{/* Header Row with Days */}
 					<View style={styles.habitTableHeader}>
-						<Text style={styles.habitsTitle}>Habits Tracker</Text>
+						<Text style={styles.habitsTitle}>Daily Rituals</Text>
 						{/* Header Actions */}
 						<View style={styles.headerActions}>
 							<TouchableOpacity onPress={toggleViewMode}>
