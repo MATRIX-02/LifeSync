@@ -79,6 +79,11 @@ triggered by a `v*` tag push or **Actions → Release APK → Run workflow**:
 4. Verifies the APK is **not** debug-signed (a debug-signed APK can't be installed over existing installs).
 5. Publishes the release with the notes file and `LifeSync-vX.Y.Z.apk`.
 
+**Testing the build without releasing:** Actions → Release APK → Run workflow,
+tick **Dry run**. It does the full signed build but publishes nothing; the APK
+is attached to the run as an artifact for 7 days. CLI:
+`gh workflow run release-apk.yml -f dry_run=true`.
+
 ### Repository secrets
 
 Settings → Secrets and variables → Actions. Already configured; only needed again if the key or values change.

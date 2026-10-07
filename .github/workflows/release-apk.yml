@@ -3,6 +3,8 @@
 # Triggers:
 #   - pushing a tag like v1.3.0           (git tag v1.3.0 && git push origin v1.3.0)
 #   - "Run workflow" in the Actions tab   (enter the tag; it is created if missing)
+#   - "Run workflow" with "Dry run" ticked: full signed build, no release -
+#     the APK is attached to the run as an artifact. Use it to test CI.
 #
 # Release notes come from docs/releases/<tag>.md when it exists, otherwise
 # GitHub generates them from the commits.
@@ -28,8 +30,12 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag (e.g. v1.3.0)"
-        required: true
+        description: "Release tag (e.g. v1.3.0). Not needed for a dry run."
+        required: false
+      dry_run:
+        description: "Dry run: build and sign, but don't publish a release"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -44,6 +50,7 @@ jobs:
     timeout-minutes: 60
     env:
       TAG: ${{ github.event.inputs.tag || github.ref_name }}
+      DRY_RUN: ${{ github.event.inputs.dry_run == 'true' }}
 
     steps:
       - uses: actions/checkout@v4
@@ -70,6 +77,7 @@ jobs:
           fi
 
       - name: Check version matches tag
+        if: env.DRY_RUN != 'true'
         run: |
           app_version=$(node -p "require('./app.json').expo.version")
           if [ "v$app_version" != "$TAG" ]; then
@@ -140,7 +148,16 @@ jobs:
           fi
           cp "$apk" "LifeSync-$TAG.apk"
 
+      - name: Upload test APK (dry run)
+        if: env.DRY_RUN == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: LifeSync-${{ env.TAG }}-dry-run
+          path: LifeSync-${{ env.TAG }}.apk
+          retention-days: 7
+
       - name: Publish release
+        if: env.DRY_RUN != 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.TAG }}
