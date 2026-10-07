@@ -134,7 +134,9 @@ function extractAmount(text: string): number | null {
 const DEBIT_VERBS =
 	/\b(debited|spent|withdrawn|paid|sent|purchase[d]?|transferred|deducted|used at|charged)\b/i;
 const CREDIT_VERBS =
-	/\b(credited|received|deposited|refund(?:ed)?|cashback|reversed|added to)\b/i;
+	// "paid you" / "sent you" start at the same index as the debit verb "paid"
+	// / "sent"; a tie resolves to credit below, so "Rahul paid you ₹50" is income.
+	/\b(credited|received|deposited|refund(?:ed)?|cashback|reversed|added to|paid you|sent you|transferred to you)\b/i;
 
 /** "debit" | "credit" by whichever direction verb appears first. */
 export function detectDirection(text: string): "credit" | "debit" | null {

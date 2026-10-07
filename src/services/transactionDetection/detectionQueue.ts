@@ -74,6 +74,72 @@ const revive = (t: any): DetectedTransaction => ({
 	timestamp: new Date(t.timestamp),
 });
 
+// ---------- "Recent alerts seen" (troubleshooting) ----------
+//
+// The last few notifications from payment sources (UPI apps, bank apps, SMS
+// apps) and what detection decided, shown in Settings → Auto-detect. Without
+// it there is no way to tell "the alert never reached LifeSync" (access off,
+// app killed) from "it arrived but didn't look like a payment".
+
+const SEEN_KEY = "detected_txn_seen";
+const MAX_SEEN = 25;
+
+export type SeenOutcome =
+	| "queued" // offered to the user
+	| "duplicate" // same payment already waiting or handled
+	| "not_payment" // from a payment app, but not a completed payment
+	| "disabled"; // detection switched off
+
+export interface SeenAlert {
+	time: number;
+	app: string;
+	title: string;
+	text: string;
+	outcome: SeenOutcome;
+	/** e.g. "₹250 expense" when queued/duplicate */
+	summary?: string;
+}
+
+export function recordSeen(entry: SeenAlert): Promise<void> {
+	return serial(async () => {
+		const seen = await readJson<SeenAlert[]>(SEEN_KEY, []);
+		seen.unshift({
+			...entry,
+			// Enough to recognise the alert; no need to keep whole messages.
+			title: entry.title.slice(0, 80),
+			text: entry.text.slice(0, 160),
+		});
+		await AsyncStorage.setItem(SEEN_KEY, JSON.stringify(seen.slice(0, MAX_SEEN)));
+	});
+}
+
+export const listSeen = () => readJson<SeenAlert[]>(SEEN_KEY, []);
+
+export function clearSeen(): Promise<void> {
+	return serial(() => AsyncStorage.removeItem(SEEN_KEY));
+}
+
+// ---------- "Test detection" ----------
+//
+// Settings posts a notification titled DETECTION_TEST_TITLE from LifeSync
+// itself; the headless task, which ignores LifeSync's own notifications,
+// makes an exception for this one and stamps the time here. Seeing the stamp
+// proves the whole chain - Android → listener service → headless JS - works.
+
+export const DETECTION_TEST_TITLE = "LifeSync detection test";
+const TEST_KEY = "detected_txn_test_received";
+
+export const markTestReceived = () =>
+	AsyncStorage.setItem(TEST_KEY, String(Date.now())).catch(() => undefined);
+
+export async function testReceivedSince(since: number): Promise<boolean> {
+	try {
+		return Number(await AsyncStorage.getItem(TEST_KEY)) >= since;
+	} catch {
+		return false;
+	}
+}
+
 // ---------- settings ----------
 
 export async function getDetectionSettings(): Promise<DetectionSettings> {

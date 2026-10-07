@@ -70,6 +70,14 @@ export const UPI_APP_PACKAGES = {
 	mobikwik: "com.mobikwik_new",
 	freecharge: "com.freecharge.android",
 	whatsapp: "com.whatsapp", // WhatsApp Pay
+	bhim: "in.org.npci.upiapp",
+	paytmbusiness: "com.paytm.business", // Paytm for Business (payments received)
+	airtel: "com.myairtelapp", // Airtel Thanks / Airtel Payments Bank
+	navi: "com.naviapp",
+	supermoney: "money.super.payments",
+	jupiter: "money.jupiter",
+	fi: "com.epifi.paisa",
+	slice: "indwin.c3.shareapp",
 } as const;
 
 // Bank SMS sender IDs

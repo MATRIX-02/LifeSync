@@ -10,6 +10,29 @@ import {
 	getAccountLinks,
 	unlinkDigits,
 } from "@/src/services/transactionDetection/accountLinks";
+import {
+	clearSeen,
+	DETECTION_TEST_TITLE,
+	listSeen,
+	SeenAlert,
+	SeenOutcome,
+	testReceivedSince,
+} from "@/src/services/transactionDetection/detectionQueue";
+import { NotificationService } from "@/src/services/notificationService";
+import * as Notifications from "expo-notifications";
+
+const TEST_TIMEOUT_MS = 10000;
+const ACCESS_HELP =
+	"• Turn Notification access off and on again for LifeSync.\n" +
+	"• If the switch is greyed out or says \"Restricted setting\": long-press the LifeSync icon → App info → ⋮ → Allow restricted settings, then try again.\n" +
+	"• App info → Battery → No restrictions (Unrestricted). On Xiaomi, Oppo, Vivo and Realme also turn on Autostart.";
+
+const OUTCOME_LABEL: Record<SeenOutcome, string> = {
+	queued: "Offered to you",
+	duplicate: "Already seen (same payment)",
+	not_payment: "Not a completed payment",
+	disabled: "Detection was off",
+};
 import Ionicons from "@expo/vector-icons/Ionicons";
 import React, { useCallback, useEffect, useState } from "react";
 import {
@@ -50,11 +73,68 @@ export default function TransactionDetectionSettings({ visible, onClose, theme }
 	} = useTransactionDetectionStore();
 
 	const [links, setLinks] = useState<Record<string, string>>({});
+	const [seen, setSeen] = useState<SeenAlert[]>([]);
 	const [scanning, setScanning] = useState(false);
+	const [testing, setTesting] = useState(false);
+
+	/**
+	 * Posts a probe notification and waits for the background listener to
+	 * report it - the only way to know the whole chain works on this phone
+	 * (access granted, service bound, not killed by the battery manager).
+	 */
+	const runDetectionTest = async () => {
+		if (!notificationAccess) {
+			Alert.alert(
+				"Notification access is off",
+				`Tap "Allow" next to Notification access and switch LifeSync on.\n\n${ACCESS_HELP}`,
+			);
+			return;
+		}
+		const perm = await Notifications.getPermissionsAsync();
+		if (!perm.granted && !(await Notifications.requestPermissionsAsync()).granted) {
+			Alert.alert(
+				"Allow notifications",
+				"LifeSync needs permission to show notifications to run the test (and to ask you about detected payments).",
+			);
+			return;
+		}
+
+		setTesting(true);
+		const started = Date.now();
+		let received = false;
+		try {
+			await NotificationService.postDetectionTest(DETECTION_TEST_TITLE);
+			while (Date.now() - started < TEST_TIMEOUT_MS) {
+				await new Promise((r) => setTimeout(r, 500));
+				if (await testReceivedSince(started)) {
+					received = true;
+					break;
+				}
+			}
+		} finally {
+			await NotificationService.dismissDetectionTest();
+			setTesting(false);
+		}
+
+		if (received) {
+			Alert.success(
+				"Detection is working",
+				settings.enabled
+					? "LifeSync received the test notification. Payment alerts from your bank SMS and UPI apps will be picked up, even when the app is closed."
+					: "LifeSync can see notifications. Switch on \"Detect payments\" above to start getting payments offered.",
+			);
+		} else {
+			Alert.alert(
+				"LifeSync didn't receive it",
+				`Android isn't passing notifications to LifeSync right now. Try:\n\n${ACCESS_HELP}\n\nThen run the test again.`,
+			);
+		}
+	};
 
 	const reload = useCallback(async () => {
 		await refresh();
 		setLinks(await getAccountLinks());
+		setSeen(await listSeen());
 	}, [refresh]);
 
 	// Re-check when opened and when returning from Android's settings page.
@@ -269,6 +349,24 @@ export default function TransactionDetectionSettings({ visible, onClose, theme }
 								<Text style={styles.rowDesc}>Check the last 48 hours of bank SMS</Text>
 							</View>
 						</TouchableOpacity>
+						<View style={styles.divider} />
+						<TouchableOpacity style={styles.row} onPress={runDetectionTest} disabled={testing}>
+							<View style={[styles.rowIcon, { backgroundColor: theme.success + "20" }]}>
+								{testing ? (
+									<ActivityIndicator size="small" color={theme.success} />
+								) : (
+									<Ionicons name="pulse" size={18} color={theme.success} />
+								)}
+							</View>
+							<View style={{ flex: 1 }}>
+								<Text style={styles.rowName}>
+									{testing ? "Testing…" : "Test detection"}
+								</Text>
+								<Text style={styles.rowDesc}>
+									Checks that LifeSync can see notifications on this phone
+								</Text>
+							</View>
+						</TouchableOpacity>
 						{pendingTransactions.length > 0 && (
 							<>
 								<View style={styles.divider} />
@@ -349,9 +447,82 @@ export default function TransactionDetectionSettings({ visible, onClose, theme }
 						</Text>
 					)}
 
+					<View style={styles.sectionHeader}>
+						<Text style={styles.sectionLabel}>RECENT ALERTS SEEN</Text>
+						<View style={{ flexDirection: "row", gap: 16 }}>
+							<TouchableOpacity onPress={() => void reload()}>
+								<Text style={styles.grantText}>Refresh</Text>
+							</TouchableOpacity>
+							{seen.length > 0 && (
+								<TouchableOpacity
+									onPress={async () => {
+										await clearSeen();
+										setSeen([]);
+									}}
+								>
+									<Text style={[styles.grantText, { color: theme.textMuted }]}>
+										Clear
+									</Text>
+								</TouchableOpacity>
+							)}
+						</View>
+					</View>
+					<View style={styles.card}>
+						{seen.length === 0 ? (
+							<Text style={[styles.rowDesc, { padding: 14 }]}>
+								Nothing yet. Payment alerts from UPI apps, bank apps and SMS
+								appear here as LifeSync receives them. If you've just made a UPI
+								payment and nothing shows up, LifeSync isn't receiving
+								notifications - check that Notification access is Allowed above
+								and see the battery tip below.
+							</Text>
+						) : (
+							seen.map((s, i) => (
+								<View key={`${s.time}-${i}`}>
+									{i > 0 && <View style={styles.divider} />}
+									<View style={[styles.row, { alignItems: "flex-start" }]}>
+										<View
+											style={[
+												styles.outcomeDot,
+												{
+													backgroundColor:
+														s.outcome === "queued"
+															? theme.success
+															: s.outcome === "duplicate"
+																? theme.primary
+																: theme.warning,
+												},
+											]}
+										/>
+										<View style={{ flex: 1 }}>
+											<Text style={styles.rowName} numberOfLines={1}>
+												{s.app} ·{" "}
+												{new Date(s.time).toLocaleString(undefined, {
+													day: "numeric",
+													month: "short",
+													hour: "numeric",
+													minute: "2-digit",
+												})}
+											</Text>
+											<Text style={styles.rowDesc} numberOfLines={3}>
+												{[s.title, s.text].filter(Boolean).join(" - ") ||
+													"(no readable text - this app may use a custom notification layout)"}
+											</Text>
+											<Text style={[styles.rowDesc, { fontWeight: "700" }]}>
+												{OUTCOME_LABEL[s.outcome]}
+												{s.summary ? ` · ${s.summary}` : ""}
+											</Text>
+										</View>
+									</View>
+								</View>
+							))
+						)}
+					</View>
+
 					<Text style={styles.hint}>
 						Some phones stop background apps to save battery. If alerts stop
-						arriving, set LifeSync's battery usage to "Unrestricted".
+						arriving, set LifeSync's battery usage to "Unrestricted" (on Xiaomi,
+						Oppo, Vivo and Realme also turn on "Autostart").
 					</Text>
 					<TouchableOpacity onPress={() => Linking.openSettings()}>
 						<Text style={[styles.grantText, { marginTop: 8 }]}>Open app settings</Text>
@@ -413,6 +584,13 @@ const createStyles = (theme: Theme) =>
 		rowName: { flex: 1, fontSize: 15, fontWeight: "600", color: theme.text },
 		rowDesc: { fontSize: 12, color: theme.textSecondary, marginTop: 2, lineHeight: 17 },
 		divider: { height: 1, backgroundColor: theme.border, marginLeft: 60 },
+		sectionHeader: {
+			flexDirection: "row",
+			justifyContent: "space-between",
+			alignItems: "center",
+			marginRight: 4,
+		},
+		outcomeDot: { width: 10, height: 10, borderRadius: 5, marginTop: 6, marginHorizontal: 12 },
 		grantedPill: {
 			flexDirection: "row",
 			alignItems: "center",

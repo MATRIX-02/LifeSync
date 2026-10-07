@@ -125,6 +125,42 @@ function looksLikeInstitution(sender: string): boolean {
 	return isBankSms(s) || /^[A-Z]{2}-[A-Z0-9]{3,9}(?:-[A-Z])?$/i.test(s);
 }
 
+/** Human name for the app that posted a notification (for the log). */
+export function sourceLabel(pkg: string): string {
+	if (isUpiNotification(pkg)) return getAppName(pkg);
+	if (BANK_APP_PACKAGES[pkg]) return BANK_APP_PACKAGES[pkg];
+	if (isSmsApp(pkg)) return "SMS";
+	if (isDevTestSource(pkg)) return "Test (adb)";
+	return pkg;
+}
+
+/** Is this a notification source detection looks at at all? (For the log.) */
+export function isPaymentSource(raw: RawNotification): boolean {
+	const pkg = raw.app ?? "";
+	return (
+		isSmsApp(pkg) ||
+		!!BANK_APP_PACKAGES[pkg] ||
+		isUpiNotification(pkg) ||
+		isDevTestSource(pkg) ||
+		looksLikeUpiAlert(raw)
+	);
+}
+
+/**
+ * A UPI payment alert from an app not in UPI_APP_PACKAGES (there are dozens
+ * of UPI apps). Deliberately strict so chat messages like "I paid you via
+ * UPI" don't qualify: it must say UPI, carry an amount, AND quote a
+ * reference number or account digits, which only real payment alerts do.
+ */
+function looksLikeUpiAlert(raw: RawNotification): boolean {
+	const text = [raw.title, raw.bigText || raw.text].filter(Boolean).join(" ");
+	return (
+		/\bUPI\b/i.test(text) &&
+		/(?:₹|Rs\.?|INR)\s*[\d,]+/i.test(text) &&
+		/(?:\b(?:ref|rrn|utr|txn)\b[\s.:#no]*\d{6,}|\ba\/c\b|\bacc(?:oun)?t\b[^\d]{0,12}\d{4})/i.test(text)
+	);
+}
+
 /** Stable id so the same alert seen twice (re-posted, grouped) dedupes. */
 function makeId(source: string, text: string, amount: number): string {
 	let hash = 0;
@@ -212,8 +248,8 @@ export function parseNotification(raw: RawNotification): DetectedTransaction[] {
 		return tx ? [tx] : [];
 	}
 
-	// --- UPI apps -----------------------------------------------------------
-	if (isUpiNotification(pkg)) {
+	// --- UPI apps (known), plus a strict fallback for ones we don't know ----
+	if (isUpiNotification(pkg) || looksLikeUpiAlert(raw)) {
 		const data: NotificationData = {
 			app: getAppName(pkg),
 			title: raw.title ?? "",

@@ -1156,6 +1156,34 @@ export class NotificationService {
 		}
 	}
 
+	/** Posts the "Test detection" probe (see detectionQueue DETECTION_TEST_TITLE). */
+	static async postDetectionTest(title: string): Promise<void> {
+		if (Platform.OS === "android") {
+			await Notifications.setNotificationChannelAsync("transaction-detection", {
+				name: "Detected Payments",
+				description: "Payments detected from bank SMS and UPI apps",
+				importance: Notifications.AndroidImportance.DEFAULT,
+			});
+		}
+		await Notifications.scheduleNotificationAsync({
+			identifier: "detection_test",
+			content: {
+				title,
+				body: "Checking that LifeSync can see notifications. You can ignore this.",
+				data: { type: "detection_test" },
+			},
+			trigger: Platform.OS === "android" ? { channelId: "transaction-detection" } : null,
+		});
+	}
+
+	static async dismissDetectionTest(): Promise<void> {
+		try {
+			await Notifications.dismissNotificationAsync("detection_test");
+		} catch {
+			// Already gone.
+		}
+	}
+
 	static async cancelDetectedTransaction(id: string): Promise<void> {
 		try {
 			await Notifications.dismissNotificationAsync(`detected_${id}`);

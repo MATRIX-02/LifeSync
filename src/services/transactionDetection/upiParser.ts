@@ -75,10 +75,19 @@ export function getAppName(packageName: string): string {
 			mobikwik: "MobiKwik",
 			freecharge: "Freecharge",
 			whatsapp: "WhatsApp Pay",
+			bhim: "BHIM",
+			paytmbusiness: "Paytm for Business",
+			airtel: "Airtel Thanks",
+			navi: "Navi",
+			supermoney: "super.money",
+			jupiter: "Jupiter",
+			fi: "Fi",
+			slice: "slice",
 		};
 		return names[appEntry[0]] || appEntry[0];
 	}
-	return packageName;
+	// An app outside UPI_APP_PACKAGES, picked up by the strict UPI fallback.
+	return "UPI app";
 }
 
 /**
@@ -129,28 +138,43 @@ function getTransactionType(text: string): "credit" | "debit" {
 /**
  * Extract merchant/recipient name from notification
  */
-function extractMerchant(text: string): string | undefined {
-	// Common patterns
-	const patterns = [
-		/(?:paid to|sent to|to)\s+([A-Za-z0-9\s]+?)(?:\s*@|\s*₹|\s*Rs|\.|$)/i,
-		/(?:received from|from)\s+([A-Za-z0-9\s]+?)(?:\s*@|\s*₹|\s*Rs|\.|$)/i,
-		/(?:at|for)\s+([A-Za-z0-9\s]+?)(?:\s*₹|\s*Rs|\.|$)/i,
-	];
+// A name ends at the first word that starts a new clause ("in your bank
+// account", "successfully", "on 07-Oct", "via UPI") or at punctuation/amount.
+const NAME_END = String.raw`(?=\s+(?:in|into|to your|on|via|using|with|for|successfully|has|have|is|was|and|ref|upi|txn)\b|\s*[.,!|@₹(]|\s+Rs\b|\s+INR\b|$)`;
+// Starts with a letter and has no "." - otherwise "₹1.00 received. Mayank"
+// yields "00 received. Mayank" via the decimal point.
+const NAME = String.raw`([A-Za-z][A-Za-z0-9 &'-]{0,48}?)`;
+
+// Words that end up captured but aren't a payee ("Tap to view", "your account").
+const NOT_A_NAME = /^(you|your|your account|your bank|your bank account|bank account|account|the|a|an|view|details|see details|check|it|money|me|us)$/i;
+
+/**
+ * Payee (expense) or payer (income). Direction picks which side to look at:
+ * "Paid ₹10 to Zomato", "₹1 received from Mayank Singh", "Rahul paid you ₹50".
+ */
+function extractMerchant(
+	text: string,
+	direction: "credit" | "debit",
+): string | undefined {
+	const patterns =
+		direction === "credit"
+			? [
+					new RegExp(String.raw`(?:received from|from)\s+${NAME}${NAME_END}`, "i"),
+					// "Rahul Kumar paid you ₹50", "Rahul sent you money"
+					new RegExp(String.raw`(?:^|[.!]\s*)${NAME}\s+(?:has\s+)?(?:paid|sent)\s+you\b`, "i"),
+				]
+			: [
+					new RegExp(String.raw`(?:paid to|sent to|payment to|transferred to|to)\s+${NAME}${NAME_END}`, "i"),
+					new RegExp(String.raw`(?:at|for)\s+${NAME}${NAME_END}`, "i"),
+				];
 
 	for (const pattern of patterns) {
 		const match = text.match(pattern);
-		if (match && match[1]) {
-			const merchant = cleanMerchant(match[1]) ?? "";
-			// Filter out common non-merchant words
-			if (
-				merchant.length > 1 &&
-				!["you", "your", "the", "a", "an"].includes(merchant.toLowerCase())
-			) {
-				return merchant.slice(0, 50); // Limit length
-			}
+		const merchant = match?.[1] ? cleanMerchant(match[1]) ?? "" : "";
+		if (merchant.length > 1 && !NOT_A_NAME.test(merchant)) {
+			return merchant.slice(0, 50);
 		}
 	}
-
 	return undefined;
 }
 
@@ -223,7 +247,7 @@ export function parseUpiNotification(
 	}
 
 	const type = getTransactionType(fullText);
-	const merchant = extractMerchant(fullText);
+	const merchant = extractMerchant(fullText, type);
 	const upiId = extractUpiId(fullText);
 	const referenceId = extractReferenceId(fullText);
 	const app = getAppName(notification.packageName);
