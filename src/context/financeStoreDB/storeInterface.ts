@@ -213,20 +213,4 @@ export interface FinanceStore {
 
 	// Settings
 	setCurrency: (currency: string) => void;
-
-	// Import/Export
-	importData: (
-		data: Partial<{
-			accounts: Account[];
-			transactions: Transaction[];
-			recurringTransactions: RecurringTransaction[];
-			budgets: Budget[];
-			savingsGoals: SavingsGoal[];
-			billReminders: BillReminder[];
-			debts: Debt[];
-			splitGroups: SplitGroup[];
-			currency: string;
-		}>
-	) => Promise<void>;
-	clearAllData: () => Promise<void>;
 }

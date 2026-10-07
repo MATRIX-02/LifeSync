@@ -30,6 +30,13 @@ export type IncomeCategory =
 	| "rental"
 	| "gifts"
 	| "refunds"
+	| "interest"
+	| "dividends"
+	| "bonus"
+	| "cashback"
+	| "allowance"
+	| "reimbursement"
+	| "sale"
 	| "other";
 
 export type PaymentMethod =
@@ -64,7 +71,7 @@ export interface Transaction {
 	id: string;
 	type: TransactionType;
 	amount: number;
-	category: ExpenseCategory | IncomeCategory;
+	category: string; // built-in key or "custom_xxxx"
 	description?: string;
 	// The `finance_transactions` table has a `note` column and no `notes`.
 	// A phantom `notes?` used to sit here, and three read sites used it — the
@@ -89,7 +96,7 @@ export interface RecurringTransaction {
 	id: string;
 	type: TransactionType;
 	amount: number;
-	category: ExpenseCategory | IncomeCategory;
+	category: string; // built-in key or "custom_xxxx"
 	description: string;
 	accountId: string;
 	paymentMethod: PaymentMethod;
@@ -105,7 +112,7 @@ export interface RecurringTransaction {
 // Budget Interface
 export interface Budget {
 	id: string;
-	category: ExpenseCategory;
+	category: string; // built-in key or "custom_xxxx"
 	amount: number;
 	spent: number;
 	period: "weekly" | "monthly" | "yearly";
@@ -126,6 +133,9 @@ export interface SavingsGoal {
 	color: string;
 	icon: string;
 	priority: "low" | "medium" | "high";
+	// Expense category key (built-in or "custom_xxxx"). Needs the
+	// savings_goals.category column (20261007_finance_category_columns.sql).
+	category?: string | null;
 	isCompleted: boolean;
 	contributions: GoalContribution[];
 	linkedAccountId?: string; // Account linked to this goal
@@ -147,7 +157,7 @@ export interface BillReminder {
 	id: string;
 	name: string;
 	amount: number;
-	category: ExpenseCategory;
+	category: string; // built-in key or "custom_xxxx"
 	dueDate: string;
 	frequency: "once" | "weekly" | "monthly" | "yearly";
 	isPaid: boolean;
@@ -251,7 +261,7 @@ export interface SplitExpense {
 	groupId: string;
 	description: string;
 	amount: number;
-	category: ExpenseCategory;
+	category: string; // built-in key or "custom_xxxx"
 	paidBy: string; // Member ID who paid
 	date: string;
 	splitType: "equal" | "exact" | "percentage" | "shares";
@@ -299,7 +309,7 @@ export interface Settlement {
 // ============== ANALYTICS ==============
 
 export interface SpendingByCategory {
-	category: ExpenseCategory;
+	category: string; // built-in key or "custom_xxxx"
 	amount: number;
 	percentage: number;
 	transactionCount: number;
@@ -362,6 +372,17 @@ export const INCOME_CATEGORIES: Record<IncomeCategory, CategoryInfo> = {
 	rental: { name: "Rental Income", icon: "home", color: "#F39C12" },
 	gifts: { name: "Gifts", icon: "gift", color: "#E91E63" },
 	refunds: { name: "Refunds", icon: "refresh", color: "#1ABC9C" },
+	interest: { name: "Interest", icon: "cash", color: "#16A085" },
+	dividends: { name: "Dividends", icon: "pie-chart", color: "#8E44AD" },
+	bonus: { name: "Bonus", icon: "ribbon", color: "#E67E22" },
+	cashback: { name: "Cashback & Rewards", icon: "pricetag", color: "#E74C3C" },
+	allowance: { name: "Allowance", icon: "wallet", color: "#2ECC71" },
+	reimbursement: {
+		name: "Reimbursement",
+		icon: "swap-horizontal",
+		color: "#5D6D7E",
+	},
+	sale: { name: "Sale of Items", icon: "storefront", color: "#D35400" },
 	other: { name: "Other", icon: "ellipsis-horizontal", color: "#95A5A6" },
 };
 

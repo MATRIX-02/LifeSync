@@ -6,8 +6,8 @@ import { useAuthStore } from "@/src/context/authStore";
 import { Theme } from "@/src/context/themeContext";
 import { NotificationService } from "@/src/services/notificationService";
 import * as SplitWiseService from "@/src/services/splitwiseService";
+import { useFinanceCategories } from "@/src/hooks/useFinanceCategories";
 import {
-	ExpenseCategory,
 	GroupInvitation,
 	GroupMember,
 	SplitGroup,
@@ -69,22 +69,6 @@ const COLORS = [
 	"#818CF8",
 	"#F87171",
 	"#10B981",
-];
-
-const EXPENSE_CATEGORIES: {
-	value: ExpenseCategory;
-	label: string;
-	icon: string;
-}[] = [
-	{ value: "food", label: "Food & Dining", icon: "restaurant" },
-	{ value: "transport", label: "Transport", icon: "car" },
-	{ value: "shopping", label: "Shopping", icon: "bag-handle" },
-	{ value: "entertainment", label: "Entertainment", icon: "game-controller" },
-	{ value: "bills", label: "Bills & Utilities", icon: "receipt" },
-	{ value: "travel", label: "Travel", icon: "airplane" },
-	{ value: "groceries", label: "Groceries", icon: "cart" },
-	{ value: "rent", label: "Rent & Housing", icon: "home" },
-	{ value: "other", label: "Other", icon: "ellipsis-horizontal" },
 ];
 
 const GROUP_TYPES = [
@@ -731,7 +715,7 @@ function SplitWiseNew({ theme, currency, onOpenDrawer }: SplitWiseProps) {
 		const { error } = await SplitWiseService.addExpense(selectedGroup.id, {
 			description: expenseForm.description.trim(),
 			amount,
-			category: expenseForm.category as ExpenseCategory,
+			category: expenseForm.category,
 			paidBy: expenseForm.paidBy,
 			date: new Date().toISOString(),
 			splitType: expenseForm.splitType,
@@ -1214,6 +1198,9 @@ const GroupDetailView: React.FC<GroupDetailViewProps> = ({
 	styles,
 	onEdit,
 }) => {
+	// Group members can't see each other's custom categories, so unknown keys
+	// fall back to "Other" via getInfo.
+	const categories = useFinanceCategories();
 	const members = group.members || [];
 	const expenses = group.expenses || [];
 	const settlements = group.settlements || [];
@@ -1463,8 +1450,9 @@ const GroupDetailView: React.FC<GroupDetailViewProps> = ({
 								)
 								.map((expense) => {
 									const payer = members.find((m) => m.id === expense.paidBy);
-									const categoryInfo = EXPENSE_CATEGORIES.find(
-										(c) => c.value === expense.category,
+									const categoryInfo = categories.getInfo(
+										"expense",
+										expense.category,
 									);
 									return (
 										<View key={expense.id} style={styles.expenseCard}>
@@ -2064,6 +2052,8 @@ const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
 	styles,
 	getInitials,
 }) => {
+	// Same category list as the rest of Money Hub (custom + hidden built-ins).
+	const categories = useFinanceCategories();
 	const amount = parseFloat(expenseForm.amount) || 0;
 	const splitAmount = members.length > 0 ? amount / members.length : 0;
 
@@ -2308,12 +2298,12 @@ const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
 						<View style={styles.formGroup}>
 							<Text style={styles.formLabel}>Category</Text>
 							<View style={styles.categoryGrid}>
-								{EXPENSE_CATEGORIES.map((cat) => (
+								{categories.expenseOptions.map((cat) => (
 									<TouchableOpacity
-										key={cat.value}
+										key={cat.key}
 										style={[
 											styles.categoryOption,
-											expenseForm.category === cat.value && {
+											expenseForm.category === cat.key && {
 												borderColor: theme.primary,
 												backgroundColor: theme.primary + "10",
 											},
@@ -2321,7 +2311,7 @@ const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
 										onPress={() =>
 											setExpenseForm((prev) => ({
 												...prev,
-												category: cat.value,
+												category: cat.key,
 											}))
 										}
 									>
@@ -2329,7 +2319,7 @@ const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
 											name={cat.icon as any}
 											size={20}
 											color={
-												expenseForm.category === cat.value
+												expenseForm.category === cat.key
 													? theme.primary
 													: theme.textSecondary
 											}
@@ -2337,12 +2327,12 @@ const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
 										<Text
 											style={[
 												styles.categoryLabel,
-												expenseForm.category === cat.value && {
+												expenseForm.category === cat.key && {
 													color: theme.primary,
 												},
 											]}
 										>
-											{cat.label}
+											{cat.name}
 										</Text>
 									</TouchableOpacity>
 								))}

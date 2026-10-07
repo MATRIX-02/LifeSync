@@ -21,6 +21,13 @@ import type {
 // Cast to any to bypass strict TS type checking for Supabase queries
 const supabase = supabaseClient as any;
 
+// PostgREST schema-cache error for savings_goals.category, i.e. the
+// 20261007_finance_category_columns.sql migration hasn't been run.
+const isMissingCategoryColumn = (error: any) =>
+	!!error &&
+	(error.code === "PGRST204" || /schema cache/i.test(error.message || "")) &&
+	/'category'/.test(error.message || "");
+
 export type { FinanceStore } from "./storeInterface";
 export * from "./types";
 
@@ -834,7 +841,12 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
 			user_id: userId,
 			contributions: newGoal.contributions,
 		});
-		const { error } = await supabase.from("savings_goals").insert(dbData);
+		let { error } = await supabase.from("savings_goals").insert(dbData);
+		if (isMissingCategoryColumn(error)) {
+			// Migration not applied yet: save the goal without its category.
+			const { category: _c, ...rest } = dbData;
+			({ error } = await supabase.from("savings_goals").insert(rest));
+		}
 		if (error) {
 			console.error("Error adding goal:", error);
 			return;
@@ -849,11 +861,18 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
 		const dbUpdates: any = { ...updates, updated_at: new Date().toISOString() };
 		if (updates.contributions) dbUpdates.contributions = updates.contributions;
 
-		const { error } = await supabase
-			.from("savings_goals")
-			.update(objectToSnakeCase(dbUpdates))
-			.eq("id", id)
-			.eq("user_id", userId);
+		const payload = objectToSnakeCase(dbUpdates);
+		const run = (p: any) =>
+			supabase
+				.from("savings_goals")
+				.update(p)
+				.eq("id", id)
+				.eq("user_id", userId);
+		let { error } = await run(payload);
+		if (isMissingCategoryColumn(error)) {
+			const { category: _c, ...rest } = payload;
+			({ error } = await run(rest));
+		}
 		if (error) {
 			console.error("Error updating goal:", error);
 			return;
@@ -1556,129 +1575,5 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
 			.then(({ error }: any) => {
 				if (error) console.error("Error saving currency preference:", error);
 			});
-	},
-
-	// Import/Export
-	importData: async (data) => {
-		const { userId } = get();
-		if (!userId) return;
-		console.log("📤 Importing finance data...");
-
-		try {
-			if (data.accounts?.length) {
-				const accountsData = data.accounts.map((a) =>
-					objectToSnakeCase({ ...a, user_id: userId }),
-				);
-				await supabase
-					.from("finance_accounts")
-					.upsert(accountsData, { onConflict: "id" });
-			}
-			if (data.transactions?.length) {
-				const transData = data.transactions.map((t) =>
-					objectToSnakeCase({ ...t, user_id: userId }),
-				);
-				for (let i = 0; i < transData.length; i += 500) {
-					await supabase
-						.from("finance_transactions")
-						.upsert(transData.slice(i, i + 500), { onConflict: "id" });
-				}
-			}
-			if (data.recurringTransactions?.length) {
-				const recurData = data.recurringTransactions.map((r) =>
-					objectToSnakeCase({ ...r, user_id: userId }),
-				);
-				await supabase
-					.from("recurring_transactions")
-					.upsert(recurData, { onConflict: "id" });
-			}
-			if (data.budgets?.length) {
-				const budgetData = data.budgets.map((b) =>
-					objectToSnakeCase({ ...b, user_id: userId }),
-				);
-				await supabase
-					.from("finance_budgets")
-					.upsert(budgetData, { onConflict: "id" });
-			}
-			if (data.savingsGoals?.length) {
-				const goalsData = data.savingsGoals.map((g) =>
-					objectToSnakeCase({
-						...g,
-						user_id: userId,
-						contributions: g.contributions || [],
-					}),
-				);
-				await supabase
-					.from("savings_goals")
-					.upsert(goalsData, { onConflict: "id" });
-			}
-			if (data.billReminders?.length) {
-				const billsData = data.billReminders.map((b) =>
-					objectToSnakeCase({ ...b, user_id: userId }),
-				);
-				await supabase
-					.from("bill_reminders")
-					.upsert(billsData, { onConflict: "id" });
-			}
-			if (data.debts?.length) {
-				const debtsData = data.debts.map((d) =>
-					objectToSnakeCase({
-						...d,
-						user_id: userId,
-						payments: d.payments || [],
-					}),
-				);
-				await supabase
-					.from("finance_debts")
-					.upsert(debtsData, { onConflict: "id" });
-			}
-			if (data.splitGroups?.length) {
-				const groupsData = data.splitGroups.map((g) =>
-					objectToSnakeCase({
-						...g,
-						user_id: userId,
-						members: g.members || [],
-						expenses: g.expenses || [],
-						settlements: g.settlements || [],
-					}),
-				);
-				await supabase
-					.from("split_groups")
-					.upsert(groupsData, { onConflict: "id" });
-			}
-
-			await get().initialize(userId);
-			console.log("✅ Finance import complete");
-		} catch (error) {
-			console.error("❌ Error importing:", error);
-		}
-	},
-
-	clearAllData: async () => {
-		const { userId } = get();
-		if (!userId) return;
-		console.log("🗑️ Clearing finance data...");
-
-		await Promise.all([
-			supabase.from("finance_transactions").delete().eq("user_id", userId),
-			supabase.from("finance_accounts").delete().eq("user_id", userId),
-			supabase.from("recurring_transactions").delete().eq("user_id", userId),
-			supabase.from("finance_budgets").delete().eq("user_id", userId),
-			supabase.from("savings_goals").delete().eq("user_id", userId),
-			supabase.from("bill_reminders").delete().eq("user_id", userId),
-			supabase.from("finance_debts").delete().eq("user_id", userId),
-			supabase.from("split_groups").delete().eq("user_id", userId),
-		]);
-
-		set({
-			accounts: [],
-			transactions: [],
-			recurringTransactions: [],
-			budgets: [],
-			savingsGoals: [],
-			billReminders: [],
-			debts: [],
-			splitGroups: [],
-		});
-		console.log("✅ Finance data cleared");
 	},
 }));

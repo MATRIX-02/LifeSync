@@ -7,7 +7,7 @@ import {
 } from "../utils/frequency";
 import * as Device from "expo-device";
 import * as Notifications from "expo-notifications";
-import { Linking, Platform } from "react-native";
+import { AppState, Linking, Platform } from "react-native";
 import { supabase } from "../config/supabase";
 import { FrequencyConfig, Frequency } from "../types";
 
@@ -1104,6 +1104,62 @@ export class NotificationService {
 		return notifId;
 	}
 
+	// ---- Workout timers (timed sets and rest) ----
+	//
+	// Backup alerts for when the phone is locked or the user is in another app.
+	// `kind` keeps the set timer and the rest timer independent, so cancelling
+	// one never touches the other (or any other module's notifications).
+
+	static async scheduleWorkoutTimer(
+		kind: "set" | "rest",
+		seconds: number,
+		title: string,
+		body: string,
+	): Promise<string | null> {
+		try {
+			await this.cancelWorkoutTimer(kind);
+			if (seconds <= 0) return null;
+			if (Platform.OS === "android") {
+				await Notifications.setNotificationChannelAsync("workout-timer", {
+					name: "Workout Timer",
+					importance: Notifications.AndroidImportance.HIGH,
+					vibrationPattern: [0, 400, 150, 400, 150, 600],
+					sound: "default",
+					enableVibrate: true,
+				});
+			}
+			return await Notifications.scheduleNotificationAsync({
+				content: {
+					title,
+					body,
+					data: { type: "workout_timer", kind },
+					sound: "default",
+					...(Platform.OS === "android" && { channelId: "workout-timer" }),
+				},
+				trigger: {
+					type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
+					seconds: Math.max(1, Math.round(seconds)),
+				},
+			});
+		} catch (error) {
+			console.warn("Could not schedule workout timer:", error);
+			return null;
+		}
+	}
+
+	static async cancelWorkoutTimer(kind?: "set" | "rest"): Promise<void> {
+		try {
+			const scheduled = await this.getAllScheduledNotifications();
+			for (const notif of scheduled) {
+				const data = notif.content.data as any;
+				if (data?.type === "workout_timer" && (!kind || data.kind === kind))
+					await this.cancelNotification(notif.identifier);
+			}
+		} catch (error) {
+			console.warn("Could not cancel workout timer:", error);
+		}
+	}
+
 	// Cancel all pomodoro notifications
 	static async cancelPomodoroNotifications(): Promise<void> {
 		const scheduled = await this.getAllScheduledNotifications();
@@ -1166,13 +1222,21 @@ export class NotificationService {
 
 	static setNotificationHandler(): void {
 		Notifications.setNotificationHandler({
-			handleNotification: async () => ({
-				shouldShowAlert: true,
-				shouldPlaySound: true,
-				shouldSetBadge: true,
-				shouldShowBanner: true,
-				shouldShowList: true,
-			}),
+			handleNotification: async (notification) => {
+				// Workout timers beep and vibrate in-app while the screen is
+				// open; the notification is only the backup for a locked phone
+				// or another app, so don't double up in the foreground.
+				const quiet =
+					notification.request.content.data?.type === "workout_timer" &&
+					AppState.currentState === "active";
+				return {
+					shouldShowAlert: !quiet,
+					shouldPlaySound: !quiet,
+					shouldSetBadge: !quiet,
+					shouldShowBanner: !quiet,
+					shouldShowList: !quiet,
+				};
+			},
 		});
 	}
 

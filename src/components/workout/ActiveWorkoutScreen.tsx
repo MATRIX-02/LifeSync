@@ -5,6 +5,7 @@ import { Theme } from "@/src/context/themeContext";
 import { useWorkoutStore } from "@/src/context/workoutStoreDB";
 import {
 	EXERCISE_DATABASE,
+	getExerciseById,
 	getExercisesByMuscle,
 	MUSCLE_GROUP_INFO,
 } from "@/src/data/exerciseDatabase";
@@ -15,7 +16,7 @@ import {
 	WorkoutSet,
 } from "@/src/types/workout";
 import Ionicons from "@expo/vector-icons/Ionicons";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
 	FlatList,
 	Modal,
@@ -27,6 +28,22 @@ import {
 	View,
 } from "react-native";
 import ExerciseDetailSheet from "./ExerciseDetailSheet";
+import { NotificationService } from "@/src/services/notificationService";
+import SetFieldInput from "./SetFieldInput";
+import {
+	preloadTimerSound,
+	timerFinished,
+	timerTick,
+} from "@/src/services/timerAlert";
+import {
+	defaultSets,
+	FIELD_LABEL,
+	formatDuration,
+	getExerciseTracking,
+	getTracking,
+	SetField,
+	TRACKING_FIELDS,
+} from "@/src/data/exerciseTracking";
 
 interface ActiveWorkoutScreenProps {
 	theme: Theme;
@@ -58,6 +75,8 @@ export default function ActiveWorkoutScreen({
 	const [showFinishModal, setShowFinishModal] = useState(false);
 	const [showCustomExerciseModal, setShowCustomExerciseModal] = useState(false);
 	const [detailExercise, setDetailExercise] = useState<Exercise | null>(null);
+	// Info sheet for exercises already in the session (no "add" button).
+	const [infoExercise, setInfoExercise] = useState<Exercise | null>(null);
 	const [selectedMuscle, setSelectedMuscle] = useState<MuscleGroup | "all">(
 		"all",
 	);
@@ -73,6 +92,32 @@ export default function ActiveWorkoutScreen({
 	>([]);
 
 	const styles = createStyles(theme);
+
+	// Per-set timer for timed exercises, one at a time. With a target (a plank
+	// set planned as 0:30) it counts DOWN and alerts at zero, then KEEPS
+	// running as "+0:05" overtime so a forgotten timer still records the real
+	// time - the user stops it. Without a target (a run) it simply counts up.
+	const [stopwatch, setStopwatch] = useState<{
+		exerciseId: string;
+		setId: string;
+		startedAt: number;
+		target?: number;
+	} | null>(null);
+	const [stopwatchNow, setStopwatchNow] = useState(Date.now());
+
+	useEffect(() => {
+		if (!stopwatch) return;
+		const id = setInterval(() => setStopwatchNow(Date.now()), 250);
+		return () => clearInterval(id);
+	}, [stopwatch]);
+
+	const stopwatchSeconds = stopwatch
+		? Math.floor((stopwatchNow - stopwatch.startedAt) / 1000)
+		: 0;
+	// Negative once past the target (overtime).
+	const stopwatchRemaining = stopwatch?.target
+		? stopwatch.target - stopwatchSeconds
+		: null;
 
 	// Elapsed time timer
 	useEffect(() => {
@@ -104,6 +149,13 @@ export default function ActiveWorkoutScreen({
 		return () => clearInterval(timer);
 	}, [isRestTimerRunning]);
 
+	// Rest feedback: tick for 3-2-1, buzz + beep at zero.
+	useEffect(() => {
+		if (!isRestTimerRunning || restTimer === null) return;
+		if (restTimer === 0) void timerFinished();
+		else if (restTimer <= 3) timerTick();
+	}, [isRestTimerRunning, restTimer]);
+
 	// Dismiss the banner once the countdown lands on zero, after holding 0:00
 	// briefly so it is actually seen rather than skipping from 0:01 to gone.
 	useEffect(() => {
@@ -130,14 +182,31 @@ export default function ActiveWorkoutScreen({
 	};
 
 	const startRestTimer = (seconds: number) => {
+		preloadTimerSound();
 		setRestTimer(seconds);
 		setIsRestTimerRunning(true);
+		// Backup alert if the phone is locked or the app is in the background.
+		void NotificationService.scheduleWorkoutTimer(
+			"rest",
+			seconds,
+			"Rest over 💪",
+			"Time for your next set.",
+		);
 	};
 
 	const stopRestTimer = () => {
 		setIsRestTimerRunning(false);
 		setRestTimer(null);
+		void NotificationService.cancelWorkoutTimer("rest");
 	};
+
+	// Leaving the workout screen: no stray timer alerts afterwards.
+	useEffect(
+		() => () => {
+			void NotificationService.cancelWorkoutTimer();
+		},
+		[],
+	);
 
 	const handleAddExercise = (exercise: Exercise) => {
 		const newExercise: WorkoutExercise = {
@@ -145,17 +214,9 @@ export default function ActiveWorkoutScreen({
 			exerciseId: exercise.id,
 			exerciseName: exercise.name,
 			targetMuscles: exercise.targetMuscles,
-			sets: [
-				{
-					id: `set_1`,
-					setNumber: 1,
-					reps: 10,
-					weight: 0,
-					completed: false,
-					isWarmup: false,
-					isDropset: false,
-				},
-			],
+			// Starts with values that fit how it's measured: a plank gets 0:30,
+			// a run gets an empty distance + time, a bench press 10 reps.
+			sets: defaultSets(getTracking(exercise.id, exercise.category), 1, "set_"),
 			targetSets: 3,
 			restBetweenSets: 60,
 			order: currentSession?.exercises.length || 0,
@@ -231,12 +292,75 @@ export default function ActiveWorkoutScreen({
 	const handleUpdateSet = (
 		exerciseId: string,
 		setId: string,
-		field: "weight" | "reps",
-		value: string,
+		field: SetField,
+		value: number,
 	) => {
-		const numValue = parseFloat(value) || 0;
-		updateSetInSession(exerciseId, setId, { [field]: numValue });
+		updateSetInSession(exerciseId, setId, { [field]: value });
 	};
+
+	const lastTickRef = useRef<number | null>(null);
+	const alertedRef = useRef(false);
+
+	const toggleStopwatch = (
+		exerciseId: string,
+		set: WorkoutSet,
+		isTimeOnly: boolean,
+	) => {
+		const running =
+			stopwatch?.exerciseId === exerciseId && stopwatch.setId === set.id;
+		if (running) {
+			// Saves the real elapsed time, overtime included.
+			updateSetInSession(exerciseId, set.id, { duration: stopwatchSeconds });
+			setStopwatch(null);
+			alertedRef.current = false;
+			void NotificationService.cancelWorkoutTimer("set");
+			// A hold is done when you stop the clock; runs still need a distance.
+			if (isTimeOnly && !set.completed)
+				handleSetComplete(exerciseId, set.id, true);
+			return;
+		}
+		// Starting a new one saves whatever another running stopwatch had.
+		if (stopwatch)
+			updateSetInSession(stopwatch.exerciseId, stopwatch.setId, {
+				duration: stopwatchSeconds,
+			});
+		const now = Date.now();
+		const target = isTimeOnly && set.duration ? set.duration : undefined;
+		setStopwatchNow(now);
+		preloadTimerSound();
+		alertedRef.current = false;
+		lastTickRef.current = null;
+		// Holds count down from their planned time; runs count up.
+		setStopwatch({ exerciseId, setId: set.id, startedAt: now, target });
+		if (target) {
+			const name =
+				currentSession?.exercises.find((e) => e.id === exerciseId)
+					?.exerciseName ?? "Set";
+			void NotificationService.scheduleWorkoutTimer(
+				"set",
+				target,
+				`${name} done ⏱️`,
+				`${formatDuration(target)} is up — open the app to stop the timer.`,
+			);
+		} else void NotificationService.cancelWorkoutTimer("set");
+	};
+
+	// Countdown feedback: tick for the last 3 seconds, buzz + beep once at
+	// zero. The timer keeps running into overtime until the user stops it.
+	useEffect(() => {
+		if (stopwatchRemaining === null) return;
+		if (stopwatchRemaining <= 0) {
+			if (!alertedRef.current) {
+				alertedRef.current = true;
+				void timerFinished();
+			}
+			return;
+		}
+		if (stopwatchRemaining <= 3 && lastTickRef.current !== stopwatchRemaining) {
+			lastTickRef.current = stopwatchRemaining;
+			timerTick();
+		}
+	}, [stopwatchRemaining]);
 
 	const handleSetTypeChange = (
 		exerciseId: string,
@@ -298,6 +422,18 @@ export default function ActiveWorkoutScreen({
 		});
 		return Math.round(volume);
 	};
+
+	const sumCompleted = (field: "duration" | "distance") =>
+		currentSession
+			? currentSession.exercises.reduce(
+					(total, ex) =>
+						total +
+						ex.sets
+							.filter((s) => s.completed)
+							.reduce((n, s) => n + (s[field] || 0), 0),
+					0,
+				)
+			: 0;
 
 	const getCompletedSets = () => {
 		if (!currentSession) return 0;
@@ -391,13 +527,25 @@ export default function ActiveWorkoutScreen({
 					<Text style={styles.statLabel}>Sets Done</Text>
 				</View>
 				<View style={styles.statDivider} />
+				{/* Show what this workout is actually made of: lifting volume,
+				    distance for cardio, or time for holds/stretches. */}
 				<View style={styles.statItem}>
 					<Text style={styles.statValue}>
-						{getTotalVolume() > 1000
-							? `${(getTotalVolume() / 1000).toFixed(1)}k`
-							: getTotalVolume()}
+						{getTotalVolume() > 0
+							? getTotalVolume() > 1000
+								? `${(getTotalVolume() / 1000).toFixed(1)}k`
+								: getTotalVolume()
+							: sumCompleted("distance") > 0
+								? +sumCompleted("distance").toFixed(2)
+								: formatDuration(sumCompleted("duration"))}
 					</Text>
-					<Text style={styles.statLabel}>Volume (kg)</Text>
+					<Text style={styles.statLabel}>
+						{getTotalVolume() > 0
+							? "Volume (kg)"
+							: sumCompleted("distance") > 0
+								? "Distance (km)"
+								: "Active time"}
+					</Text>
 				</View>
 			</View>
 
@@ -450,6 +598,21 @@ export default function ActiveWorkoutScreen({
 								<Text style={styles.exerciseName}>{exercise.exerciseName}</Text>
 							</View>
 							<View style={styles.exerciseActions}>
+								{getExerciseById(exercise.exerciseId) && (
+									<TouchableOpacity
+										onPress={() =>
+											setInfoExercise(getExerciseById(exercise.exerciseId) ?? null)
+										}
+										hitSlop={10}
+										style={styles.addSetButton}
+									>
+										<Ionicons
+											name="information-circle-outline"
+											size={22}
+											color={theme.textSecondary}
+										/>
+									</TouchableOpacity>
+								)}
 								<TouchableOpacity
 									style={styles.addSetButton}
 									onPress={() => addSetToExercise(exercise.id)}
@@ -511,12 +674,15 @@ export default function ActiveWorkoutScreen({
 							))}
 						</View>
 
-						{/* Sets Table Header */}
+						{/* Sets Table Header - columns follow how the exercise is measured */}
 						<View style={styles.setsHeader}>
 							<Text style={[styles.setHeaderText, styles.setCol]}>SET</Text>
 							<Text style={[styles.setHeaderText, styles.typeCol]}>TYPE</Text>
-							<Text style={[styles.setHeaderText, styles.weightCol]}>KG</Text>
-							<Text style={[styles.setHeaderText, styles.repsCol]}>REPS</Text>
+							{TRACKING_FIELDS[getExerciseTracking(exercise)].map((f) => (
+								<Text key={f} style={[styles.setHeaderText, styles.valueCol]}>
+									{FIELD_LABEL[f]}
+								</Text>
+							))}
 							<Text style={[styles.setHeaderText, styles.checkCol]}>
 								<Ionicons name="checkmark" size={18} />
 							</Text>
@@ -580,26 +746,72 @@ export default function ActiveWorkoutScreen({
 													: "Normal"}
 									</Text>
 								</TouchableOpacity>
-								<TextInput
-									style={[styles.setInput, styles.weightCol]}
-									value={set.weight?.toString() || ""}
-									onChangeText={(v) =>
-										handleUpdateSet(exercise.id, set.id, "weight", v)
-									}
-									keyboardType="numeric"
-									placeholder="0"
-									placeholderTextColor={theme.textMuted}
-								/>
-								<TextInput
-									style={[styles.setInput, styles.repsCol]}
-									value={set.reps?.toString() || ""}
-									onChangeText={(v) =>
-										handleUpdateSet(exercise.id, set.id, "reps", v)
-									}
-									keyboardType="numeric"
-									placeholder="0"
-									placeholderTextColor={theme.textMuted}
-								/>
+								{TRACKING_FIELDS[getExerciseTracking(exercise)].map((f) => {
+									const tracking = getExerciseTracking(exercise);
+									if (f !== "duration")
+										return (
+											<SetFieldInput
+												key={f}
+												field={f}
+												value={set[f]}
+												onChange={(v) =>
+													handleUpdateSet(exercise.id, set.id, f, v)
+												}
+												style={[styles.setInput, styles.valueCol]}
+												placeholderTextColor={theme.textMuted}
+											/>
+										);
+									const running =
+										stopwatch?.exerciseId === exercise.id &&
+										stopwatch.setId === set.id;
+									return (
+										<View key={f} style={[styles.valueCol, styles.timeCell]}>
+											{running ? (
+												<Text
+													style={[
+														styles.setInput,
+														styles.timeRunning,
+														stopwatchRemaining !== null &&
+															stopwatchRemaining <= 0 &&
+															styles.timeOvertime,
+													]}
+												>
+													{stopwatchRemaining === null
+														? formatDuration(stopwatchSeconds)
+														: stopwatchRemaining > 0
+															? formatDuration(stopwatchRemaining)
+															: `+${formatDuration(-stopwatchRemaining)}`}
+												</Text>
+											) : (
+												<SetFieldInput
+													field="duration"
+													value={set.duration}
+													onChange={(v) =>
+														handleUpdateSet(exercise.id, set.id, "duration", v)
+													}
+													style={[styles.setInput, styles.timeInput]}
+													placeholderTextColor={theme.textMuted}
+												/>
+											)}
+											<TouchableOpacity
+												hitSlop={8}
+												onPress={() =>
+													toggleStopwatch(
+														exercise.id,
+														set,
+														tracking === "time",
+													)
+												}
+											>
+												<Ionicons
+													name={running ? "stop-circle" : "play-circle-outline"}
+													size={22}
+													color={running ? theme.error : theme.primary}
+												/>
+											</TouchableOpacity>
+										</View>
+									);
+								})}
 								<TouchableOpacity
 									style={[
 										styles.checkButton,
@@ -875,12 +1087,30 @@ export default function ActiveWorkoutScreen({
 								</Text>
 								<Text style={styles.finishSummaryLabel}>Sets</Text>
 							</View>
-							<View style={styles.finishSummaryItem}>
-								<Text style={styles.finishSummaryValue}>
-									{(getTotalVolume() / 1000).toFixed(1)}k
-								</Text>
-								<Text style={styles.finishSummaryLabel}>Volume</Text>
-							</View>
+							{getTotalVolume() > 0 && (
+								<View style={styles.finishSummaryItem}>
+									<Text style={styles.finishSummaryValue}>
+										{(getTotalVolume() / 1000).toFixed(1)}k
+									</Text>
+									<Text style={styles.finishSummaryLabel}>Volume</Text>
+								</View>
+							)}
+							{sumCompleted("distance") > 0 && (
+								<View style={styles.finishSummaryItem}>
+									<Text style={styles.finishSummaryValue}>
+										{+sumCompleted("distance").toFixed(2)} km
+									</Text>
+									<Text style={styles.finishSummaryLabel}>Distance</Text>
+								</View>
+							)}
+							{sumCompleted("duration") > 0 && (
+								<View style={styles.finishSummaryItem}>
+									<Text style={styles.finishSummaryValue}>
+										{formatDuration(sumCompleted("duration"))}
+									</Text>
+									<Text style={styles.finishSummaryLabel}>Timed</Text>
+								</View>
+							)}
 						</View>
 
 						{/* Mood Selection */}
@@ -980,6 +1210,12 @@ export default function ActiveWorkoutScreen({
 					setDetailExercise(null);
 					handleAddExercise(ex);
 				}}
+			/>
+
+			<ExerciseDetailSheet
+				exercise={infoExercise}
+				theme={theme}
+				onClose={() => setInfoExercise(null)}
 			/>
 		</View>
 	);
@@ -1193,6 +1429,27 @@ const createStyles = (theme: Theme) =>
 		},
 		repsCol: {
 			flex: 1,
+		},
+		valueCol: {
+			flex: 1,
+		},
+		timeCell: {
+			flexDirection: "row",
+			alignItems: "center",
+			justifyContent: "center",
+			gap: 4,
+		},
+		timeInput: {
+			minWidth: 48,
+		},
+		timeOvertime: {
+			color: theme.warning,
+		},
+		timeRunning: {
+			minWidth: 48,
+			color: theme.primary,
+			fontWeight: "700",
+			fontVariant: ["tabular-nums"],
 		},
 		checkCol: {
 			width: 40,

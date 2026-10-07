@@ -1,5 +1,6 @@
 import { Alert } from "@/src/components/CustomAlert";
 import { useAuthStore } from "@/src/context/authStore";
+import FinanceCategorySettings from "@/src/components/finance/FinanceCategorySettings";
 import { useFinanceStore } from "@/src/context/financeStoreDB";
 import { useHabitStore } from "@/src/context/habitStoreDB";
 import { ModuleType, useModuleStore } from "@/src/context/moduleContext";
@@ -35,10 +36,7 @@ import {
 	setAiSmsFallbackEnabled,
 } from "@/src/services/transactionDetection/aiSmsFallback";
 import Ionicons from "@expo/vector-icons/Ionicons";
-import * as DocumentPicker from "expo-document-picker";
-import * as FileSystem from "expo-file-system/legacy";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import * as Sharing from "expo-sharing";
 import React, { useEffect, useMemo, useState } from "react";
 import {
 	ActivityIndicator,
@@ -313,10 +311,9 @@ export default function SettingsScreen() {
 	const { user, isAdmin, profile: authProfile } = useAuthStore();
 
 	const [notificationsEnabled, setNotificationsEnabled] = useState(true);
+	const [showCategorySettings, setShowCategorySettings] = useState(false);
 	const [soundEnabled, setSoundEnabled] = useState(true);
 	const [vibrationEnabled, setVibrationEnabled] = useState(true);
-	const [isExporting, setIsExporting] = useState<ModuleType | null>(null);
-	const [isImporting, setIsImporting] = useState<ModuleType | null>(null);
 	const [showDeveloper, setShowDeveloper] = useState(false);
 	const [scheduledNotifications, setScheduledNotifications] = useState<any[]>(
 		[],
@@ -806,381 +803,6 @@ export default function SettingsScreen() {
 		setNotificationsEnabled(!notificationsEnabled);
 	};
 
-	// Export module-specific data
-	const handleExportModuleData = async (module: ModuleType) => {
-		setIsExporting(module);
-		try {
-			let exportData: any = {
-				version: "1.0.0",
-				exportedAt: new Date().toISOString(),
-				appName: "LifeSync",
-				module: module,
-				data: {},
-			};
-
-			if (module === "habits") {
-				exportData.data = {
-					habits: habitStore.habits,
-					logs: habitStore.logs,
-					profile: habitStore.profile,
-					settings: habitStore.settings,
-				};
-			} else if (module === "workout") {
-				exportData.data = {
-					fitnessProfile: workoutStore.fitnessProfile,
-					bodyMeasurements: workoutStore.bodyMeasurements,
-					bodyWeights: workoutStore.bodyWeights,
-					customExercises: workoutStore.customExercises,
-					workoutPlans: workoutStore.workoutPlans,
-					workoutSessions: workoutStore.workoutSessions,
-					personalRecords: workoutStore.personalRecords,
-					activePlanId: workoutStore.activePlanId,
-				};
-			} else if (module === "finance") {
-				exportData.data = {
-					accounts: financeStore.accounts,
-					transactions: financeStore.transactions,
-					recurringTransactions: financeStore.recurringTransactions,
-					budgets: financeStore.budgets,
-					savingsGoals: financeStore.savingsGoals,
-					billReminders: financeStore.billReminders,
-					debts: financeStore.debts,
-					splitGroups: financeStore.splitGroups,
-					currency: financeStore.currency,
-				};
-			} else if (module === "study") {
-				exportData.data = {
-					studyGoals: studyStore.studyGoals,
-					subjects: studyStore.subjects,
-					studySessions: studyStore.studySessions,
-					flashcardDecks: studyStore.flashcardDecks,
-					flashcards: studyStore.flashcards,
-					revisionSchedule: studyStore.revisionSchedule,
-					mockTests: studyStore.mockTests,
-					dailyPlans: studyStore.dailyPlans,
-					studyNotes: studyStore.studyNotes,
-				};
-			}
-
-			const jsonString = JSON.stringify(exportData, null, 2);
-			const fileName = `lifesync_${module}_backup_${
-				new Date().toISOString().split("T")[0]
-			}.json`;
-			const filePath = `${FileSystem.documentDirectory}${fileName}`;
-
-			await FileSystem.writeAsStringAsync(filePath, jsonString);
-
-			if (await Sharing.isAvailableAsync()) {
-				await Sharing.shareAsync(filePath, {
-					mimeType: "application/json",
-					dialogTitle: `Export ${module} Data`,
-					UTI: "public.json",
-				});
-			} else {
-				Alert.alert("Success", `Data exported to: ${fileName}`);
-			}
-		} catch (error) {
-			console.error("Export error:", error);
-			Alert.alert("Export Failed", `Failed to export ${module} data.`);
-		} finally {
-			setIsExporting(null);
-		}
-	};
-
-	// Import module-specific data
-	const handleImportModuleData = async (module: ModuleType) => {
-		Alert.alert(
-			`Import ${module} Data`,
-			`This will replace your current ${module} data with the imported backup. Are you sure?`,
-			[
-				{ text: "Cancel", style: "cancel" },
-				{
-					text: "Import",
-					onPress: async () => {
-						setIsImporting(module);
-						try {
-							const result = await DocumentPicker.getDocumentAsync({
-								type: "application/json",
-								copyToCacheDirectory: true,
-							});
-
-							if (result.canceled || !result.assets?.[0]) {
-								setIsImporting(null);
-								return;
-							}
-
-							const fileUri = result.assets[0].uri;
-							const jsonString = await FileSystem.readAsStringAsync(fileUri);
-							const importData = JSON.parse(jsonString);
-
-							if (
-								importData.appName !== "LifeSync" ||
-								importData.module !== module
-							) {
-								Alert.alert(
-									"Invalid File",
-									`This doesn't appear to be a valid ${module} backup file.`,
-								);
-								setIsImporting(null);
-								return;
-							}
-
-							if (module === "habits") {
-								habitStore.importData(importData.data);
-							} else if (module === "workout") {
-								workoutStore.importData(importData.data);
-							} else if (module === "finance") {
-								financeStore.importData(importData.data);
-							} else if (module === "study") {
-								studyStore.importData(importData.data);
-							}
-
-							Alert.alert("Success", `${module} data imported successfully!`);
-						} catch (error) {
-							console.error("Import error:", error);
-							Alert.alert("Import Failed", `Failed to import ${module} data.`);
-						} finally {
-							setIsImporting(null);
-						}
-					},
-				},
-			],
-		);
-	};
-
-	// Clear module-specific data
-	const handleClearModuleData = (module: ModuleType) => {
-		if (!user?.id) {
-			Alert.alert("Sign In Required", "Please sign in to clear your data.");
-			return;
-		}
-
-		const moduleName =
-			module === "habits"
-				? "Habits"
-				: module === "workout"
-					? "Workout"
-					: module === "finance"
-						? "Finance"
-						: "Study";
-
-		Alert.alert(
-			`Clear ${moduleName} Data`,
-			`This will permanently delete ALL your ${moduleName} data. This action cannot be undone!`,
-			[
-				{ text: "Cancel", style: "cancel" },
-				{
-					text: "Delete",
-					style: "destructive",
-					onPress: async () => {
-						try {
-							if (module === "habits") {
-								await habitStore.clearAllData();
-							} else if (module === "workout") {
-								await workoutStore.clearAllData();
-							} else if (module === "finance") {
-								await financeStore.clearAllData();
-							} else if (module === "study") {
-								await studyStore.clearAllData();
-							}
-							Alert.alert(
-								"Success",
-								`All ${moduleName} data has been cleared.`,
-							);
-						} catch (error: any) {
-							Alert.alert("Error", `Failed to clear ${moduleName} data.`);
-						}
-					},
-				},
-			],
-		);
-	};
-
-	// Export all data
-	const handleExportAllData = async () => {
-		setIsExporting("habits");
-		try {
-			const exportData = {
-				version: "1.0.0",
-				exportedAt: new Date().toISOString(),
-				appName: "LifeSync",
-				data: {
-					habits: {
-						habits: habitStore.habits,
-						logs: habitStore.logs,
-						profile: habitStore.profile,
-						settings: habitStore.settings,
-					},
-					workouts: {
-						fitnessProfile: workoutStore.fitnessProfile,
-						bodyMeasurements: workoutStore.bodyMeasurements,
-						bodyWeights: workoutStore.bodyWeights,
-						customExercises: workoutStore.customExercises,
-						workoutPlans: workoutStore.workoutPlans,
-						workoutSessions: workoutStore.workoutSessions,
-						personalRecords: workoutStore.personalRecords,
-						activePlanId: workoutStore.activePlanId,
-					},
-					finance: {
-						accounts: financeStore.accounts,
-						transactions: financeStore.transactions,
-						recurringTransactions: financeStore.recurringTransactions,
-						budgets: financeStore.budgets,
-						savingsGoals: financeStore.savingsGoals,
-						billReminders: financeStore.billReminders,
-						debts: financeStore.debts,
-						splitGroups: financeStore.splitGroups,
-						currency: financeStore.currency,
-					},
-					study: {
-						studyGoals: studyStore.studyGoals,
-						subjects: studyStore.subjects,
-						studySessions: studyStore.studySessions,
-						flashcardDecks: studyStore.flashcardDecks,
-						flashcards: studyStore.flashcards,
-						revisionSchedule: studyStore.revisionSchedule,
-						mockTests: studyStore.mockTests,
-						dailyPlans: studyStore.dailyPlans,
-						studyNotes: studyStore.studyNotes,
-					},
-				},
-			};
-
-			const jsonString = JSON.stringify(exportData, null, 2);
-			const fileName = `lifesync_backup_${
-				new Date().toISOString().split("T")[0]
-			}.json`;
-			const filePath = `${FileSystem.documentDirectory}${fileName}`;
-
-			await FileSystem.writeAsStringAsync(filePath, jsonString);
-
-			if (await Sharing.isAvailableAsync()) {
-				await Sharing.shareAsync(filePath, {
-					mimeType: "application/json",
-					dialogTitle: "Export LifeSync Data",
-					UTI: "public.json",
-				});
-			} else {
-				Alert.alert("Success", `Data exported to: ${fileName}`);
-			}
-		} catch (error) {
-			console.error("Export error:", error);
-			Alert.alert("Export Failed", "An error occurred while exporting data.");
-		} finally {
-			setIsExporting(null);
-		}
-	};
-
-	// Import all data
-	const handleImportAllData = async () => {
-		Alert.alert(
-			"Import All Data",
-			"This will replace your current data with the imported backup. Are you sure?",
-			[
-				{ text: "Cancel", style: "cancel" },
-				{
-					text: "Import",
-					onPress: async () => {
-						setIsImporting("habits");
-						try {
-							const result = await DocumentPicker.getDocumentAsync({
-								type: "application/json",
-								copyToCacheDirectory: true,
-							});
-
-							if (result.canceled || !result.assets?.[0]) {
-								setIsImporting(null);
-								return;
-							}
-
-							const fileUri = result.assets[0].uri;
-							const jsonString = await FileSystem.readAsStringAsync(fileUri);
-
-							const importData = JSON.parse(jsonString);
-
-							// Validate the import data
-							if (!importData.appName || importData.appName !== "LifeSync") {
-								Alert.alert(
-									"Invalid File",
-									"This doesn't appear to be a valid LifeSync backup file.",
-								);
-								setIsImporting(null);
-								return;
-							}
-
-							// Import Habits data
-							if (importData.data?.habits) {
-								habitStore.importData(importData.data.habits);
-							}
-
-							// Import Workout data
-							if (importData.data?.workouts) {
-								workoutStore.importData(importData.data.workouts);
-							}
-
-							// Import Finance data
-							if (importData.data?.finance) {
-								financeStore.importData(importData.data.finance);
-							}
-
-							// Import Study data
-							if (importData.data?.study) {
-								studyStore.importData(importData.data.study);
-							}
-
-							Alert.alert("Success", "Data imported successfully!");
-						} catch (error) {
-							console.error("Import error:", error);
-							Alert.alert(
-								"Import Failed",
-								"An error occurred while importing data. Please check the file format.",
-							);
-						} finally {
-							setIsImporting(null);
-						}
-					},
-				},
-			],
-		);
-	};
-
-	// Clear all data
-	const handleClearAllData = () => {
-		if (!user?.id) {
-			Alert.alert("Sign In Required", "Please sign in to clear your data.");
-			return;
-		}
-
-		Alert.alert(
-			"Clear All Data",
-			"This will permanently delete ALL your habits, workouts, finance, and study data. This action cannot be undone!",
-			[
-				{ text: "Cancel", style: "cancel" },
-				{
-					text: "Delete Everything",
-					style: "destructive",
-					onPress: async () => {
-						try {
-							// Clear all stores using their methods (all now filter by user_id)
-							await Promise.all([
-								habitStore.clearAllData(),
-								workoutStore.clearAllData(),
-								financeStore.clearAllData(),
-								studyStore.clearAllData(),
-							]);
-
-							Alert.alert("Success", "All data has been cleared.");
-						} catch (error: any) {
-							Alert.alert(
-								"Error",
-								"Failed to clear some data. Please try again.",
-							);
-						}
-					},
-				},
-			],
-		);
-	};
 
 	return (
 		<View style={styles.container}>
@@ -1221,9 +843,7 @@ export default function SettingsScreen() {
 				showsVerticalScrollIndicator={false}
 			>
 				{/* Appearance Section */}
-				<View style={styles.section}>
-					<Text style={styles.sectionTitle}>APPEARANCE</Text>
-
+				<SettingsSection title="APPEARANCE" styles={styles}>
 					<View style={styles.settingCard}>
 						<SettingRow
 							icon="moon"
@@ -1242,12 +862,10 @@ export default function SettingsScreen() {
 							}
 						/>
 					</View>
-				</View>
+				</SettingsSection>
 
 				{/* Modules Section */}
-				<View style={styles.section}>
-					<Text style={styles.sectionTitle}>MODULES</Text>
-
+				<SettingsSection title="MODULES" styles={styles}>
 					<View style={styles.settingCard}>
 						{moduleStore.moduleOrder.map((module, index) => (
 							<ModuleSettingRow
@@ -1264,12 +882,72 @@ export default function SettingsScreen() {
 							/>
 						))}
 					</View>
-				</View>
+				</SettingsSection>
+
+				{/* Finance Section */}
+				{moduleStore.isModuleEnabled("finance") && (
+					<SettingsSection title="FINANCE" styles={styles}>
+						<View style={styles.settingCard}>
+							<TouchableOpacity
+								activeOpacity={0.7}
+								onPress={() => setShowCategorySettings(true)}
+							>
+								<SettingRow
+									icon="pricetags"
+									iconColor={theme.primary}
+									iconBg={theme.primary + "20"}
+									label="Categories"
+									description="Choose which expense and income categories you use, or add your own"
+									theme={theme}
+									rightElement={
+										<Ionicons
+											name="chevron-forward"
+											size={20}
+											color={theme.textMuted}
+										/>
+									}
+								/>
+							</TouchableOpacity>
+						</View>
+
+						<View style={[styles.settingCard, { marginTop: 12 }]}>
+							<SettingRow
+								icon="chatbox-ellipses-outline"
+								iconColor={theme.warning}
+								iconBg={theme.warning + "20"}
+								label="AI Reading of Bank SMS"
+								description="Send unreadable bank messages to AI to detect transactions"
+								theme={theme}
+								rightElement={
+									<Switch
+										value={aiSmsEnabled}
+										onValueChange={handleToggleAiSms}
+										trackColor={{
+											false: theme.border,
+											true: theme.primary + "80",
+										}}
+										thumbColor={aiSmsEnabled ? theme.primary : theme.textMuted}
+									/>
+								}
+							/>
+						</View>
+
+						<Text style={styles.quotaNote}>
+							Off by default. When on, only messages LifeSync cannot parse
+							itself are sent to an external AI service, with long digit runs
+							masked.
+						</Text>
+
+						<FinanceCategorySettings
+							visible={showCategorySettings}
+							onClose={() => setShowCategorySettings(false)}
+							theme={theme}
+						/>
+					</SettingsSection>
+				)}
 
 				{/* Notifications Section */}
-				<View style={styles.section}>
-					<Text style={styles.sectionTitle}>NOTIFICATIONS</Text>
-
+				<SettingsSection title="NOTIFICATIONS" styles={styles}>
 					<View style={styles.settingCard}>
 						<SettingRow
 							icon="notifications"
@@ -1399,12 +1077,10 @@ export default function SettingsScreen() {
 							}
 						/>
 					</View>
-				</View>
+				</SettingsSection>
 
 				{/* Cloud Sync Section */}
-				<View style={styles.section}>
-					<Text style={styles.sectionTitle}>CLOUD SYNC</Text>
-
+				<SettingsSection title="CLOUD SYNC" styles={styles}>
 					{user ? (
 						<>
 							{/* Sync All */}
@@ -1471,29 +1147,6 @@ export default function SettingsScreen() {
 											)}
 										</View>
 										<Text style={styles.compactButtonText}>Restore All</Text>
-									</TouchableOpacity>
-
-									<TouchableOpacity
-										style={styles.compactButton}
-										onPress={() => handleDeleteCloudData("all")}
-									>
-										<View
-											style={[
-												styles.compactIcon,
-												{ backgroundColor: theme.error + "20" },
-											]}
-										>
-											<Ionicons
-												name="cloud-offline"
-												size={18}
-												color={theme.error}
-											/>
-										</View>
-										<Text
-											style={[styles.compactButtonText, { color: theme.error }]}
-										>
-											Delete Cloud
-										</Text>
 									</TouchableOpacity>
 								</View>
 							</View>
@@ -1799,6 +1452,32 @@ export default function SettingsScreen() {
 									</>
 								)}
 							</View>
+
+							{/* Destructive */}
+							<View style={[styles.settingCard, { marginTop: 12 }]}>
+								<TouchableOpacity
+									style={styles.settingRow}
+									onPress={() => handleDeleteCloudData("all")}
+								>
+									<View
+										style={[
+											styles.settingIcon,
+											{ backgroundColor: theme.error + "20" },
+										]}
+									>
+										<Ionicons name="cloud-offline" size={20} color={theme.error} />
+									</View>
+									<View style={styles.settingContent}>
+										<Text style={[styles.settingLabel, { color: theme.error }]}>
+											Delete Cloud Backup
+										</Text>
+										<Text style={styles.settingDescription}>
+											Permanently remove your data from the cloud
+										</Text>
+									</View>
+									<Ionicons name="chevron-forward" size={18} color={theme.textMuted} />
+								</TouchableOpacity>
+							</View>
 						</>
 					) : (
 						<View style={styles.settingCard}>
@@ -1815,7 +1494,7 @@ export default function SettingsScreen() {
 									Sign In to Enable Cloud Sync
 								</Text>
 								<Text style={styles.signInPromptText}>
-									Your data is stored locally. Sign in to backup and sync across
+									Sign in to back up your data and sync it across
 									devices.
 								</Text>
 								<View style={styles.signInButton}>
@@ -1824,339 +1503,151 @@ export default function SettingsScreen() {
 							</TouchableOpacity>
 						</View>
 					)}
-				</View>
+				</SettingsSection>
 
-				{/* Local Data Management Section */}
-				<View style={styles.section}>
-					<Text style={styles.sectionTitle}>LOCAL DATA</Text>
-
-					{/* All Data - Compact Actions */}
+				{/* AI Usage Section */}
+				<SettingsSection title="AI USAGE" styles={styles}>
 					<View style={styles.settingCard}>
-						<View style={styles.compactHeader}>
-							<Text style={styles.compactHeaderText}>
-								Export / Import (Local Files)
-							</Text>
-						</View>
-						<View style={styles.compactActions}>
-							<TouchableOpacity
-								style={[
-									styles.compactButton,
-									isExporting === "habits" && { opacity: 0.5 },
-								]}
-								onPress={handleExportAllData}
-								disabled={isExporting !== null}
-							>
-								<View
-									style={[
-										styles.compactIcon,
-										{ backgroundColor: theme.primary + "20" },
-									]}
-								>
-									<Ionicons
-										name="download-outline"
-										size={18}
-										color={theme.primary}
-									/>
-								</View>
-								<Text style={styles.compactButtonText}>Export All</Text>
-							</TouchableOpacity>
+						{aiQuota ? (
+							<>
+								<SettingRow
+									icon="sparkles-outline"
+									iconColor={theme.primary}
+									iconBg={theme.primary + "20"}
+									label="Analyses Left Today"
+									description={
+										aiQuota.remainingRequests !== undefined &&
+										aiQuota.limitRequests !== undefined
+											? `${aiQuota.remainingRequests.toLocaleString()} of ${aiQuota.limitRequests.toLocaleString()} · ${describeDailyReset()}`
+											: "Not reported"
+									}
+									theme={theme}
+								/>
 
-							<TouchableOpacity
-								style={[
-									styles.compactButton,
-									isImporting === "habits" && { opacity: 0.5 },
-								]}
-								onPress={handleImportAllData}
-								disabled={isImporting !== null}
-							>
-								<View
-									style={[
-										styles.compactIcon,
-										{ backgroundColor: theme.accent + "20" },
-									]}
-								>
-									<Ionicons
-										name="folder-open-outline"
-										size={18}
-										color={theme.accent}
-									/>
-								</View>
-								<Text style={styles.compactButtonText}>Import</Text>
-							</TouchableOpacity>
+								<View style={styles.divider} />
 
-							<TouchableOpacity
-								style={styles.compactButton}
-								onPress={handleClearAllData}
+								<SettingRow
+									icon="speedometer-outline"
+									iconColor={theme.accent}
+									iconBg={theme.accent + "20"}
+									label="Token Budget"
+									description={
+										aiQuota.remainingTokens !== undefined &&
+										aiQuota.limitTokens !== undefined
+											? `${aiQuota.remainingTokens.toLocaleString()} of ${aiQuota.limitTokens.toLocaleString()} this minute`
+											: "Not reported"
+									}
+									theme={theme}
+								/>
+
+								<View style={styles.divider} />
+
+								<SettingRow
+									icon="time-outline"
+									iconColor={theme.textSecondary}
+									iconBg={theme.textSecondary + "20"}
+									label="Last Checked"
+									description={new Date(aiQuota.capturedAt).toLocaleString()}
+									theme={theme}
+								/>
+							</>
+						) : (
+							<SettingRow
+								icon="sparkles-outline"
+								iconColor={theme.textMuted}
+								iconBg={theme.textMuted + "20"}
+								label="Analyses Left Today"
+								description="Tap Check Usage below to see your remaining quota"
+								theme={theme}
+							/>
+						)}
+
+						<View style={styles.divider} />
+
+						<TouchableOpacity
+							style={styles.settingRow}
+							onPress={handleCheckQuota}
+							disabled={isCheckingQuota}
+						>
+							<View
+								style={[
+									styles.settingIcon,
+									{ backgroundColor: theme.primary + "20" },
+								]}
 							>
-								<View
-									style={[
-										styles.compactIcon,
-										{ backgroundColor: theme.error + "20" },
-									]}
-								>
-									<Ionicons
-										name="trash-outline"
-										size={18}
-										color={theme.error}
-									/>
-								</View>
-								<Text
-									style={[styles.compactButtonText, { color: theme.error }]}
-								>
-									Clear All
+								{isCheckingQuota ? (
+									<ActivityIndicator size="small" color={theme.primary} />
+								) : (
+									<Ionicons name="refresh" size={20} color={theme.primary} />
+								)}
+							</View>
+							<View style={styles.settingContent}>
+								<Text style={styles.settingLabel}>Check Usage</Text>
+								<Text style={styles.settingDescription}>
+									{isCheckingQuota ? "Checking…" : "Fetch the latest quota"}
 								</Text>
-							</TouchableOpacity>
-						</View>
+							</View>
+							<Ionicons
+								name="chevron-forward"
+								size={18}
+								color={theme.textMuted}
+							/>
+						</TouchableOpacity>
 					</View>
 
-					{/* Module-Specific Data */}
-					{(moduleStore.isModuleEnabled("habits") ||
-						moduleStore.isModuleEnabled("workout") ||
-						moduleStore.isModuleEnabled("finance") ||
-						moduleStore.isModuleEnabled("study")) && (
-						<View style={[styles.settingCard, { marginTop: 12 }]}>
-							<View style={styles.compactHeader}>
-								<Text style={styles.compactHeaderText}>By Module (Local)</Text>
+					<Text style={styles.quotaNote}>
+						The AI allowance is shared across everyone using LifeSync, not
+						reserved per account. Checking uses one request of your daily
+						allowance.
+					</Text>
+				</SettingsSection>
+
+				{/* About Section */}
+				<SettingsSection title="ABOUT" styles={styles}>
+					<View style={styles.settingCard}>
+						<View style={styles.settingRow}>
+							<View
+								style={[
+									styles.settingIcon,
+									{ backgroundColor: theme.primary + "20" },
+								]}
+							>
+								<Ionicons
+									name="information-circle-outline"
+									size={20}
+									color={theme.primary}
+								/>
 							</View>
-
-							{/* Habits */}
-							{moduleStore.isModuleEnabled("habits") && (
-								<>
-									<View style={styles.moduleRow}>
-										<View style={styles.moduleInfo}>
-											<Ionicons
-												name="checkmark-circle"
-												size={16}
-												color={theme.primary}
-											/>
-											<Text style={styles.moduleLabel}>Habits</Text>
-										</View>
-										<View style={styles.moduleActions}>
-											<TouchableOpacity
-												style={styles.iconButton}
-												onPress={() => handleExportModuleData("habits")}
-												disabled={isExporting !== null}
-											>
-												<Ionicons
-													name="download-outline"
-													size={18}
-													color={
-														isExporting === "habits"
-															? theme.textMuted
-															: theme.primary
-													}
-												/>
-											</TouchableOpacity>
-											<TouchableOpacity
-												style={styles.iconButton}
-												onPress={() => handleImportModuleData("habits")}
-												disabled={isImporting !== null}
-											>
-												<Ionicons
-													name="cloud-upload-outline"
-													size={18}
-													color={
-														isImporting === "habits"
-															? theme.textMuted
-															: theme.accent
-													}
-												/>
-											</TouchableOpacity>
-											<TouchableOpacity
-												style={styles.iconButton}
-												onPress={() => handleClearModuleData("habits")}
-											>
-												<Ionicons
-													name="trash-outline"
-													size={18}
-													color={theme.error}
-												/>
-											</TouchableOpacity>
-										</View>
-									</View>
-									{(moduleStore.isModuleEnabled("workout") ||
-										moduleStore.isModuleEnabled("finance")) && (
-										<View style={styles.thinDivider} />
-									)}
-								</>
-							)}
-
-							{/* Workout */}
-							{moduleStore.isModuleEnabled("workout") && (
-								<>
-									<View style={styles.moduleRow}>
-										<View style={styles.moduleInfo}>
-											<Ionicons
-												name="barbell"
-												size={16}
-												color={theme.success}
-											/>
-											<Text style={styles.moduleLabel}>FitZone</Text>
-										</View>
-										<View style={styles.moduleActions}>
-											<TouchableOpacity
-												style={styles.iconButton}
-												onPress={() => handleExportModuleData("workout")}
-												disabled={isExporting !== null}
-											>
-												<Ionicons
-													name="download-outline"
-													size={18}
-													color={
-														isExporting === "workout"
-															? theme.textMuted
-															: theme.primary
-													}
-												/>
-											</TouchableOpacity>
-											<TouchableOpacity
-												style={styles.iconButton}
-												onPress={() => handleImportModuleData("workout")}
-												disabled={isImporting !== null}
-											>
-												<Ionicons
-													name="cloud-upload-outline"
-													size={18}
-													color={
-														isImporting === "workout"
-															? theme.textMuted
-															: theme.accent
-													}
-												/>
-											</TouchableOpacity>
-											<TouchableOpacity
-												style={styles.iconButton}
-												onPress={() => handleClearModuleData("workout")}
-											>
-												<Ionicons
-													name="trash-outline"
-													size={18}
-													color={theme.error}
-												/>
-											</TouchableOpacity>
-										</View>
-									</View>
-									{moduleStore.isModuleEnabled("finance") && (
-										<View style={styles.thinDivider} />
-									)}
-								</>
-							)}
-
-							{/* Finance */}
-							{moduleStore.isModuleEnabled("finance") && (
-								<View style={styles.moduleRow}>
-									<View style={styles.moduleInfo}>
-										<Ionicons name="wallet" size={16} color={theme.warning} />
-										<Text style={styles.moduleLabel}>Finance</Text>
-									</View>
-									<View style={styles.moduleActions}>
-										<TouchableOpacity
-											style={styles.iconButton}
-											onPress={() => handleExportModuleData("finance")}
-											disabled={isExporting !== null}
-										>
-											<Ionicons
-												name="download-outline"
-												size={18}
-												color={
-													isExporting === "finance"
-														? theme.textMuted
-														: theme.primary
-												}
-											/>
-										</TouchableOpacity>
-										<TouchableOpacity
-											style={styles.iconButton}
-											onPress={() => handleImportModuleData("finance")}
-											disabled={isImporting !== null}
-										>
-											<Ionicons
-												name="cloud-upload-outline"
-												size={18}
-												color={
-													isImporting === "finance"
-														? theme.textMuted
-														: theme.accent
-												}
-											/>
-										</TouchableOpacity>
-										<TouchableOpacity
-											style={styles.iconButton}
-											onPress={() => handleClearModuleData("finance")}
-										>
-											<Ionicons
-												name="trash-outline"
-												size={18}
-												color={theme.error}
-											/>
-										</TouchableOpacity>
-									</View>
-								</View>
-							)}
-
-							{/* Study Hub */}
-							{moduleStore.isModuleEnabled("study") && (
-								<>
-									<View style={styles.thinDivider} />
-									<View style={styles.moduleRow}>
-										<View style={styles.moduleInfo}>
-											<Ionicons name="book" size={16} color="#06B6D4" />
-											<Text style={styles.moduleLabel}>Study Hub</Text>
-										</View>
-										<View style={styles.moduleActions}>
-											<TouchableOpacity
-												style={styles.iconButton}
-												onPress={() => handleExportModuleData("study")}
-												disabled={isExporting !== null}
-											>
-												<Ionicons
-													name="download-outline"
-													size={18}
-													color={
-														isExporting === "study"
-															? theme.textMuted
-															: theme.primary
-													}
-												/>
-											</TouchableOpacity>
-											<TouchableOpacity
-												style={styles.iconButton}
-												onPress={() => handleImportModuleData("study")}
-												disabled={isImporting !== null}
-											>
-												<Ionicons
-													name="cloud-upload-outline"
-													size={18}
-													color={
-														isImporting === "study"
-															? theme.textMuted
-															: theme.accent
-													}
-												/>
-											</TouchableOpacity>
-											<TouchableOpacity
-												style={styles.iconButton}
-												onPress={() => handleClearModuleData("study")}
-											>
-												<Ionicons
-													name="trash-outline"
-													size={18}
-													color={theme.error}
-												/>
-											</TouchableOpacity>
-										</View>
-									</View>
-								</>
-							)}
+							<View style={styles.settingContent}>
+								<Text style={styles.settingLabel}>App Version</Text>
+								<Text style={styles.settingDescription}>2.1.0 (Build 2)</Text>
+							</View>
 						</View>
-					)}
-				</View>
+
+						<View style={styles.divider} />
+
+						<View style={styles.settingRow}>
+							<View
+								style={[
+									styles.settingIcon,
+									{ backgroundColor: theme.accent + "20" },
+								]}
+							>
+								<Ionicons name="code-slash" size={20} color={theme.accent} />
+							</View>
+							<View style={styles.settingContent}>
+								<Text style={styles.settingLabel}>Made with ❤️ by Mayank</Text>
+								<Text style={styles.settingDescription}>
+									For personal productivity
+								</Text>
+							</View>
+						</View>
+					</View>
+				</SettingsSection>
 
 				{/* Developer Section - Admin Only */}
 				{isAdmin() && (
-					<View style={styles.section}>
-						<Text style={styles.sectionTitle}>DEVELOPER</Text>
-
+					<SettingsSection title="DEVELOPER" styles={styles}>
 						<View style={styles.settingCard}>
 							<TouchableOpacity
 								style={styles.settingRow}
@@ -2377,179 +1868,8 @@ export default function SettingsScreen() {
 								/>
 							</TouchableOpacity>
 						</View>
-					</View>
+					</SettingsSection>
 				)}
-
-				{/* AI Usage Section */}
-				<View style={styles.section}>
-					<Text style={styles.sectionTitle}>AI USAGE</Text>
-
-					<View style={styles.settingCard}>
-						{aiQuota ? (
-							<>
-								<SettingRow
-									icon="sparkles-outline"
-									iconColor={theme.primary}
-									iconBg={theme.primary + "20"}
-									label="Analyses Left Today"
-									description={
-										aiQuota.remainingRequests !== undefined &&
-										aiQuota.limitRequests !== undefined
-											? `${aiQuota.remainingRequests.toLocaleString()} of ${aiQuota.limitRequests.toLocaleString()} · ${describeDailyReset()}`
-											: "Not reported"
-									}
-									theme={theme}
-								/>
-
-								<View style={styles.divider} />
-
-								<SettingRow
-									icon="speedometer-outline"
-									iconColor={theme.accent}
-									iconBg={theme.accent + "20"}
-									label="Token Budget"
-									description={
-										aiQuota.remainingTokens !== undefined &&
-										aiQuota.limitTokens !== undefined
-											? `${aiQuota.remainingTokens.toLocaleString()} of ${aiQuota.limitTokens.toLocaleString()} this minute`
-											: "Not reported"
-									}
-									theme={theme}
-								/>
-
-								<View style={styles.divider} />
-
-								<SettingRow
-									icon="time-outline"
-									iconColor={theme.textSecondary}
-									iconBg={theme.textSecondary + "20"}
-									label="Last Checked"
-									description={new Date(aiQuota.capturedAt).toLocaleString()}
-									theme={theme}
-								/>
-							</>
-						) : (
-							<SettingRow
-								icon="sparkles-outline"
-								iconColor={theme.textMuted}
-								iconBg={theme.textMuted + "20"}
-								label="Analyses Left Today"
-								description="Tap Check Usage below to see your remaining quota"
-								theme={theme}
-							/>
-						)}
-
-						<View style={styles.divider} />
-
-						<TouchableOpacity
-							style={styles.settingRow}
-							onPress={handleCheckQuota}
-							disabled={isCheckingQuota}
-						>
-							<View
-								style={[
-									styles.settingIcon,
-									{ backgroundColor: theme.primary + "20" },
-								]}
-							>
-								{isCheckingQuota ? (
-									<ActivityIndicator size="small" color={theme.primary} />
-								) : (
-									<Ionicons name="refresh" size={20} color={theme.primary} />
-								)}
-							</View>
-							<View style={styles.settingContent}>
-								<Text style={styles.settingLabel}>Check Usage</Text>
-								<Text style={styles.settingDescription}>
-									{isCheckingQuota ? "Checking…" : "Fetch the latest quota"}
-								</Text>
-							</View>
-							<Ionicons
-								name="chevron-forward"
-								size={18}
-								color={theme.textMuted}
-							/>
-						</TouchableOpacity>
-					</View>
-
-					<Text style={styles.quotaNote}>
-						The AI allowance is shared across everyone using LifeSync, not
-						reserved per account. Checking uses one request of your daily
-						allowance.
-					</Text>
-
-					<View style={[styles.settingCard, { marginTop: 16 }]}>
-						<SettingRow
-							icon="chatbox-ellipses-outline"
-							iconColor={theme.warning}
-							iconBg={theme.warning + "20"}
-							label="AI Reading of Bank SMS"
-							description="Send unreadable bank messages to AI to detect transactions"
-							theme={theme}
-							rightElement={
-								<Switch
-									value={aiSmsEnabled}
-									onValueChange={handleToggleAiSms}
-									trackColor={{
-										false: theme.border,
-										true: theme.primary + "80",
-									}}
-									thumbColor={aiSmsEnabled ? theme.primary : theme.textMuted}
-								/>
-							}
-						/>
-					</View>
-
-					<Text style={styles.quotaNote}>
-						Off by default. When on, only messages LifeSync cannot parse itself
-						are sent to an external AI service, with long digit runs masked.
-					</Text>
-				</View>
-
-				{/* About Section */}
-				<View style={styles.section}>
-					<Text style={styles.sectionTitle}>ABOUT</Text>
-
-					<View style={styles.settingCard}>
-						<View style={styles.settingRow}>
-							<View
-								style={[
-									styles.settingIcon,
-									{ backgroundColor: theme.primary + "20" },
-								]}
-							>
-								<Ionicons
-									name="information-circle-outline"
-									size={20}
-									color={theme.primary}
-								/>
-							</View>
-							<View style={styles.settingContent}>
-								<Text style={styles.settingLabel}>App Version</Text>
-								<Text style={styles.settingDescription}>2.1.0 (Build 2)</Text>
-							</View>
-						</View>
-
-						<View style={styles.divider} />
-
-						<View style={styles.settingRow}>
-							<View
-								style={[
-									styles.settingIcon,
-									{ backgroundColor: theme.accent + "20" },
-								]}
-							>
-								<Ionicons name="code-slash" size={20} color={theme.accent} />
-							</View>
-							<View style={styles.settingContent}>
-								<Text style={styles.settingLabel}>Made with ❤️ by Mayank</Text>
-								<Text style={styles.settingDescription}>
-									For personal productivity
-								</Text>
-							</View>
-						</View>
-					</View>
-				</View>
 
 				{/* Footer */}
 				<View style={styles.footer}>
@@ -2780,6 +2100,17 @@ interface SettingRowProps {
 	theme: Theme;
 	rightElement?: React.ReactNode;
 }
+
+const SettingsSection: React.FC<{
+	title: string;
+	styles: ReturnType<typeof createStyles>;
+	children: React.ReactNode;
+}> = ({ title, styles, children }) => (
+	<View style={styles.section}>
+		<Text style={styles.sectionTitle}>{title}</Text>
+		{children}
+	</View>
+);
 
 const SettingRow: React.FC<SettingRowProps> = ({
 	icon,

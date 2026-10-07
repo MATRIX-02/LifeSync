@@ -1,5 +1,6 @@
 // Workout Statistics - Detailed analytics with muscle map visualization
 
+import { formatDurationShort } from "@/src/data/exerciseTracking";
 import { MuscleBodyMap } from "@/src/components/muscle-map";
 import { SubscriptionCheckResult } from "@/src/components/PremiumFeatureGate";
 import { Theme } from "@/src/context/themeContext";
@@ -256,6 +257,8 @@ export default function WorkoutStatistics({
 			lats: 0,
 			lower_back: 0,
 			legs: 0,
+			shins: 0,
+			feet: 0,
 		};
 
 		// Get date range based on selected timeRange
@@ -332,16 +335,27 @@ export default function WorkoutStatistics({
 			lats: 0,
 			lower_back: 0,
 			legs: 0,
+			shins: 0,
+			feet: 0,
 		};
 		filtered[selectedMuscle] = muscleActivity[selectedMuscle];
 		return filtered;
 	}, [muscleActivity, selectedMuscle]);
 
+	const formatPR = (type: string, value: number) =>
+		type === "weight"
+			? `${+value.toFixed(1)} ${weightUnit}`
+			: type === "reps"
+				? `${value} reps`
+				: type === "duration"
+					? formatDurationShort(value)
+					: `${+value.toFixed(2)} km`;
+
 	// Get top exercises for selected muscle from real data
 	const getTopExercisesForMuscle = (muscle: MuscleGroup) => {
 		const exerciseStats: Record<
 			string,
-			{ sets: number; volume: number; name: string }
+			{ sets: number; volume: number; seconds: number; km: number; name: string }
 		> = {};
 
 		workoutSessions.forEach((session) => {
@@ -352,6 +366,8 @@ export default function WorkoutStatistics({
 						exerciseStats[ex.exerciseId] = {
 							sets: 0,
 							volume: 0,
+							seconds: 0,
+							km: 0,
 							name: ex.exerciseName,
 						};
 					}
@@ -360,6 +376,8 @@ export default function WorkoutStatistics({
 							exerciseStats[ex.exerciseId].sets += 1;
 							exerciseStats[ex.exerciseId].volume +=
 								(set.weight || 0) * (set.reps || 0);
+							exerciseStats[ex.exerciseId].seconds += set.duration || 0;
+							exerciseStats[ex.exerciseId].km += set.distance || 0;
 						}
 					});
 				}
@@ -372,10 +390,17 @@ export default function WorkoutStatistics({
 			.map((e) => ({
 				name: e.name,
 				sets: e.sets,
+				// Volume for lifts; distance or time for runs and holds.
 				volume:
-					e.volume >= 1000
-						? `${(e.volume / 1000).toFixed(1)}k ${weightUnit}`
-						: `${e.volume} ${weightUnit}`,
+					e.volume > 0
+						? e.volume >= 1000
+							? `${(e.volume / 1000).toFixed(1)}k ${weightUnit}`
+							: `${e.volume} ${weightUnit}`
+						: e.km > 0
+							? `${+e.km.toFixed(2)} km`
+							: e.seconds > 0
+								? formatDurationShort(e.seconds)
+								: `0 ${weightUnit}`,
 			}));
 	};
 
@@ -745,16 +770,11 @@ export default function WorkoutStatistics({
 							</View>
 							<View style={styles.prValue}>
 								<Text style={styles.prNumber}>
-									{pr.value}
-									{pr.type === "weight"
-										? ` ${weightUnit}`
-										: pr.type === "reps"
-										? " reps"
-										: ""}
+									{formatPR(pr.type, pr.value)}
 								</Text>
-								{pr.previousValue && (
+								{!!pr.previousValue && (
 									<Text style={styles.prImprovement}>
-										+{pr.value - pr.previousValue}
+										+{formatPR(pr.type, pr.value - pr.previousValue)}
 									</Text>
 								)}
 							</View>

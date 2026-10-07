@@ -1062,7 +1062,9 @@ const HabitRowItem: React.FC<HabitRowItemProps> = ({
 			<View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
 				{last5Days.map((date, index) => {
 					const { done, target } = getProgressForDate(habit.id, date);
-					const isCompleted = done >= target;
+					// target 0 = not scheduled that day: only a real log is a ✓.
+					const isCompleted = target === 0 ? done > 0 : done >= target;
+					const unscheduled = target === 0 && done === 0;
 
 					return (
 						<TouchableOpacity
@@ -1094,7 +1096,7 @@ const HabitRowItem: React.FC<HabitRowItemProps> = ({
 										color: done > 0 ? habit.color : theme.textMuted,
 									}}
 								>
-									{target > 1 ? `${done}/${target}` : "×"}
+									{unscheduled ? "–" : target > 1 ? `${done}/${target}` : "×"}
 								</Text>
 							)}
 						</TouchableOpacity>
@@ -1305,6 +1307,10 @@ const HabitGridItem: React.FC<HabitGridItemProps> = ({
 		if (!date || date > today) return "transparent";
 		const empty = isDark ? "#2d333b" : "#ebedf0";
 		const { done, target } = getProgressForDate(habit.id, date);
+		// Not scheduled that day (target 0): a bonus log still shows as done,
+		// otherwise a faint cell so rest days read differently from misses.
+		// Previously 0 >= 0 painted every rest day as fully complete.
+		if (target === 0) return done > 0 ? habit.color : empty + "66";
 		if (done >= target) return habit.color;
 		if (done === 0) return empty;
 		// 25% / 50% / 75% alpha bands, as an 8-digit hex suffix.

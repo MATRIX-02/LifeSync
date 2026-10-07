@@ -6,6 +6,7 @@ import { Theme } from "@/src/context/themeContext";
 import { useWorkoutStore } from "@/src/context/workoutStoreDB";
 import {
 	EXERCISE_DATABASE,
+	getExerciseById,
 	getExercisesByMuscle,
 	MUSCLE_GROUP_INFO,
 } from "@/src/data/exerciseDatabase";
@@ -31,6 +32,22 @@ import {
 	View,
 } from "react-native";
 import ExerciseDetailSheet from "./ExerciseDetailSheet";
+import SetFieldInput from "./SetFieldInput";
+import {
+	defaultSets,
+	getExerciseTracking,
+	getTracking,
+	nextSetValues,
+	SetField,
+	TRACKING_FIELDS,
+} from "@/src/data/exerciseTracking";
+
+const PLAN_FIELD_LABEL: Record<SetField, string> = {
+	weight: "Weight",
+	reps: "Reps",
+	duration: "Time",
+	distance: "Km",
+};
 
 interface WorkoutPlansProps {
 	theme: Theme;
@@ -75,6 +92,8 @@ export default function WorkoutPlans({
 	const [searchQuery, setSearchQuery] = useState("");
 	const [expandedExercise, setExpandedExercise] = useState<string | null>(null);
 	const [detailExercise, setDetailExercise] = useState<Exercise | null>(null);
+	// Info sheet for exercises already in the plan (no "add" button).
+	const [infoExercise, setInfoExercise] = useState<Exercise | null>(null);
 
 	const styles = createStyles(theme);
 
@@ -188,35 +207,8 @@ export default function WorkoutPlans({
 				exerciseId: exercise.id,
 				exerciseName: exercise.name,
 				targetMuscles: exercise.targetMuscles,
-				sets: [
-					{
-						id: "1",
-						setNumber: 1,
-						reps: 10,
-						weight: 0,
-						completed: false,
-						isWarmup: false,
-						isDropset: false,
-					},
-					{
-						id: "2",
-						setNumber: 2,
-						reps: 10,
-						weight: 0,
-						completed: false,
-						isWarmup: false,
-						isDropset: false,
-					},
-					{
-						id: "3",
-						setNumber: 3,
-						reps: 10,
-						weight: 0,
-						completed: false,
-						isWarmup: false,
-						isDropset: false,
-					},
-				],
+				// e.g. a plank starts as 3 x 0:30, a run as 1 x (km + time)
+				sets: defaultSets(getTracking(exercise.id, exercise.category)),
 				targetSets: 3,
 				restBetweenSets: 60,
 				order: selectedExercises.length,
@@ -252,15 +244,16 @@ export default function WorkoutPlans({
 				exerciseId: s.exerciseId,
 				exerciseName: s.name,
 				targetMuscles: source?.targetMuscles ?? [],
-				sets: Array.from({ length: s.sets }, (_, i) => ({
-					id: `${i + 1}`,
-					setNumber: i + 1,
-					reps: s.reps,
-					weight: 0,
-					completed: false,
-					isWarmup: false,
-					isDropset: false,
-				})),
+				sets: (() => {
+					const tracking = getTracking(s.exerciseId, source?.category);
+					// Suggestions only carry reps; timed and cardio exercises
+					// keep their own defaults instead of "12 reps" of plank.
+					return defaultSets(tracking, s.sets).map((set) =>
+						TRACKING_FIELDS[tracking].includes("reps")
+							? { ...set, reps: s.reps }
+							: set,
+					);
+				})(),
 				targetSets: s.sets,
 				targetReps: s.reps,
 				restBetweenSets: s.restSeconds,
@@ -580,6 +573,67 @@ export default function WorkoutPlans({
 			"ex_piriformis_stretch",
 			"ex_walking_rehab",
 		],
+
+		// Running. Strength first, because most running injuries are the calf,
+		// shin and hip failing to tolerate load, not a lack of mileage.
+		"Runner's Strength": [
+			"ex_single_leg_calf_raise",
+			"ex_bent_knee_calf_raise",
+			"ex_tibialis_raise",
+			"ex_single_leg_rdl",
+			"ex_step_up",
+			"ex_copenhagen_plank",
+			"ex_lateral_band_walk",
+		],
+		"Shin Splint Prevention": [
+			"ex_tibialis_raise",
+			"ex_bent_knee_calf_raise",
+			"ex_single_leg_calf_raise",
+			"ex_banded_inversion",
+			"ex_ankle_knee_to_wall",
+			"ex_standing_calf_stretch",
+		],
+		"Achilles & Calf Care": [
+			"ex_eccentric_heel_drop",
+			"ex_bent_knee_calf_raise",
+			"ex_single_leg_calf_raise",
+			"ex_standing_calf_stretch",
+		],
+		"Pre-Run Warm-Up": [
+			"ex_leg_swings",
+			"ex_ankle_knee_to_wall",
+			"ex_lateral_band_walk",
+			"ex_a_skip",
+			"ex_high_knees",
+			"ex_pogo_hops",
+		],
+		"Post-Run Mobility": [
+			"ex_standing_calf_stretch",
+			"ex_kneeling_hip_flexor_stretch",
+			"ex_supine_hamstring_stretch_strap",
+			"ex_piriformis_stretch",
+			"ex_foot_roll",
+		],
+
+		// Feet. Arch work is mostly for FLEXIBLE flat feet - see the note in
+		// the template picker and above the foot exercises in the database.
+		"Flat Foot / Arch Strength": [
+			"ex_short_foot",
+			"ex_toe_yoga",
+			"ex_toe_splay",
+			"ex_towel_scrunch",
+			"ex_banded_inversion",
+			"ex_heel_raise_ball",
+			"ex_single_leg_balance",
+		],
+		"Plantar Fasciitis Relief": [
+			"ex_plantar_fascia_stretch",
+			"ex_foot_roll",
+			"ex_standing_calf_stretch",
+			"ex_towel_scrunch",
+			"ex_short_foot",
+			"ex_bent_knee_calf_raise",
+		],
 	};
 
 	/**
@@ -630,6 +684,34 @@ export default function WorkoutPlans({
 		// Conditioning
 		ex_walking_rehab: { setDurations: [600], rest: 0 },
 
+		// Running strength - slow, high-rep lower-leg work
+		ex_tibialis_raise: { setReps: [20, 20, 20], rest: 45 },
+		ex_bent_knee_calf_raise: { setReps: [15, 15, 15], rest: 60 },
+		ex_single_leg_calf_raise: { setReps: [15, 15, 15], rest: 60 },
+		// Alfredson-style: 3x15 is the studied dose
+		ex_eccentric_heel_drop: { setReps: [15, 15, 15], rest: 60 },
+		ex_copenhagen_plank: { setDurations: [20, 20, 20], rest: 45 },
+		ex_single_leg_rdl: { setReps: [10, 10, 10], rest: 60 },
+		ex_step_up: { setReps: [10, 10, 10], rest: 60 },
+		ex_lateral_band_walk: { setReps: [15, 15], rest: 30 },
+		ex_pogo_hops: { setReps: [20, 20], rest: 60 },
+		ex_ankle_knee_to_wall: { setReps: [10, 10], rest: 15 },
+		ex_leg_swings: { setReps: [15, 15], rest: 0 },
+		ex_a_skip: { setDurations: [20, 20], rest: 30 },
+		ex_high_knees: { setDurations: [20, 20], rest: 30 },
+		ex_standing_calf_stretch: { setDurations: [30, 30], rest: 0 },
+
+		// Feet - many short holds and light, frequent reps
+		ex_short_foot: { setReps: [10, 10], rest: 30 },
+		ex_towel_scrunch: { setReps: [3, 3], rest: 30 },
+		ex_toe_yoga: { setReps: [10, 10], rest: 20 },
+		ex_toe_splay: { setReps: [12, 12], rest: 20 },
+		ex_heel_raise_ball: { setReps: [12, 12, 12], rest: 45 },
+		ex_banded_inversion: { setReps: [15, 15], rest: 30 },
+		ex_single_leg_balance: { setDurations: [30, 30], rest: 15 },
+		ex_plantar_fascia_stretch: { setDurations: [30, 30, 30], rest: 10 },
+		ex_foot_roll: { setDurations: [90], rest: 0 },
+
 		// Shared yoga poses that these plans also pull in
 		ex_cat_cow: { setReps: [12], rest: 20 },
 		ex_childs_pose: { setDurations: [60], rest: 0 },
@@ -651,16 +733,18 @@ export default function WorkoutPlans({
 				const durations = rx?.setDurations;
 				const count = reps?.length ?? durations?.length ?? 3;
 
-				const sets = Array.from({ length: count }, (_, i) => ({
-					id: String(i + 1),
-					setNumber: i + 1,
-					reps: durations ? undefined : (reps?.[i] ?? 10),
-					duration: durations?.[i],
-					weight: 0,
-					completed: false,
-					isWarmup: false,
-					isDropset: false,
-				}));
+				// No prescription: the exercise's own defaults (3 x 10 for lifts,
+				// 3 x 0:30 for holds, ...). A prescription overrides the numbers.
+				const sets = defaultSets(
+					getTracking(exercise.id, exercise.category),
+					count,
+				).map((set, i) =>
+					durations
+						? { ...set, reps: undefined, duration: durations[i] }
+						: reps
+							? { ...set, reps: reps[i] }
+							: set,
+				);
 
 				exercises.push({
 					id: `${Date.now()}_${index}`,
@@ -690,7 +774,7 @@ export default function WorkoutPlans({
 	const updateSetValue = (
 		exerciseId: string,
 		setId: string,
-		field: "reps" | "weight",
+		field: SetField,
 		value: number,
 	) => {
 		setSelectedExercises(
@@ -720,8 +804,10 @@ export default function WorkoutPlans({
 							{
 								id: `${newSetNumber}`,
 								setNumber: newSetNumber,
-								reps: 10,
-								weight: 0,
+								...nextSetValues(
+									getTracking(ex.exerciseId),
+									ex.sets[ex.sets.length - 1],
+								),
 								completed: false,
 								isWarmup: false,
 								isDropset: false,
@@ -976,6 +1062,79 @@ export default function WorkoutPlans({
 											</TouchableOpacity>
 										))}
 									</View>
+									<Text style={[styles.editorSectionTitle, { marginTop: 20 }]}>
+										🏃 Running
+									</Text>
+									<Text style={styles.templateNote}>
+										Strength work 2-3 times a week prevents most shin, calf and knee problems. Warm up before runs, stretch after.
+									</Text>
+									<View style={styles.templateGrid}>
+										{[
+											{ name: "Runner's Strength", icon: "barbell" },
+											{ name: "Shin Splint Prevention", icon: "shield-checkmark" },
+											{ name: "Achilles & Calf Care", icon: "bandage" },
+											{ name: "Pre-Run Warm-Up", icon: "flame" },
+											{ name: "Post-Run Mobility", icon: "leaf" },
+										].map((template) => (
+											<TouchableOpacity
+												key={template.name}
+												style={[
+													styles.templateCard,
+													{ backgroundColor: theme.primary + "15" },
+												]}
+												onPress={() => handleSelectTemplate(template.name)}
+											>
+												<Ionicons
+													name={template.icon as any}
+													size={18}
+													color={theme.primary}
+												/>
+												<Text
+													style={[
+														styles.templateText,
+														{ color: theme.primary },
+													]}
+												>
+													{template.name}
+												</Text>
+											</TouchableOpacity>
+										))}
+									</View>
+									<Text style={[styles.editorSectionTitle, { marginTop: 20 }]}>
+										🦶 Feet &amp; Arches
+									</Text>
+									<Text style={styles.templateNote}>
+										Best for flexible flat feet (the arch shows when you sit or stand on tiptoe). If your feet are painful, the arch never appears, or one foot recently flattened, see a physio or podiatrist first.
+									</Text>
+									<View style={styles.templateGrid}>
+										{[
+											{ name: "Flat Foot / Arch Strength", icon: "footsteps" },
+											{ name: "Plantar Fasciitis Relief", icon: "medkit" },
+										].map((template) => (
+											<TouchableOpacity
+												key={template.name}
+												style={[
+													styles.templateCard,
+													{ backgroundColor: theme.warning + "15" },
+												]}
+												onPress={() => handleSelectTemplate(template.name)}
+											>
+												<Ionicons
+													name={template.icon as any}
+													size={18}
+													color={theme.warning}
+												/>
+												<Text
+													style={[
+														styles.templateText,
+														{ color: theme.warning },
+													]}
+												>
+													{template.name}
+												</Text>
+											</TouchableOpacity>
+										))}
+									</View>
 								</View>
 							)}
 
@@ -1045,6 +1204,21 @@ export default function WorkoutPlans({
 													</Text>
 												</View>
 												<View style={styles.exerciseCardActions}>
+													{getExerciseById(exercise.exerciseId) && (
+														<TouchableOpacity
+															onPress={() =>
+																setInfoExercise(getExerciseById(exercise.exerciseId) ?? null)
+															}
+															hitSlop={10}
+															style={styles.exerciseInfoButton}
+														>
+															<Ionicons
+																name="information-circle-outline"
+																size={22}
+																color={theme.textSecondary}
+															/>
+														</TouchableOpacity>
+													)}
 													<Text style={styles.exerciseSetsCount}>
 														{exercise.sets.length} sets
 													</Text>
@@ -1066,8 +1240,13 @@ export default function WorkoutPlans({
 												{/* Sets */}
 												<View style={styles.setsHeader}>
 													<Text style={styles.setsHeaderText}>Set</Text>
-													<Text style={styles.setsHeaderText}>Reps</Text>
-													<Text style={styles.setsHeaderText}>Weight</Text>
+													{TRACKING_FIELDS[getExerciseTracking(exercise)].map(
+														(f) => (
+															<Text key={f} style={styles.setsHeaderText}>
+																{PLAN_FIELD_LABEL[f]}
+															</Text>
+														),
+													)}
 													<View style={{ width: 24 }} />
 												</View>
 
@@ -1078,32 +1257,20 @@ export default function WorkoutPlans({
 																{set.setNumber}
 															</Text>
 														</View>
-														<TextInput
-															style={styles.setInput}
-															keyboardType="numeric"
-															value={set.reps?.toString() || ""}
-															onChangeText={(v) =>
-																updateSetValue(
-																	exercise.id,
-																	set.id,
-																	"reps",
-																	parseInt(v) || 0,
-																)
-															}
-														/>
-														<TextInput
-															style={styles.setInput}
-															keyboardType="numeric"
-															value={set.weight?.toString() || "0"}
-															onChangeText={(v) =>
-																updateSetValue(
-																	exercise.id,
-																	set.id,
-																	"weight",
-																	parseFloat(v) || 0,
-																)
-															}
-														/>
+														{TRACKING_FIELDS[
+															getExerciseTracking(exercise)
+														].map((f) => (
+															<SetFieldInput
+																key={f}
+																field={f}
+																value={set[f]}
+																onChange={(v) =>
+																	updateSetValue(exercise.id, set.id, f, v)
+																}
+																style={styles.setInput}
+																placeholderTextColor={theme.textMuted}
+															/>
+														))}
 														<TouchableOpacity
 															onPress={() =>
 																removeSetFromExerciseInPlan(exercise.id, set.id)
@@ -1369,6 +1536,12 @@ export default function WorkoutPlans({
 								addLabel="Add to Plan"
 							/>
 						</Modal>
+
+						<ExerciseDetailSheet
+							exercise={infoExercise}
+							theme={theme}
+							onClose={() => setInfoExercise(null)}
+						/>
 					</View>
 				</View>
 			</Modal>

@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { AppState, AppStateStatus } from "react-native";
 import { supabaseDirect } from "../config/supabase";
 import { useAuthStore } from "../context/authStore";
+import { useFinanceCategoryStore } from "../context/financeCategoryStore";
 import { useFinanceStore } from "../context/financeStoreDB";
 import { useHabitStore } from "../context/habitStoreDB";
 import { useModuleStore } from "../context/moduleContext";
@@ -94,6 +95,8 @@ export const useSyncManager = () => {
 				habitStore.initialize(user.id),
 				workoutStore.initialize(user.id),
 				financeStore.initialize(user.id),
+				// Isolated: it logs and returns on failure, never blocks the others.
+				useFinanceCategoryStore.getState().initialize(user.id),
 			]);
 
 			// Post any recurring transactions that have come due. Must run AFTER

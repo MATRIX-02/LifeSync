@@ -5,19 +5,13 @@ import AddTransactionModal from "@/src/components/finance/AddTransactionModal";
 import { SubscriptionCheckResult } from "@/src/components/PremiumFeatureGate";
 import { useFinancePrefsStore } from "@/src/context/financePrefsStore";
 import { useFinanceStore } from "@/src/context/financeStoreDB";
-import {
-	ExpenseCategory,
-	IncomeCategory,
-} from "@/src/context/financeStoreDB/types";
 import { Theme } from "@/src/context/themeContext";
+import { useFinanceCategories } from "@/src/hooks/useFinanceCategories";
 import { useModuleRefresh } from "@/src/hooks/useModuleRefresh";
-import {
-	EXPENSE_CATEGORIES,
-	INCOME_CATEGORIES,
-	Transaction,
-} from "@/src/types/finance";
+import { Transaction } from "@/src/types/finance";
 import Ionicons from "@expo/vector-icons/Ionicons";
-import React, { useMemo, useState } from "react";
+import DateTimePicker from "@react-native-community/datetimepicker";
+import React, { useMemo, useRef, useState } from "react";
 import {
 	FlatList,
 	Modal,
@@ -39,7 +33,40 @@ interface TransactionListProps {
 }
 
 type FilterType = "all" | "income" | "expense" | "transfer";
-type DateFilter = "all" | "today" | "week" | "month" | "year";
+type DateFilter = "all" | "today" | "7d" | "30d" | "365d" | "custom";
+
+const TYPE_OPTIONS: { key: FilterType; label: string }[] = [
+	{ key: "all", label: "All" },
+	{ key: "income", label: "Income" },
+	{ key: "expense", label: "Expense" },
+	{ key: "transfer", label: "Transfer" },
+];
+
+const DATE_OPTIONS: { key: DateFilter; label: string }[] = [
+	{ key: "today", label: "Today" },
+	{ key: "7d", label: "Last 7 days" },
+	{ key: "30d", label: "Last 30 days" },
+	{ key: "365d", label: "Last 365 days" },
+	{ key: "all", label: "All time" },
+	{ key: "custom", label: "Custom range" },
+];
+
+const DEFAULT_DATE_FILTER: DateFilter = "30d";
+
+/** "YYYY-MM-DD" -> local Date (never via UTC parsing); null -> today. */
+const keyToDate = (key: string | null): Date => {
+	if (!key) return new Date();
+	const [y, m, d] = key.split("-").map(Number);
+	return new Date(y, m - 1, d);
+};
+
+const formatKey = (key: string): string => {
+	return keyToDate(key).toLocaleDateString("en-GB", {
+		day: "numeric",
+		month: "short",
+		year: "numeric",
+	});
+};
 
 /**
  * Local calendar date as "YYYY-MM-DD", the same format Transaction.date uses.
@@ -101,12 +128,18 @@ export default function TransactionList({
 	const { hideBalance, toggleHideBalance } = useFinancePrefsStore();
 
 	const styles = createStyles(theme);
+	const categories = useFinanceCategories();
 	const { refreshing, onRefresh } = useModuleRefresh("finance");
 
 	const [filterType, setFilterType] = useState<FilterType>("all");
-	const [dateFilter, setDateFilter] = useState<DateFilter>("month");
+	const [dateFilter, setDateFilter] = useState<DateFilter>(DEFAULT_DATE_FILTER);
+	const [customFrom, setCustomFrom] = useState<string | null>(null);
+	const [customTo, setCustomTo] = useState<string | null>(null);
+	const [pickerTarget, setPickerTarget] = useState<"from" | "to" | null>(null);
 	const [searchQuery, setSearchQuery] = useState("");
 	const [showFilters, setShowFilters] = useState(false);
+	const [popoverTop, setPopoverTop] = useState(110);
+	const filterButtonRef = useRef<View>(null);
 	const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
 	const [selectedAccount, setSelectedAccount] = useState<string | null>(null);
 	const [selectedTransaction, setSelectedTransaction] =
@@ -130,15 +163,19 @@ export default function TransactionList({
 		const today = toDateKey(new Date());
 		if (dateFilter === "today") {
 			filtered = filtered.filter((t) => t.date === today);
-		} else if (dateFilter === "week") {
-			const weekAgo = daysAgoKey(7);
-			filtered = filtered.filter((t) => t.date >= weekAgo);
-		} else if (dateFilter === "month") {
-			const monthAgo = daysAgoKey(30);
-			filtered = filtered.filter((t) => t.date >= monthAgo);
-		} else if (dateFilter === "year") {
-			const yearAgo = daysAgoKey(365);
-			filtered = filtered.filter((t) => t.date >= yearAgo);
+		} else if (dateFilter === "7d") {
+			const from = daysAgoKey(7);
+			filtered = filtered.filter((t) => t.date >= from);
+		} else if (dateFilter === "30d") {
+			const from = daysAgoKey(30);
+			filtered = filtered.filter((t) => t.date >= from);
+		} else if (dateFilter === "365d") {
+			const from = daysAgoKey(365);
+			filtered = filtered.filter((t) => t.date >= from);
+		} else if (dateFilter === "custom") {
+			// Inclusive on both ends; either end may be left open.
+			if (customFrom) filtered = filtered.filter((t) => t.date >= customFrom);
+			if (customTo) filtered = filtered.filter((t) => t.date <= customTo);
 		}
 
 		// Apply category filter
@@ -215,10 +252,56 @@ export default function TransactionList({
 		transactions,
 		filterType,
 		dateFilter,
+		customFrom,
+		customTo,
 		selectedCategory,
 		selectedAccount,
 		searchQuery,
 	]);
+
+	const hasActiveFilters =
+		filterType !== "all" ||
+		dateFilter !== DEFAULT_DATE_FILTER ||
+		!!selectedCategory ||
+		!!selectedAccount;
+
+	const resetFilters = () => {
+		setFilterType("all");
+		setDateFilter(DEFAULT_DATE_FILTER);
+		setCustomFrom(null);
+		setCustomTo(null);
+		setSelectedCategory(null);
+		setSelectedAccount(null);
+	};
+
+	const openFilters = () => {
+		// Anchor the popover just under the button, wherever the header lands.
+		filterButtonRef.current?.measureInWindow((_x, y, _w, h) => {
+			setPopoverTop(y + h + 6);
+			setShowFilters(true);
+		});
+	};
+
+	const onPickDate = (_e: unknown, date?: Date) => {
+		const target = pickerTarget;
+		setPickerTarget(null); // Android closes its dialog on any event
+		if (!date || !target) return;
+		const key = toDateKey(date);
+		if (target === "from") {
+			setCustomFrom(key);
+			if (customTo && customTo < key) setCustomTo(key);
+		} else {
+			setCustomTo(key);
+			if (customFrom && customFrom > key) setCustomFrom(key);
+		}
+	};
+
+	const dateSummary =
+		dateFilter === "custom"
+			? `${customFrom ? formatKey(customFrom) : "Any"} – ${
+					customTo ? formatKey(customTo) : "Any"
+				}`
+			: DATE_OPTIONS.find((o) => o.key === dateFilter)?.label;
 
 	const handleDeleteTransaction = (transaction: Transaction) => {
 		Alert.alert(
@@ -293,13 +376,15 @@ export default function TransactionList({
 		setEditingTransaction(transaction);
 	};
 
-	const formatAmount = (value: number) => {
-		if (hideBalance) return "••••";
-		return value.toLocaleString("en-IN", {
+	const formatAmount = (value: number) =>
+		value.toLocaleString("en-IN", {
 			minimumFractionDigits: 0,
 			maximumFractionDigits: 2,
 		});
-	};
+
+	// The hide toggle only masks balances; transaction amounts stay visible.
+	const formatBalance = (value: number) =>
+		hideBalance ? "••••" : formatAmount(value);
 
 	const getAccountName = (accountId: string) => {
 		const account = accounts.find((a) => a.id === accountId);
@@ -364,10 +449,7 @@ export default function TransactionList({
 	};
 
 	const renderTransactionItem = (transaction: Transaction) => {
-		const catInfo =
-			transaction.type === "income"
-				? INCOME_CATEGORIES[transaction.category as IncomeCategory]
-				: EXPENSE_CATEGORIES[transaction.category as ExpenseCategory];
+		const catInfo = categories.getInfo(transaction.type, transaction.category);
 
 		const { account: closingBalanceAccount } = getClosingBalances(transaction);
 
@@ -429,7 +511,7 @@ export default function TransactionList({
 					<Text style={styles.transactionBalance} numberOfLines={1}>
 						Closing Balance ({getAccountName(transaction.accountId)}):{" "}
 						{currency}
-						{formatAmount(closingBalanceAccount)}
+						{formatBalance(closingBalanceAccount)}
 					</Text>
 				</View>
 				<View style={styles.transactionAmountContainer}>
@@ -481,19 +563,19 @@ export default function TransactionList({
 		</View>
 	);
 
-	const allCategories = useMemo(() => {
-		const expCats = Object.entries(EXPENSE_CATEGORIES).map(([key, val]) => ({
-			key,
-			...val,
-			type: "expense" as const,
-		}));
-		const incCats = Object.entries(INCOME_CATEGORIES).map(([key, val]) => ({
-			key,
-			...val,
-			type: "income" as const,
-		}));
-		return [...expCats, ...incCats];
-	}, []);
+	const allCategories = useMemo(
+		() => [
+			...categories.expenseOptions.map((c) => ({
+				...c,
+				type: "expense" as const,
+			})),
+			...categories.incomeOptions.map((c) => ({
+				...c,
+				type: "income" as const,
+			})),
+		],
+		[categories],
+	);
 
 	return (
 		<View style={styles.container}>
@@ -560,77 +642,120 @@ export default function TransactionList({
 						color={theme.text}
 					/>
 				</TouchableOpacity>
+				<View ref={filterButtonRef} collapsable={false}>
+					<TouchableOpacity
+						style={[
+							styles.filterButton,
+							(showFilters || hasActiveFilters) && styles.filterButtonActive,
+						]}
+						onPress={openFilters}
+						accessibilityLabel="Filters"
+					>
+						<Ionicons
+							name="options"
+							size={20}
+							color={showFilters || hasActiveFilters ? "#FFF" : theme.text}
+						/>
+					</TouchableOpacity>
+				</View>
+			</View>
+
+			{/* Active filter summary */}
+			<Text style={styles.filterSummary}>
+				{TYPE_OPTIONS.find((o) => o.key === filterType)?.label} • {dateSummary}
+			</Text>
+
+			{/* Filter popover */}
+			<Modal
+				visible={showFilters}
+				transparent
+				animationType="fade"
+				onRequestClose={() => setShowFilters(false)}
+			>
 				<TouchableOpacity
-					style={[
-						styles.filterButton,
-						showFilters && styles.filterButtonActive,
-					]}
-					onPress={() => setShowFilters(!showFilters)}
+					style={styles.popoverBackdrop}
+					activeOpacity={1}
+					onPress={() => setShowFilters(false)}
 				>
-					<Ionicons
-						name="options"
-						size={20}
-						color={showFilters ? "#FFF" : theme.text}
-					/>
-				</TouchableOpacity>
-			</View>
-
-			{/* Quick Filters */}
-			<View style={styles.quickFilters}>
-				{(["all", "income", "expense", "transfer"] as FilterType[]).map(
-					(type) => (
-						<TouchableOpacity
-							key={type}
-							style={[
-								styles.quickFilter,
-								filterType === type && styles.quickFilterActive,
-							]}
-							onPress={() => setFilterType(type)}
+					<TouchableOpacity
+						activeOpacity={1}
+						style={[styles.popover, { top: popoverTop }]}
+					>
+						<ScrollView
+							showsVerticalScrollIndicator={false}
+							style={{ maxHeight: 460 }}
 						>
-							<Text
-								style={[
-									styles.quickFilterText,
-									filterType === type && styles.quickFilterTextActive,
-								]}
-							>
-								{type.charAt(0).toUpperCase() + type.slice(1)}
-							</Text>
-						</TouchableOpacity>
-					),
-				)}
-			</View>
+							<Text style={styles.filterLabel}>Type</Text>
+							<View style={styles.chipWrap}>
+								{TYPE_OPTIONS.map((o) => (
+									<TouchableOpacity
+										key={o.key}
+										style={[
+											styles.quickFilter,
+											filterType === o.key && styles.quickFilterActive,
+										]}
+										onPress={() => setFilterType(o.key)}
+									>
+										<Text
+											style={[
+												styles.quickFilterText,
+												filterType === o.key && styles.quickFilterTextActive,
+											]}
+										>
+											{o.label}
+										</Text>
+									</TouchableOpacity>
+								))}
+							</View>
 
-			{/* Date Filter */}
-			<View style={styles.dateFilters}>
-				{(["today", "week", "month", "year", "all"] as DateFilter[]).map(
-					(date) => (
-						<TouchableOpacity
-							key={date}
-							style={[
-								styles.dateFilterOption,
-								dateFilter === date && styles.dateFilterOptionActive,
-							]}
-							onPress={() => setDateFilter(date)}
-						>
-							<Text
-								style={[
-									styles.dateFilterText,
-									dateFilter === date && styles.dateFilterTextActive,
-								]}
-							>
-								{date === "all"
-									? "All Time"
-									: date.charAt(0).toUpperCase() + date.slice(1)}
-							</Text>
-						</TouchableOpacity>
-					),
-				)}
-			</View>
+							<Text style={[styles.filterLabel, { marginTop: 16 }]}>Period</Text>
+							<View style={styles.chipWrap}>
+								{DATE_OPTIONS.map((o) => (
+									<TouchableOpacity
+										key={o.key}
+										style={[
+											styles.quickFilter,
+											dateFilter === o.key && styles.quickFilterActive,
+										]}
+										onPress={() => setDateFilter(o.key)}
+									>
+										<Text
+											style={[
+												styles.quickFilterText,
+												dateFilter === o.key && styles.quickFilterTextActive,
+											]}
+										>
+											{o.label}
+										</Text>
+									</TouchableOpacity>
+								))}
+							</View>
 
-			{/* Expanded Filters */}
-			{showFilters && (
-				<View style={styles.expandedFilters}>
-					<Text style={styles.filterLabel}>Filter by Category</Text>
+							{dateFilter === "custom" && (
+								<View style={styles.customRange}>
+									{(["from", "to"] as const).map((which) => {
+										const value = which === "from" ? customFrom : customTo;
+										return (
+											<TouchableOpacity
+												key={which}
+												style={styles.dateField}
+												onPress={() => setPickerTarget(which)}
+											>
+												<Text style={styles.dateFieldLabel}>
+													{which === "from" ? "From" : "To"}
+												</Text>
+												<Text style={styles.dateFieldValue}>
+													{value ? formatKey(value) : "Select"}
+												</Text>
+											</TouchableOpacity>
+										);
+									})}
+								</View>
+							)}
+
+							<Text style={[styles.filterLabel, { marginTop: 16 }]}>
+								Category
+							</Text>
 					<FlatList
 						horizontal
 						showsHorizontalScrollIndicator={false}
@@ -673,7 +798,7 @@ export default function TransactionList({
 					/>
 
 					<Text style={[styles.filterLabel, { marginTop: 16 }]}>
-						Filter by Account
+						Account
 					</Text>
 					<FlatList
 						horizontal
@@ -717,8 +842,29 @@ export default function TransactionList({
 							</TouchableOpacity>
 						)}
 					/>
-				</View>
-			)}
+						</ScrollView>
+
+						<View style={styles.popoverFooter}>
+							<TouchableOpacity onPress={resetFilters}>
+								<Text style={styles.resetText}>Reset</Text>
+							</TouchableOpacity>
+							<TouchableOpacity
+								style={styles.doneButton}
+								onPress={() => setShowFilters(false)}
+							>
+								<Text style={styles.doneButtonText}>Done</Text>
+							</TouchableOpacity>
+						</View>
+					</TouchableOpacity>
+				</TouchableOpacity>
+				{pickerTarget && (
+					<DateTimePicker
+						value={keyToDate(pickerTarget === "from" ? customFrom : customTo)}
+						mode="date"
+						onChange={onPickDate}
+					/>
+				)}
+			</Modal>
 
 			{/* Transaction List */}
 			<FlatList
@@ -805,14 +951,10 @@ export default function TransactionList({
 
 								<View style={styles.detailCard}>
 									{(() => {
-										const catInfo =
-											selectedTransaction.type === "income"
-												? INCOME_CATEGORIES[
-														selectedTransaction.category as IncomeCategory
-													]
-												: EXPENSE_CATEGORIES[
-														selectedTransaction.category as ExpenseCategory
-													];
+										const catInfo = categories.getInfo(
+											selectedTransaction.type,
+											selectedTransaction.category,
+										);
 										return (
 											<>
 												<View
@@ -857,13 +999,12 @@ export default function TransactionList({
 										<View style={styles.detailRow}>
 											<Text style={styles.detailLabel}>Category</Text>
 											<Text style={styles.detailValue}>
-												{selectedTransaction.type === "income"
-													? INCOME_CATEGORIES[
-															selectedTransaction.category as IncomeCategory
-														]?.name
-													: EXPENSE_CATEGORIES[
-															selectedTransaction.category as ExpenseCategory
-														]?.name}
+												{
+													categories.getInfo(
+														selectedTransaction.type,
+														selectedTransaction.category,
+													).name
+												}
 											</Text>
 										</View>
 										<View style={styles.detailRow}>
@@ -913,7 +1054,7 @@ export default function TransactionList({
 														</Text>
 														<Text style={styles.detailValue}>
 															{currency}
-															{formatAmount(accBal)}
+															{formatBalance(accBal)}
 														</Text>
 													</View>
 													<View style={styles.detailRow}>
@@ -922,7 +1063,7 @@ export default function TransactionList({
 														</Text>
 														<Text style={styles.detailValue}>
 															{currency}
-															{formatAmount(totBal)}
+															{formatBalance(totBal)}
 														</Text>
 													</View>
 												</>
@@ -1027,11 +1168,82 @@ const createStyles = (theme: Theme) =>
 		filterButtonActive: {
 			backgroundColor: theme.primary,
 		},
-		quickFilters: {
-			flexDirection: "row",
+		filterSummary: {
 			paddingHorizontal: 16,
+			marginBottom: 4,
+			fontSize: 12,
+			color: theme.textMuted,
+			fontWeight: "500",
+		},
+		popoverBackdrop: {
+			flex: 1,
+			backgroundColor: "rgba(0,0,0,0.25)",
+		},
+		popover: {
+			position: "absolute",
+			left: 16,
+			right: 16,
+			backgroundColor: theme.background,
+			borderRadius: 16,
+			padding: 16,
+			borderWidth: 1,
+			borderColor: theme.border,
+			elevation: 10,
+			shadowColor: "#000",
+			shadowOpacity: 0.25,
+			shadowRadius: 12,
+			shadowOffset: { width: 0, height: 6 },
+		},
+		chipWrap: {
+			flexDirection: "row",
+			flexWrap: "wrap",
 			gap: 8,
-			marginBottom: 12,
+		},
+		customRange: {
+			flexDirection: "row",
+			gap: 10,
+			marginTop: 12,
+		},
+		dateField: {
+			flex: 1,
+			backgroundColor: theme.surface,
+			borderRadius: 12,
+			paddingVertical: 10,
+			paddingHorizontal: 12,
+			borderWidth: 1,
+			borderColor: theme.border,
+		},
+		dateFieldLabel: {
+			fontSize: 11,
+			color: theme.textMuted,
+			marginBottom: 2,
+		},
+		dateFieldValue: {
+			fontSize: 14,
+			fontWeight: "600",
+			color: theme.text,
+		},
+		popoverFooter: {
+			flexDirection: "row",
+			justifyContent: "space-between",
+			alignItems: "center",
+			marginTop: 14,
+		},
+		resetText: {
+			fontSize: 14,
+			fontWeight: "600",
+			color: theme.textMuted,
+		},
+		doneButton: {
+			backgroundColor: theme.primary,
+			paddingVertical: 8,
+			paddingHorizontal: 22,
+			borderRadius: 10,
+		},
+		doneButtonText: {
+			color: "#FFF",
+			fontSize: 14,
+			fontWeight: "600",
 		},
 		quickFilter: {
 			paddingVertical: 8,

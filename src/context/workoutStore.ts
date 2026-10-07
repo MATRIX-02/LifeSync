@@ -1,5 +1,10 @@
 // Workout Store - Zustand state management for workout tracker
 
+import {
+	getTracking,
+	nextSetValues,
+	TrackingType,
+} from "@/src/data/exerciseTracking";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
@@ -108,6 +113,47 @@ interface WorkoutStore {
 		activePlanId?: string | null;
 	}) => void;
 	clearAllData: () => void;
+}
+
+// What counts as a "best" for each way of measuring an exercise.
+const PR_TYPE: Record<TrackingType, PersonalRecord["type"]> = {
+	weight_reps: "weight", // heaviest set
+	reps: "reps", // most reps in a set
+	time: "duration", // longest hold
+	distance_time: "distance", // longest distance
+};
+
+/** Personal records after a finished session, one per exercise. */
+function updatePersonalRecords(
+	records: PersonalRecord[],
+	session: WorkoutSession,
+): PersonalRecord[] {
+	let next = records;
+	for (const ex of session.exercises) {
+		const type = PR_TYPE[getTracking(ex.exerciseId)];
+		const best = ex.sets
+			.filter((s) => s.completed)
+			.reduce((max, s) => Math.max(max, s[type] ?? 0), 0);
+		if (best <= 0) continue;
+		const existing = next.find(
+			(pr) => pr.exerciseId === ex.exerciseId && pr.type === type,
+		);
+		if (existing && best <= existing.value) continue;
+		const pr: PersonalRecord = {
+			id: `pr_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`,
+			exerciseId: ex.exerciseId,
+			exerciseName: ex.exerciseName,
+			type,
+			value: best,
+			previousValue: existing?.value,
+			date: new Date(),
+			workoutSessionId: session.id,
+		};
+		next = existing
+			? next.map((r) => (r === existing ? pr : r))
+			: [...next, pr];
+	}
+	return next;
 }
 
 export const useWorkoutStore = create<WorkoutStore>()(
@@ -334,8 +380,9 @@ export const useWorkoutStore = create<WorkoutStore>()(
 								const newSet: WorkoutSet = {
 									id: `set_${Date.now()}_${newSetNumber}`,
 									setNumber: newSetNumber,
-									reps: lastSet?.reps || 10,
-									weight: lastSet?.weight || 0,
+									// Copy the previous set's values for whatever this
+									// exercise measures (kg/reps, time, distance).
+									...nextSetValues(getTracking(ex.exerciseId), lastSet),
 									isWarmup: false,
 									isDropset: false,
 									completed: false,
@@ -396,6 +443,10 @@ export const useWorkoutStore = create<WorkoutStore>()(
 					return {
 						currentSession: null,
 						workoutSessions: [completedSession, ...state.workoutSessions],
+						personalRecords: updatePersonalRecords(
+							state.personalRecords,
+							completedSession,
+						),
 					};
 				}),
 

@@ -129,6 +129,8 @@ export default function ProfileScreen() {
 			lats: 0,
 			lower_back: 0,
 			legs: 0,
+			shins: 0,
+			feet: 0,
 		};
 
 		// Get all completed sessions

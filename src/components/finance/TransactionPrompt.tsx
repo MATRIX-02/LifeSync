@@ -5,14 +5,10 @@
 
 import { Alert } from "@/src/components/CustomAlert";
 import { useFinanceStore } from "@/src/context/financeStoreDB";
-import {
-	ExpenseCategory,
-	IncomeCategory,
-} from "@/src/context/financeStoreDB/types";
 import { Theme, useTheme } from "@/src/context/themeContext";
 import { useTransactionDetectionStore } from "@/src/context/transactionDetectionStore";
+import { useFinanceCategories } from "@/src/hooks/useFinanceCategories";
 import { DetectedTransaction } from "@/src/services/transactionDetection";
-import { EXPENSE_CATEGORIES, INCOME_CATEGORIES } from "@/src/types/finance";
 import { Ionicons } from "@expo/vector-icons";
 import React, { useEffect, useState } from "react";
 import {
@@ -43,6 +39,7 @@ export function TransactionPrompt({
 }: TransactionPromptProps) {
 	const { theme } = useTheme();
 	const styles = createStyles(theme);
+	const financeCategories = useFinanceCategories();
 	const { accounts, addTransaction } = useFinanceStore();
 	const { markAsProcessed, dismissTransaction } =
 		useTransactionDetectionStore();
@@ -78,18 +75,11 @@ export function TransactionPrompt({
 
 	if (!transaction) return null;
 
-	const categories =
+	const categories = (
 		transactionType === "expense"
-			? Object.entries(EXPENSE_CATEGORIES).map(([key, val]) => ({
-					key,
-					label: val.name,
-					...val,
-			  }))
-			: Object.entries(INCOME_CATEGORIES).map(([key, val]) => ({
-					key,
-					label: val.name,
-					...val,
-			  }));
+			? financeCategories.expenseOptions
+			: financeCategories.incomeOptions
+	).map((c) => ({ ...c, label: c.name }));
 
 	const handleAdd = () => {
 		const amountNum = parseFloat(amount);
@@ -103,7 +93,7 @@ export function TransactionPrompt({
 		addTransaction({
 			type: transactionType,
 			amount: amountNum,
-			category: selectedCategory as ExpenseCategory | IncomeCategory,
+			category: selectedCategory,
 			description: description.trim() || "",
 			date: today,
 			time: new Date().toTimeString().split(" ")[0],

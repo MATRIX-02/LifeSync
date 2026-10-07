@@ -6,6 +6,12 @@ import { SubscriptionCheckResult } from "@/src/components/PremiumFeatureGate";
 import { Theme } from "@/src/context/themeContext";
 import { useWorkoutStore } from "@/src/context/workoutStoreDB";
 import { MUSCLE_GROUP_INFO } from "@/src/data/exerciseDatabase";
+import {
+	formatDuration as formatClock,
+	formatSet,
+	getExerciseTracking,
+	summarizeSets,
+} from "@/src/data/exerciseTracking";
 import { MuscleGroup, WorkoutSession } from "@/src/types/workout";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import React, { useMemo, useState } from "react";
@@ -204,7 +210,17 @@ export default function WorkoutHistory({
 					</View>
 					<View style={styles.sessionRight}>
 						<Text style={styles.sessionVolume}>
-							{(session.totalVolume / 1000).toFixed(1)}k {weightUnit}
+							{(() => {
+								// Lifting sessions show volume; runs and stretch/hold
+								// sessions show what they're actually measured in.
+								if (session.totalVolume > 0)
+									return `${(session.totalVolume / 1000).toFixed(1)}k ${weightUnit}`;
+								const totals = session.exercises.map(summarizeSets);
+								const km = totals.reduce((n, t) => n + t.distance, 0);
+								if (km > 0) return `${+km.toFixed(2)} km`;
+								const secs = totals.reduce((n, t) => n + t.seconds, 0);
+								return secs > 0 ? formatClock(secs) : `0 ${weightUnit}`;
+							})()}
 						</Text>
 						<Ionicons
 							name={isExpanded ? "chevron-up" : "chevron-down"}
@@ -268,7 +284,7 @@ export default function WorkoutHistory({
 														set.completed && styles.setChipTextCompleted,
 													]}
 												>
-													{set.weight}kg × {set.reps}
+													{formatSet(set, getExerciseTracking(exercise, true))}
 												</Text>
 											</View>
 										))}

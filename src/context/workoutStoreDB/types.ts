@@ -28,7 +28,9 @@ export type MuscleGroup =
 	| "traps"
 	| "lats"
 	| "lower_back"
-	| "legs";
+	| "legs"
+	| "shins"
+	| "feet";
 
 export interface FitnessProfile {
 	id?: string;
@@ -305,19 +307,4 @@ export interface WorkoutStore {
 	getRecentWorkouts: (count?: number) => WorkoutSession[];
 	getWorkoutsThisWeek: () => WorkoutSession[];
 	getStreakCount: () => number;
-
-	// Import/Export
-	importData: (
-		data: Partial<{
-			fitnessProfile: FitnessProfile | null;
-			bodyMeasurements: BodyMeasurement[];
-			bodyWeights: BodyWeight[];
-			customExercises: CustomExercise[];
-			workoutPlans: WorkoutPlan[];
-			workoutSessions: WorkoutSession[];
-			personalRecords: PersonalRecord[];
-			activePlanId: string | null;
-		}>
-	) => Promise<void>;
-	clearAllData: () => Promise<void>;
 }

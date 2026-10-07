@@ -1,19 +1,21 @@
-// Finance Analytics - Charts, spending breakdown, trends, insights
-// Redesigned with Statistics.tsx inspiration
+// Finance Analytics - where you stand right now (health score, this month's
+// forecast, action plan, budgets, obligations) plus period charts.
+// The calculations live in src/services/financeAnalytics.ts.
 
 import { SubscriptionCheckResult } from "@/src/components/PremiumFeatureGate";
 import { useFinanceStore } from "@/src/context/financeStoreDB";
 import { Theme } from "@/src/context/themeContext";
+import { useFinanceCategories } from "@/src/hooks/useFinanceCategories";
 import {
-	EXPENSE_CATEGORIES,
-	ExpenseCategory,
-	INCOME_CATEGORIES,
-	IncomeCategory,
-} from "@/src/types/finance";
+	computeFinanceAnalytics,
+	Recommendation,
+} from "@/src/services/financeAnalytics";
 import Ionicons from "@expo/vector-icons/Ionicons";
+import DateTimePicker from "@react-native-community/datetimepicker";
 import React, { useMemo, useState } from "react";
 import {
 	Dimensions,
+	Platform,
 	ScrollView,
 	StyleSheet,
 	Text,
@@ -29,7 +31,42 @@ interface FinanceAnalyticsProps {
 	subscriptionCheck?: SubscriptionCheckResult;
 }
 
-type TimeRange = "week" | "month" | "quarter" | "year" | "all";
+// Rolling windows ending now, so "Last 7 days" on a Monday still shows a
+// full week instead of a one-day "this week".
+type TimeRange = "24h" | "7d" | "30d" | "90d" | "1y" | "all" | "custom";
+
+const RANGE_OPTIONS: { value: TimeRange; label: string }[] = [
+	{ value: "24h", label: "Last 24 hours" },
+	{ value: "7d", label: "Last 7 days" },
+	{ value: "30d", label: "Last 30 days" },
+	{ value: "90d", label: "Last 3 months" },
+	{ value: "1y", label: "Last 12 months" },
+	{ value: "all", label: "All time" },
+	{ value: "custom", label: "Custom range…" },
+];
+
+const RANGE_DAYS: Partial<Record<TimeRange, number>> = {
+	"7d": 7,
+	"30d": 30,
+	"90d": 90,
+	"1y": 365,
+};
+
+const HOUR_MS = 60 * 60 * 1000;
+
+const startOfDay = (d: Date) =>
+	new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+const endOfDay = (d: Date) => startOfDay(d) + 24 * HOUR_MS - 1;
+
+/** Local timestamp of a transaction (date + optional HH:MM[:SS] time). */
+const txTime = (t: { date: string; time?: string }) => {
+	const [y, m, d] = t.date.split("-").map(Number);
+	const [hh = 0, mm = 0, ss = 0] = (t.time || "").split(":").map(Number);
+	return new Date(y, m - 1, d, hh || 0, mm || 0, ss || 0).getTime();
+};
+
+const shortDay = (d: Date) =>
+	d.toLocaleDateString(undefined, { day: "numeric", month: "short" });
 
 const { width } = Dimensions.get("window");
 
@@ -83,57 +120,65 @@ export default function FinanceAnalytics({
 	currency,
 	onOpenDrawer,
 }: FinanceAnalyticsProps) {
-	const { transactions, accounts, getNetWorth } = useFinanceStore();
+	const {
+		transactions,
+		accounts,
+		getNetWorth,
+		budgets,
+		billReminders,
+		debts,
+		savingsGoals,
+		recurringTransactions,
+	} = useFinanceStore();
 
 	const styles = createStyles(theme);
+	const categories = useFinanceCategories();
 
-	const [timeRange, setTimeRange] = useState<TimeRange>("month");
+	const [timeRange, setTimeRange] = useState<TimeRange>("30d");
+	const [customStart, setCustomStart] = useState(
+		() => new Date(Date.now() - 29 * 24 * HOUR_MS),
+	);
+	const [customEnd, setCustomEnd] = useState(() => new Date());
+	const [pickerFor, setPickerFor] = useState<"start" | "end" | null>(null);
 	const [showPeriodDropdown, setShowPeriodDropdown] = useState(false);
 	const [selectedAccountId, setSelectedAccountId] = useState("all");
 	const [showAccountDropdown, setShowAccountDropdown] = useState(false);
 	const [showAllCategories, setShowAllCategories] = useState(false);
+	const [showAllRecs, setShowAllRecs] = useState(false);
+	const [showHealthDetails, setShowHealthDetails] = useState(false);
 
-	const dateRange = useMemo(() => {
+	// [start, end] in local milliseconds.
+	const period = useMemo(() => {
 		const now = new Date();
-		let start: string;
-		switch (timeRange) {
-			case "week":
-				start = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
-					.toISOString()
-					.split("T")[0];
-				break;
-			case "month":
-				start = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000)
-					.toISOString()
-					.split("T")[0];
-				break;
-			case "quarter":
-				start = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000)
-					.toISOString()
-					.split("T")[0];
-				break;
-			case "year":
-				start = new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000)
-					.toISOString()
-					.split("T")[0];
-				break;
-			default:
-				start = "2020-01-01";
+		if (timeRange === "24h")
+			return { start: now.getTime() - 24 * HOUR_MS, end: now.getTime() };
+		if (timeRange === "all") return { start: 0, end: now.getTime() };
+		if (timeRange === "custom") {
+			const [a, b] =
+				customStart <= customEnd
+					? [customStart, customEnd]
+					: [customEnd, customStart];
+			return { start: startOfDay(a), end: endOfDay(b) };
 		}
-		return { start, end: now.toISOString().split("T")[0] };
-	}, [timeRange]);
+		const days = RANGE_DAYS[timeRange] ?? 30;
+		return {
+			start: startOfDay(now) - (days - 1) * 24 * HOUR_MS,
+			end: now.getTime(),
+		};
+	}, [timeRange, customStart, customEnd]);
+
+	const inAccount = (t: { accountId: string; toAccountId?: string }) =>
+		selectedAccountId === "all" ||
+		t.accountId === selectedAccountId ||
+		t.toAccountId === selectedAccountId;
 
 	const periodTransactions = useMemo(
 		() =>
-			transactions.filter(
-				(t) =>
-					t.date >= dateRange.start &&
-					t.date <= dateRange.end &&
-					(selectedAccountId === "all" ||
-						t.accountId === selectedAccountId ||
-						t.toAccountId === selectedAccountId),
-			),
-		[dateRange, selectedAccountId, transactions],
+			transactions.filter((t) => {
+				const ts = txTime(t);
+				return ts >= period.start && ts <= period.end && inAccount(t);
+			}),
+		[period, selectedAccountId, transactions],
 	);
 
 	const summary = useMemo(() => {
@@ -233,16 +278,6 @@ export default function FinanceAnalytics({
 		});
 	};
 
-	const formatPercent = (
-		value: number | undefined | null,
-		total: number | undefined | null,
-	) => {
-		const v = value ?? 0;
-		const t = total ?? 0;
-		if (t === 0) return "0%";
-		return `${((v / t) * 100).toFixed(1)}%`;
-	};
-
 	// Calculate key metrics
 	const savingsRate =
 		summary.totalIncome > 0
@@ -250,40 +285,77 @@ export default function FinanceAnalytics({
 				100
 			: 0;
 
-	const days = Math.max(
-		1,
-		Math.floor(
-			(new Date(dateRange.end).getTime() -
-				new Date(dateRange.start).getTime()) /
-				(24 * 60 * 60 * 1000),
-		) + 1,
+	// "Current position" analytics: always across all accounts and based on
+	// this month + trailing averages, independent of the period filter.
+	const insights = useMemo(
+		() =>
+			computeFinanceAnalytics(
+				{
+					transactions,
+					accounts,
+					budgets,
+					billReminders,
+					debts,
+					savingsGoals,
+					recurringTransactions,
+				},
+				(n) => `${n < 0 ? "-" : ""}${currency}${formatAmount(Math.round(Math.abs(n)))}`,
+				(key) => categories.getInfo("expense", key).name,
+			),
+		[
+			transactions,
+			accounts,
+			budgets,
+			billReminders,
+			debts,
+			savingsGoals,
+			recurringTransactions,
+			currency,
+			categories,
+		],
 	);
-	const avgDailySpending = summary.totalExpenses / days;
+	const { forecast, snapshot, obligations, health, baseline } = insights;
+	const money = (n: number) =>
+		`${n < 0 ? "-" : ""}${currency}${formatAmount(Math.round(Math.abs(n)))}`;
 
-	const txCount = periodTransactions.length;
+	const healthColor = (score: number) =>
+		score >= 75
+			? theme.success
+			: score >= 50
+				? "#22D3EE"
+				: score >= 30
+					? theme.warning
+					: theme.error;
+	const healthLabel = (score: number) =>
+		score >= 75
+			? "Doing great"
+			: score >= 50
+				? "Doing okay"
+				: score >= 30
+					? "Needs attention"
+					: "Needs work urgently";
+	const severityColor = (sev: Recommendation["severity"]) =>
+		sev === "high"
+			? theme.error
+			: sev === "medium"
+				? theme.warning
+				: sev === "good"
+					? theme.success
+					: theme.primary;
+	const visibleRecs = showAllRecs
+		? insights.recommendations
+		: insights.recommendations.slice(0, 4);
 
+	// The same length of time immediately before the selected period.
 	const comparison = useMemo(() => {
 		if (timeRange === "all") return null;
-		const dayMs = 24 * 60 * 60 * 1000;
-		const currentStart = new Date(`${dateRange.start}T00:00:00Z`);
-		const currentEnd = new Date(`${dateRange.end}T00:00:00Z`);
-		const periodLength =
-			Math.floor((currentEnd.getTime() - currentStart.getTime()) / dayMs) + 1;
-		const previousEnd = new Date(currentStart.getTime() - dayMs);
-		const previousStart = new Date(
-			previousEnd.getTime() - (periodLength - 1) * dayMs,
-		);
-		const toDateKey = (date: Date) => date.toISOString().split("T")[0];
-		const previousTransactions = transactions.filter(
-			(t) =>
-				t.date >= toDateKey(previousStart) &&
-				t.date <= toDateKey(previousEnd) &&
-				(selectedAccountId === "all" ||
-					t.accountId === selectedAccountId ||
-					t.toAccountId === selectedAccountId),
-		);
+		const length = period.end - period.start;
+		const prevStart = period.start - length;
+		const previousTransactions = transactions.filter((t) => {
+			const ts = txTime(t);
+			return ts >= prevStart && ts < period.start && inAccount(t);
+		});
 		return {
-			start: toDateKey(previousStart),
 			income: previousTransactions
 				.filter((t) => t.type === "income")
 				.reduce((total, t) => total + t.amount, 0),
@@ -291,7 +363,7 @@ export default function FinanceAnalytics({
 				.filter((t) => t.type === "expense")
 				.reduce((total, t) => total + t.amount, 0),
 		};
-	}, [dateRange, selectedAccountId, timeRange, transactions]);
+	}, [period, selectedAccountId, timeRange, transactions]);
 
 	const getPercentageChange = (current: number, previous: number) => {
 		if (previous === 0) return current === 0 ? 0 : null;
@@ -316,20 +388,19 @@ export default function FinanceAnalytics({
 		1,
 	);
 
-	const getPeriodLabel = () => {
-		switch (timeRange) {
-			case "week":
-				return "This Week";
-			case "month":
-				return "This Month";
-			case "quarter":
-				return "This Quarter";
-			case "year":
-				return "This Year";
-			case "all":
-				return "All Time";
-		}
-	};
+	const compact = (n: number) =>
+		n >= 10000000
+			? `${(n / 10000000).toFixed(1)}Cr`
+			: n >= 100000
+				? `${(n / 100000).toFixed(1)}L`
+				: n >= 1000
+					? `${(n / 1000).toFixed(1)}k`
+					: `${Math.round(n)}`;
+
+	const getPeriodLabel = () =>
+		timeRange === "custom"
+			? `${shortDay(new Date(period.start))} – ${shortDay(new Date(period.end))}`
+			: RANGE_OPTIONS.find((o) => o.value === timeRange)!.label;
 
 	const getRingColor = () => {
 		if (savingsRate >= 30) return theme.success;
@@ -409,33 +480,78 @@ export default function FinanceAnalytics({
 
 				{showPeriodDropdown && (
 					<View style={styles.dropdownMenu}>
-						{(["week", "month", "quarter", "year", "all"] as TimeRange[]).map(
-							(range) => (
-								<TouchableOpacity
-									key={range}
+						{RANGE_OPTIONS.map((option) => (
+							<TouchableOpacity
+								key={option.value}
+								style={[
+									styles.dropdownItem,
+									timeRange === option.value && styles.dropdownItemActive,
+								]}
+								onPress={() => {
+									setTimeRange(option.value);
+									setShowPeriodDropdown(false);
+								}}
+							>
+								<Text
 									style={[
-										styles.dropdownItem,
-										timeRange === range && styles.dropdownItemActive,
+										styles.dropdownItemText,
+										timeRange === option.value &&
+											styles.dropdownItemTextActive,
 									]}
-									onPress={() => {
-										setTimeRange(range);
-										setShowPeriodDropdown(false);
-									}}
 								>
-									<Text
-										style={[
-											styles.dropdownItemText,
-											timeRange === range && styles.dropdownItemTextActive,
-										]}
-									>
-										{range === "all"
-											? "All Time"
-											: range.charAt(0).toUpperCase() + range.slice(1)}
-									</Text>
-								</TouchableOpacity>
-							),
-						)}
+									{option.label}
+								</Text>
+							</TouchableOpacity>
+						))}
 					</View>
+				)}
+
+				{timeRange === "custom" && (
+					<View style={styles.customRangeRow}>
+						{(
+							[
+								["start", "From", customStart],
+								["end", "To", customEnd],
+							] as const
+						).map(([key, label, value]) => (
+							<TouchableOpacity
+								key={key}
+								style={styles.customRangeButton}
+								onPress={() => setPickerFor(key)}
+							>
+								<Text style={styles.customRangeLabel}>{label}</Text>
+								<View style={styles.customRangeValueRow}>
+									<Ionicons name="calendar" size={16} color={theme.primary} />
+									<Text style={styles.customRangeValue}>
+										{value.toLocaleDateString(undefined, {
+											day: "numeric",
+											month: "short",
+											year: "numeric",
+										})}
+									</Text>
+								</View>
+							</TouchableOpacity>
+						))}
+					</View>
+				)}
+				{pickerFor && (
+					<DateTimePicker
+						value={pickerFor === "start" ? customStart : customEnd}
+						mode="date"
+						maximumDate={new Date()}
+						minimumDate={pickerFor === "end" ? customStart : undefined}
+						display={Platform.OS === "ios" ? "inline" : "default"}
+						onChange={(event, date) => {
+							const which = pickerFor;
+							if (Platform.OS !== "ios") setPickerFor(null);
+							if (event.type === "dismissed" || !date) return;
+							if (which === "start") {
+								setCustomStart(date);
+								if (date > customEnd) setCustomEnd(date);
+							} else setCustomEnd(date);
+							if (Platform.OS === "ios") setPickerFor(null);
+						}}
+					/>
 				)}
 			</View>
 
@@ -458,7 +574,7 @@ export default function FinanceAnalytics({
 						</View>
 					</View>
 					<View style={styles.overviewBalance}>
-						<Text style={styles.overviewBalanceLabel}>Net Balance</Text>
+						<Text style={styles.overviewBalanceLabel}>Earned − Spent</Text>
 						<Text
 							style={[
 								styles.overviewBalanceValue,
@@ -509,14 +625,15 @@ export default function FinanceAnalytics({
 							{ backgroundColor: theme.warning + "20" },
 						]}
 					>
-						<Ionicons name="calendar" size={18} color={theme.warning} />
+						<Ionicons name="shield-checkmark" size={18} color={theme.warning} />
 					</View>
 					<View style={styles.quickStatContent}>
 						<Text style={styles.quickStatValue}>
-							{currency}
-							{formatAmount(avgDailySpending)}
+							{snapshot.emergencyMonths === null
+								? "—"
+								: `${snapshot.emergencyMonths.toFixed(1)} mo`}
 						</Text>
-						<Text style={styles.quickStatLabel}>Daily Avg</Text>
+						<Text style={styles.quickStatLabel}>Backup lasts</Text>
 					</View>
 				</View>
 				<View style={styles.quickStat}>
@@ -526,11 +643,13 @@ export default function FinanceAnalytics({
 							{ backgroundColor: theme.primary + "20" },
 						]}
 					>
-						<Ionicons name="receipt" size={18} color={theme.primary} />
+						<Ionicons name="lock-closed" size={18} color={theme.primary} />
 					</View>
 					<View style={styles.quickStatContent}>
-						<Text style={styles.quickStatValue}>{txCount}</Text>
-						<Text style={styles.quickStatLabel}>Transactions</Text>
+						<Text style={styles.quickStatValue}>
+							{money(obligations.fixedMonthly)}
+						</Text>
+						<Text style={styles.quickStatLabel}>Bills / month</Text>
 					</View>
 				</View>
 				<View style={styles.quickStat}>
@@ -547,18 +666,466 @@ export default function FinanceAnalytics({
 							{currency}
 							{formatAmount(netWorth)}
 						</Text>
-						<Text style={styles.quickStatLabel}>Net Worth</Text>
+						<Text style={styles.quickStatLabel}>Total balance</Text>
 					</View>
 				</View>
 			</View>
+
+			{/* ===== Current position (all accounts) ===== */}
+
+			{/* Financial Health */}
+			{health.score !== null && (
+				<View style={styles.section}>
+					<View style={styles.sectionHeader}>
+						<Text style={styles.sectionTitle}>Money Health Score</Text>
+						<Text style={styles.sectionHint}>All accounts</Text>
+					</View>
+					<TouchableOpacity
+						activeOpacity={0.8}
+						style={styles.chartCard}
+						onPress={() => setShowHealthDetails(!showHealthDetails)}
+					>
+						<View style={styles.healthTop}>
+							<View style={styles.progressRingContainer}>
+								<ProgressRing
+									progress={health.score}
+									size={84}
+									strokeWidth={9}
+									color={healthColor(health.score)}
+									backgroundColor={theme.surfaceLight}
+								/>
+								<View style={styles.progressTextContainer}>
+									<Text
+										style={[
+											styles.healthScore,
+											{ color: healthColor(health.score) },
+										]}
+									>
+										{health.score}
+									</Text>
+								</View>
+							</View>
+							<View style={styles.healthSummary}>
+								<Text
+									style={[
+										styles.healthLabel,
+										{ color: healthColor(health.score) },
+									]}
+								>
+									{healthLabel(health.score)}
+								</Text>
+								<Text style={styles.healthSub}>
+									{baseline.monthsUsed > 0
+										? `A score out of 100 from your last ${baseline.monthsUsed} month${baseline.monthsUsed > 1 ? "s" : ""} of spending, your balances and what you owe`
+										: "A score out of 100. It gets more accurate as you add more months of data"}
+								</Text>
+								<Text style={styles.healthToggle}>
+									{showHealthDetails ? "Hide details" : "What's this based on?"}
+								</Text>
+							</View>
+						</View>
+						{showHealthDetails &&
+							health.factors.map((f) => (
+								<View key={f.key} style={styles.factorRow}>
+									<View style={styles.factorHeader}>
+										<Text style={styles.factorLabel}>{f.label}</Text>
+										<Text
+											style={[
+												styles.factorScore,
+												{ color: healthColor(f.score) },
+											]}
+										>
+											{Math.round(f.score)}
+										</Text>
+									</View>
+									<View style={styles.factorBar}>
+										<View
+											style={[
+												styles.factorFill,
+												{
+													width: `${Math.max(f.score, 3)}%`,
+													backgroundColor: healthColor(f.score),
+												},
+											]}
+										/>
+									</View>
+									<Text style={styles.factorDetail}>{f.detail}</Text>
+									<Text style={styles.factorHint}>{f.hint}</Text>
+								</View>
+							))}
+					</TouchableOpacity>
+				</View>
+			)}
+
+			{/* This month */}
+			{forecast.expectedIncome > 0 && (
+				<View style={styles.section}>
+					<View style={styles.sectionHeader}>
+						<Text style={styles.sectionTitle}>This Month</Text>
+						<Text style={styles.sectionHint}>
+							Day {forecast.dayOfMonth} of {forecast.daysInMonth}
+						</Text>
+					</View>
+					<View style={styles.chartCard}>
+						<Text style={styles.forecastLabel}>
+							You can still spend this month
+						</Text>
+						<Text
+							style={[
+								styles.forecastValue,
+								{
+									color:
+										forecast.safeToSpend >= 0 ? theme.success : theme.error,
+								},
+							]}
+						>
+							{money(forecast.safeToSpend)}
+						</Text>
+						<Text style={styles.forecastSub}>
+							{forecast.safeToSpend >= 0
+								? `That's about ${money(forecast.safePerDay)} a day for the ${forecast.daysLeft} day${forecast.daysLeft > 1 ? "s" : ""} left, after bills and savings goals`
+								: "Your bills and savings goals are more than you'll earn this month"}
+						</Text>
+
+						{/* Spending pace vs. month elapsed */}
+						{forecast.expectedIncome > 0 && (
+							<View style={styles.paceWrap}>
+								<View style={styles.factorBar}>
+									<View
+										style={[
+											styles.factorFill,
+											{
+												width: `${Math.min(100, (forecast.mtdExpense / forecast.expectedIncome) * 100)}%`,
+												backgroundColor:
+													forecast.mtdExpense / forecast.expectedIncome >
+													forecast.dayOfMonth / forecast.daysInMonth
+														? theme.warning
+														: theme.primary,
+											},
+										]}
+									/>
+									<View
+										style={[
+											styles.paceMarker,
+											{
+												left: `${(forecast.dayOfMonth / forecast.daysInMonth) * 100}%`,
+											},
+										]}
+									/>
+								</View>
+								<Text style={styles.factorDetail}>
+									{Math.round(
+										(forecast.mtdExpense / forecast.expectedIncome) * 100,
+									)}
+									% of this month's income spent, and{" "}
+									{Math.round(
+										(forecast.dayOfMonth / forecast.daysInMonth) * 100,
+									)}
+									% of the month has passed
+								</Text>
+							</View>
+						)}
+
+						{(
+							[
+								["Income this month", forecast.expectedIncome, theme.success],
+								["Spent so far", -forecast.mtdExpense, theme.text],
+								[
+									`Bills still to pay (${forecast.upcomingBillCount})`,
+									-forecast.upcomingBills,
+									theme.text,
+								],
+								["For savings goals", -forecast.goalNeedsThisMonth, theme.text],
+							] as [string, number, string][]
+						)
+							.filter(([, v], i) => i < 2 || v !== 0)
+							.map(([label, value, color]) => (
+								<View key={label} style={styles.forecastRow}>
+									<Text style={styles.forecastRowLabel}>{label}</Text>
+									<Text style={[styles.forecastRowValue, { color }]}>
+										{value < 0 ? "−" : ""}
+										{money(Math.abs(value))}
+									</Text>
+								</View>
+							))}
+						<View style={styles.forecastDivider} />
+						<View style={styles.forecastRow}>
+							<Text style={styles.forecastRowLabel}>
+								Likely total spending this month
+							</Text>
+							<Text style={styles.forecastRowValue}>
+								{money(forecast.projectedExpense)}
+							</Text>
+						</View>
+						{baseline.avgExpense > 0 && (
+							<View style={styles.forecastRow}>
+								<Text style={styles.forecastRowLabel}>
+									What you normally spend
+								</Text>
+								<Text style={styles.forecastRowValue}>
+									{money(baseline.avgExpense)}
+								</Text>
+							</View>
+						)}
+						{forecast.expectedIncome > 0 && (
+							<View style={styles.forecastRow}>
+								<Text style={styles.forecastRowLabel}>
+									Likely left over at month-end
+								</Text>
+								<Text
+									style={[
+										styles.forecastRowValue,
+										{
+											color:
+												forecast.projectedSavings >= 0
+													? theme.success
+													: theme.error,
+										},
+									]}
+								>
+									{money(forecast.projectedSavings)}
+								</Text>
+							</View>
+						)}
+					</View>
+				</View>
+			)}
+
+			{/* Action plan */}
+			{insights.recommendations.length > 0 && (
+				<View style={styles.section}>
+					<View style={styles.sectionHeader}>
+						<Text style={styles.sectionTitle}>What You Should Do</Text>
+						{insights.recommendations.length > 4 && (
+							<TouchableOpacity
+								style={styles.categoryToggle}
+								onPress={() => setShowAllRecs(!showAllRecs)}
+							>
+								<Text style={styles.categoryToggleText}>
+									{showAllRecs
+										? "Show less"
+										: `All ${insights.recommendations.length}`}
+								</Text>
+							</TouchableOpacity>
+						)}
+					</View>
+					<View style={styles.tipsContainer}>
+						{visibleRecs.map((r) => (
+							<View
+								key={r.id}
+								style={[
+									styles.tipCard,
+									{ borderLeftColor: severityColor(r.severity) },
+								]}
+							>
+								<Ionicons
+									name={r.icon as any}
+									size={20}
+									color={severityColor(r.severity)}
+								/>
+								<View style={styles.tipContent}>
+									<Text style={styles.tipTitle}>{r.title}</Text>
+									<Text style={styles.tipText}>{r.body}</Text>
+								</View>
+							</View>
+						))}
+					</View>
+				</View>
+			)}
+
+			{/* Budget forecast */}
+			{insights.budgets.length > 0 && (
+				<View style={styles.section}>
+					<View style={styles.sectionHeader}>
+						<Text style={styles.sectionTitle}>Your Budgets</Text>
+						<Text style={styles.sectionHint}>Faded bar = expected by month-end</Text>
+					</View>
+					<View style={styles.categoryCard}>
+						{insights.budgets.map((b) => {
+							const info = categories.getInfo("expense", b.budget.category);
+							const color =
+								b.status === "over"
+									? theme.error
+									: b.status === "at_risk"
+										? theme.warning
+										: theme.success;
+							const spentPct = Math.min(100, b.percentUsed);
+							const projPct = Math.min(
+								100,
+								(b.projected / b.budget.amount) * 100,
+							);
+							return (
+								<View key={b.budget.id} style={styles.budgetRow}>
+									<View style={styles.factorHeader}>
+										<View style={styles.categoryLeft}>
+											<View
+												style={[
+													styles.categoryIcon,
+													{ backgroundColor: info.color + "20" },
+												]}
+											>
+												<Ionicons
+													name={info.icon as any}
+													size={16}
+													color={info.color}
+												/>
+											</View>
+											<Text style={styles.categoryName}>{info.name}</Text>
+										</View>
+										<Text style={styles.categoryAmount}>
+											{money(b.spent)}
+											<Text style={styles.factorDetail}>
+												{" "}
+												/ {money(b.budget.amount)}
+											</Text>
+										</Text>
+									</View>
+									<View style={styles.factorBar}>
+										<View
+											style={[
+												styles.factorFill,
+												styles.projectedFill,
+												{ width: `${projPct}%`, backgroundColor: color },
+											]}
+										/>
+										<View
+											style={[
+												styles.factorFill,
+												{
+													position: "absolute",
+													width: `${spentPct}%`,
+													backgroundColor: color,
+												},
+											]}
+										/>
+									</View>
+									<Text style={[styles.factorDetail, { color }]}>
+										{b.status === "over"
+											? `Over the limit by ${money(b.spent - b.budget.amount)}`
+											: b.status === "at_risk"
+												? `May reach ${money(b.projected)} — spend under ${money(b.dailyAllowance)} a day`
+												: `Fine — you can spend ${money(b.dailyAllowance)} a day here`}
+									</Text>
+								</View>
+							);
+						})}
+					</View>
+				</View>
+			)}
+
+			{/* What changed */}
+			{insights.movers.length > 0 && (
+				<View style={styles.section}>
+					<View style={styles.sectionHeader}>
+						<Text style={styles.sectionTitle}>Spending Changes</Text>
+						<Text style={styles.sectionHint}>Last 30 days vs. a normal month</Text>
+					</View>
+					<View style={styles.categoryCard}>
+						{insights.movers.map((m) => {
+							const info = categories.getInfo("expense", m.category);
+							const up = m.recent > m.average;
+							return (
+								<View key={m.category} style={styles.categoryItem}>
+									<View style={styles.categoryLeft}>
+										<View
+											style={[
+												styles.categoryIcon,
+												{ backgroundColor: info.color + "20" },
+											]}
+										>
+											<Ionicons
+												name={info.icon as any}
+												size={16}
+												color={info.color}
+											/>
+										</View>
+										<View style={styles.categoryInfo}>
+											<Text style={styles.categoryName}>{info.name}</Text>
+											<Text style={styles.categoryPercent}>
+												{money(m.recent)} now, normally {money(m.average)}
+											</Text>
+										</View>
+									</View>
+									<Text
+										style={[
+											styles.categoryAmount,
+											{ color: up ? theme.error : theme.success },
+										]}
+									>
+										{up ? "▲" : "▼"}{" "}
+										{m.average > 0
+											? `${Math.abs(Math.round(m.change * 100))}%`
+											: "new"}
+									</Text>
+								</View>
+							);
+						})}
+					</View>
+				</View>
+			)}
+
+			{/* Commitments */}
+			{(obligations.fixedMonthly > 0 ||
+				obligations.oweTotal > 0 ||
+				obligations.lentTotal > 0 ||
+				obligations.creditUtilization !== null ||
+				snapshot.goalsTarget > 0) && (
+				<View style={styles.section}>
+					<Text style={styles.sectionTitle}>What You Owe & Own</Text>
+					<View style={styles.chartCard}>
+						{(
+							[
+								obligations.fixedMonthly > 0 && [
+									"Regular bills each month",
+									money(obligations.fixedMonthly) +
+										(obligations.fixedShare !== null
+											? ` (${Math.round(obligations.fixedShare * 100)}% of spending)`
+											: ""),
+								],
+								obligations.goalsMonthlyNeeded > 0 && [
+									"Save monthly for goals",
+									money(obligations.goalsMonthlyNeeded),
+								],
+								snapshot.goalsTarget > 0 && [
+									"Saved toward goals",
+									`${money(snapshot.goalsSaved)} of ${money(snapshot.goalsTarget)}`,
+								],
+								obligations.oweTotal > 0 && [
+									"You owe",
+									money(obligations.oweTotal),
+								],
+								obligations.lentTotal > 0 && [
+									"Others owe you",
+									money(obligations.lentTotal),
+								],
+								obligations.creditUtilization !== null && [
+									"Credit card used",
+									`${money(obligations.creditUsed)} of ${money(obligations.creditLimit)} limit`,
+								],
+								snapshot.liquid > 0 && [
+									"Cash & bank balance",
+									money(snapshot.liquid),
+								],
+							].filter(Boolean) as [string, string][]
+						).map(([label, value]) => (
+							<View key={label} style={styles.forecastRow}>
+								<Text style={styles.forecastRowLabel}>{label}</Text>
+								<Text style={styles.forecastRowValue}>{value}</Text>
+							</View>
+						))}
+					</View>
+				</View>
+			)}
+
+			{/* ===== Selected period ===== */}
 
 			{comparison && (
 				<View style={styles.comparisonCard}>
 					<View style={styles.comparisonHeader}>
 						<View>
-							<Text style={styles.comparisonTitle}>Period comparison</Text>
+							<Text style={styles.comparisonTitle}>Compared to before</Text>
 							<Text style={styles.comparisonSubtitle}>
-								Compared with the previous period
+								Same length of time just before this one
 							</Text>
 						</View>
 						<Ionicons
@@ -616,7 +1183,7 @@ export default function FinanceAnalytics({
 			{/* Monthly Trends - Bar Chart */}
 			<View style={styles.section}>
 				<View style={styles.sectionHeader}>
-					<Text style={styles.sectionTitle}>Monthly Trends</Text>
+					<Text style={styles.sectionTitle}>Month by Month</Text>
 					<View style={styles.legendRow}>
 						<View style={styles.legendItem}>
 							<View
@@ -675,6 +1242,20 @@ export default function FinanceAnalytics({
 												/>
 											</View>
 											<Text style={styles.trendMonth}>{month.month}</Text>
+											<Text
+												style={[
+													styles.trendNet,
+													{
+														color:
+															month.income - month.expense >= 0
+																? theme.success
+																: theme.error,
+													},
+												]}
+											>
+												{month.income - month.expense >= 0 ? "+" : "−"}
+												{compact(Math.abs(month.income - month.expense))}
+											</Text>
 										</View>
 									);
 								})}
@@ -688,7 +1269,7 @@ export default function FinanceAnalytics({
 			<View style={styles.section}>
 				<View style={styles.sectionHeader}>
 					<Text style={[styles.sectionTitle, styles.categoryHeading]}>
-						Spending Breakdown
+						Where Your Money Went
 					</Text>
 					{spendingByCategory.length > 6 && (
 						<TouchableOpacity
@@ -718,8 +1299,7 @@ export default function FinanceAnalytics({
 							? spendingByCategory
 							: spendingByCategory.slice(0, 6)
 						).map((item) => {
-							const catInfo =
-								EXPENSE_CATEGORIES[item.category as ExpenseCategory];
+							const catInfo = categories.getInfo("expense", item.category);
 							const percentage =
 								summary.totalExpenses > 0
 									? (item.amount / summary.totalExpenses) * 100
@@ -748,6 +1328,9 @@ export default function FinanceAnalytics({
 											</Text>
 											<Text style={styles.categoryPercent}>
 												{percentage.toFixed(1)}%
+												{timeRange === "30d" &&
+													baseline.avgByCategory[item.category] > 0 &&
+													` · normally ${money(baseline.avgByCategory[item.category])}`}
 											</Text>
 										</View>
 									</View>
@@ -765,11 +1348,10 @@ export default function FinanceAnalytics({
 			{/* Income by Source */}
 			{incomeByCategory.length > 0 && (
 				<View style={styles.section}>
-					<Text style={styles.sectionTitle}>Income Sources</Text>
+					<Text style={styles.sectionTitle}>Where Your Money Came From</Text>
 					<View style={styles.categoryCard}>
 						{incomeByCategory.slice(0, 5).map((item) => {
-							const catInfo =
-								INCOME_CATEGORIES[item.category as IncomeCategory];
+							const catInfo = categories.getInfo("income", item.category);
 							const totalIncome = incomeByCategory.reduce(
 								(sum, i) => sum + i.amount,
 								0,
@@ -872,75 +1454,6 @@ export default function FinanceAnalytics({
 				</View>
 			)}
 
-			{/* Tips Section */}
-			<View style={styles.section}>
-				<Text style={styles.sectionTitle}>Insights</Text>
-				<View style={styles.tipsContainer}>
-					{savingsRate >= 20 && (
-						<View style={[styles.tipCard, { borderLeftColor: theme.success }]}>
-							<Ionicons name="trophy" size={20} color={theme.success} />
-							<View style={styles.tipContent}>
-								<Text style={styles.tipTitle}>Great Savings!</Text>
-								<Text style={styles.tipText}>
-									You're saving {savingsRate.toFixed(0)}% of your income. Keep
-									it up!
-								</Text>
-							</View>
-						</View>
-					)}
-
-					{savingsRate < 0 && (
-						<View style={[styles.tipCard, { borderLeftColor: theme.error }]}>
-							<Ionicons name="alert-circle" size={20} color={theme.error} />
-							<View style={styles.tipContent}>
-								<Text style={styles.tipTitle}>Spending Alert</Text>
-								<Text style={styles.tipText}>
-									Your expenses exceed income by {currency}
-									{formatAmount(Math.abs(summary.balance))}. Review your
-									spending.
-								</Text>
-							</View>
-						</View>
-					)}
-
-					{spendingByCategory.length > 0 && (
-						<View style={[styles.tipCard, { borderLeftColor: theme.primary }]}>
-							<Ionicons name="bulb" size={20} color={theme.primary} />
-							<View style={styles.tipContent}>
-								<Text style={styles.tipTitle}>Top Spending</Text>
-								<Text style={styles.tipText}>
-									{EXPENSE_CATEGORIES[
-										spendingByCategory[0].category as ExpenseCategory
-									]?.name || spendingByCategory[0].category}{" "}
-									accounts for{" "}
-									{formatPercent(
-										spendingByCategory[0].amount,
-										summary.totalExpenses,
-									)}{" "}
-									of expenses.
-								</Text>
-							</View>
-						</View>
-					)}
-
-					{summary.totalIncome === 0 && summary.totalExpenses === 0 && (
-						<View style={[styles.tipCard, { borderLeftColor: theme.warning }]}>
-							<Ionicons
-								name="information-circle"
-								size={20}
-								color={theme.warning}
-							/>
-							<View style={styles.tipContent}>
-								<Text style={styles.tipTitle}>Start Tracking</Text>
-								<Text style={styles.tipText}>
-									Add your first transaction to see insights and analytics.
-								</Text>
-							</View>
-						</View>
-					)}
-				</View>
-			</View>
-
 			<View style={{ height: 40 }} />
 		</ScrollView>
 	);
@@ -948,6 +1461,164 @@ export default function FinanceAnalytics({
 
 const createStyles = (theme: Theme) =>
 	StyleSheet.create({
+		customRangeRow: {
+			flexDirection: "row",
+			gap: 8,
+			marginTop: 10,
+		},
+		customRangeButton: {
+			flex: 1,
+			backgroundColor: theme.surface,
+			borderRadius: 12,
+			borderWidth: 1,
+			borderColor: theme.border,
+			paddingHorizontal: 12,
+			paddingVertical: 8,
+		},
+		customRangeLabel: {
+			fontSize: 11,
+			color: theme.textMuted,
+		},
+		customRangeValueRow: {
+			flexDirection: "row",
+			alignItems: "center",
+			gap: 6,
+			marginTop: 2,
+		},
+		customRangeValue: {
+			fontSize: 14,
+			fontWeight: "600",
+			color: theme.text,
+		},
+		sectionHint: {
+			fontSize: 12,
+			color: theme.textMuted,
+		},
+		healthTop: {
+			flexDirection: "row",
+			alignItems: "center",
+			gap: 16,
+		},
+		healthScore: {
+			fontSize: 26,
+			fontWeight: "800",
+		},
+		healthSummary: {
+			flex: 1,
+		},
+		healthLabel: {
+			fontSize: 18,
+			fontWeight: "700",
+		},
+		healthSub: {
+			fontSize: 12,
+			color: theme.textSecondary,
+			marginTop: 4,
+		},
+		healthToggle: {
+			fontSize: 12,
+			color: theme.primary,
+			fontWeight: "600",
+			marginTop: 8,
+		},
+		factorRow: {
+			marginTop: 14,
+		},
+		factorHeader: {
+			flexDirection: "row",
+			alignItems: "center",
+			justifyContent: "space-between",
+			marginBottom: 6,
+		},
+		factorLabel: {
+			fontSize: 13,
+			fontWeight: "600",
+			color: theme.text,
+		},
+		factorScore: {
+			fontSize: 13,
+			fontWeight: "700",
+		},
+		factorBar: {
+			height: 6,
+			borderRadius: 3,
+			backgroundColor: theme.surfaceLight,
+			overflow: "hidden",
+		},
+		factorFill: {
+			height: 6,
+			borderRadius: 3,
+		},
+		projectedFill: {
+			opacity: 0.3,
+		},
+		factorHint: {
+			fontSize: 11,
+			color: theme.textMuted,
+			marginTop: 2,
+			fontStyle: "italic",
+		},
+		factorDetail: {
+			fontSize: 12,
+			color: theme.textSecondary,
+			marginTop: 4,
+		},
+		forecastLabel: {
+			fontSize: 13,
+			color: theme.textSecondary,
+		},
+		forecastValue: {
+			fontSize: 30,
+			fontWeight: "800",
+			marginTop: 2,
+		},
+		forecastSub: {
+			fontSize: 13,
+			color: theme.textSecondary,
+			marginTop: 2,
+		},
+		paceWrap: {
+			marginTop: 14,
+			marginBottom: 6,
+		},
+		paceMarker: {
+			position: "absolute",
+			top: 0,
+			bottom: 0,
+			width: 2,
+			backgroundColor: theme.text,
+		},
+		forecastRow: {
+			flexDirection: "row",
+			justifyContent: "space-between",
+			alignItems: "center",
+			paddingVertical: 6,
+			gap: 12,
+		},
+		forecastRowLabel: {
+			fontSize: 13,
+			color: theme.textSecondary,
+		},
+		forecastRowValue: {
+			fontSize: 14,
+			fontWeight: "600",
+			color: theme.text,
+			flexShrink: 1,
+			textAlign: "right",
+		},
+		forecastDivider: {
+			height: 1,
+			backgroundColor: theme.border,
+			marginVertical: 6,
+		},
+		budgetRow: {
+			paddingVertical: 10,
+		},
+		trendNet: {
+			fontSize: 10,
+			fontWeight: "600",
+			marginTop: 2,
+		},
 		container: {
 			flex: 1,
 			backgroundColor: theme.background,

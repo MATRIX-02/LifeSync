@@ -6,14 +6,11 @@ import { SubscriptionCheckResult } from "@/src/components/PremiumFeatureGate";
 import { useFinancePrefsStore } from "@/src/context/financePrefsStore";
 import { useFinanceStore } from "@/src/context/financeStoreDB";
 import { Theme } from "@/src/context/themeContext";
+import { useFinanceCategories } from "@/src/hooks/useFinanceCategories";
 import { useModuleRefresh } from "@/src/hooks/useModuleRefresh";
 import {
 	Account,
 	COLORS,
-	EXPENSE_CATEGORIES,
-	ExpenseCategory,
-	INCOME_CATEGORIES,
-	IncomeCategory,
 	TransactionType,
 } from "@/src/types/finance";
 import Ionicons from "@expo/vector-icons/Ionicons";
@@ -66,6 +63,7 @@ export default function FinanceDashboard({
 	} = useFinanceStore();
 
 	const styles = createStyles(theme);
+	const categories = useFinanceCategories();
 	const { refreshing, onRefresh } = useModuleRefresh("finance");
 
 	// Transactions recorded this calendar month, for the plan limit. Matches
@@ -569,7 +567,7 @@ export default function FinanceDashboard({
 
 					<View style={styles.spendingCard}>
 						{monthSummary.topCategories.slice(0, 3).map((cat, index) => {
-							const catInfo = EXPENSE_CATEGORIES[cat.category];
+							const catInfo = categories.getInfo("expense", cat.category);
 							return (
 								<View key={cat.category} style={styles.spendingItem}>
 									<View
@@ -624,7 +622,7 @@ export default function FinanceDashboard({
 
 					<View style={styles.billsCard}>
 						{upcomingBills.map((bill) => {
-							const catInfo = EXPENSE_CATEGORIES[bill.category];
+							const catInfo = categories.getInfo("expense", bill.category);
 							const daysLeft = Math.ceil(
 								(new Date(bill.dueDate).getTime() - new Date().getTime()) /
 									(1000 * 60 * 60 * 24),
@@ -694,10 +692,10 @@ export default function FinanceDashboard({
 				) : (
 					<View style={styles.transactionsCard}>
 						{recentTransactions.map((transaction, index) => {
-							const catInfo =
-								transaction.type === "income"
-									? INCOME_CATEGORIES[transaction.category as IncomeCategory]
-									: EXPENSE_CATEGORIES[transaction.category as ExpenseCategory];
+							const catInfo = categories.getInfo(
+								transaction.type,
+								transaction.category,
+							);
 							const isLast = index === recentTransactions.length - 1;
 							return (
 								<View

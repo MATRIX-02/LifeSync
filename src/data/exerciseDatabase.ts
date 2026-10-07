@@ -1478,6 +1478,542 @@ const RAW_EXERCISE_DATABASE: Omit<Exercise, "targetMuscles">[] = [
 		],
 		isCustom: false,
 	},
+	// ==========================================================================
+	// RUNNER'S STRENGTH & LOWER LEG
+	//
+	// Most running injuries (shin splints, Achilles and calf strains, runner's
+	// knee) are load-tolerance problems below the knee and at the hip. The calf
+	// complex takes several times body weight per stride, and the soleus does
+	// most of that work - which is why the bent-knee calf raise is here
+	// alongside the straight-leg one. Tibialis work balances the calf and is
+	// the classic shin-splint prevention exercise.
+	// ==========================================================================
+	{
+		id: "ex_tibialis_raise",
+		name: "Tibialis Raises",
+		category: "strength",
+		primaryMuscles: ["shins"],
+		secondaryMuscles: [],
+		equipment: ["wall"],
+		difficulty: "beginner",
+		description:
+			"Strengthens the muscle on the front of the shin - the go-to exercise for preventing shin splints",
+		instructions: [
+			"Stand with your back and hips against a wall, heels about a foot (30 cm) away from it",
+			"Keep your legs straight and lean your weight into the wall",
+			"Pull your toes and the front of your feet up toward your shins as high as you can",
+			"Pause for a second at the top, then lower slowly until your toes almost touch the floor",
+			"Repeat without letting your toes rest on the floor between reps",
+		],
+		tips: [
+			"Move your heels further from the wall to make it harder",
+			"A burning feeling in the front of the shin is normal - sharp pain is not",
+			"Do these 2-3 times a week, and before runs if your shins get sore",
+		],
+		isCustom: false,
+	},
+	{
+		id: "ex_bent_knee_calf_raise",
+		name: "Bent-Knee Calf Raise (Soleus)",
+		category: "strength",
+		primaryMuscles: ["calves"],
+		secondaryMuscles: ["feet"],
+		equipment: [],
+		difficulty: "beginner",
+		description:
+			"Targets the soleus, the deep calf muscle that absorbs most of the load when you run",
+		instructions: [
+			"Stand facing a wall with your hands on it for balance",
+			"Bend your knees slightly (about 30 degrees) and keep them bent the whole time",
+			"Rise up onto the balls of your feet as high as you can",
+			"Hold for a second at the top",
+			"Lower slowly over 2-3 seconds",
+		],
+		tips: [
+			"Keeping the knees bent is the whole point - it shifts the work from the outer calf to the soleus",
+			"Progress to one leg at a time, then hold a dumbbell",
+			"Push through the big toe so your ankle doesn't roll outward",
+		],
+		isCustom: false,
+	},
+	{
+		id: "ex_single_leg_calf_raise",
+		name: "Single-Leg Calf Raise",
+		category: "strength",
+		primaryMuscles: ["calves"],
+		secondaryMuscles: ["feet"],
+		equipment: ["step (optional)"],
+		difficulty: "intermediate",
+		description:
+			"Builds calf strength one leg at a time, the way you load it when running",
+		instructions: [
+			"Stand on one foot, holding a wall or rail lightly for balance",
+			"Rise up as high as you can onto the ball of your foot",
+			"Hold for a second at the top",
+			"Lower slowly over 2-3 seconds",
+			"Do all reps on one side, then switch",
+		],
+		tips: [
+			"A good target for runners is 25 or more slow reps on each leg",
+			"Stand on the edge of a step to go lower for a bigger range of motion",
+			"If one side does far fewer reps, give it an extra set",
+		],
+		isCustom: false,
+	},
+	{
+		id: "ex_eccentric_heel_drop",
+		name: "Eccentric Heel Drop (Achilles)",
+		category: "strength",
+		primaryMuscles: ["calves"],
+		secondaryMuscles: [],
+		equipment: ["step"],
+		difficulty: "intermediate",
+		description:
+			"Slow lowering on a step - the best-studied exercise for Achilles tendon pain",
+		instructions: [
+			"Stand on the edge of a step on the balls of both feet, holding a rail",
+			"Rise up on both feet",
+			"Lift one foot off and slowly lower the other heel below the step over 3-4 seconds",
+			"Put the other foot back down and use both feet to come back up",
+			"Do it with the knee straight, then repeat a set with the knee slightly bent",
+		],
+		tips: [
+			"Mild discomfort in the tendon (up to about 3 out of 10) is acceptable",
+			"Pain that is worse the next morning means you did too much - reduce the reps",
+			"Stop and see a physio if you felt a pop or have sudden sharp pain",
+		],
+		isCustom: false,
+	},
+	{
+		id: "ex_copenhagen_plank",
+		name: "Copenhagen Plank",
+		category: "strength",
+		primaryMuscles: ["legs"],
+		secondaryMuscles: ["obliques", "abs"],
+		equipment: ["bench"],
+		difficulty: "intermediate",
+		description:
+			"Side plank with your top leg on a bench - strengthens the inner thigh and reduces groin injuries",
+		instructions: [
+			"Lie on your side next to a bench, propped up on your forearm",
+			"Rest the inside of your top knee (easier) or ankle (harder) on the bench",
+			"Lift your hips until your body is in a straight line",
+			"Hold, keeping your hips high and your body straight",
+			"Lower down with control and switch sides",
+		],
+		tips: [
+			"Start with the knee on the bench and short 10-15 second holds",
+			"Don't let your hips sag or rotate forward",
+		],
+		isCustom: false,
+	},
+	{
+		id: "ex_single_leg_rdl",
+		name: "Single-Leg Romanian Deadlift",
+		category: "strength",
+		primaryMuscles: ["hamstrings", "glutes"],
+		secondaryMuscles: ["lower_back", "feet"],
+		equipment: ["dumbbell (optional)"],
+		difficulty: "intermediate",
+		description:
+			"Builds hip and hamstring strength and balance on one leg - key for stable running",
+		instructions: [
+			"Stand on one leg with a soft bend in that knee",
+			"Hinge forward at the hips, letting the other leg rise straight out behind you",
+			"Keep your back flat and your hips level - don't let the lifted hip open up",
+			"Lower until you feel a stretch in the back of the standing leg",
+			"Push your hips forward to stand back up",
+		],
+		tips: [
+			"Hold a wall or stick with one hand while you learn the balance",
+			"Grip the floor with your toes and keep the arch of the foot lifted",
+		],
+		isCustom: false,
+	},
+	{
+		id: "ex_step_up",
+		name: "Step-Ups",
+		category: "strength",
+		primaryMuscles: ["quadriceps", "glutes"],
+		secondaryMuscles: ["hamstrings", "calves"],
+		equipment: ["box or step"],
+		difficulty: "beginner",
+		description:
+			"Single-leg strength for the knee and hip, close to the running motion",
+		instructions: [
+			"Stand facing a box or step about knee height or lower",
+			"Place one whole foot on the box",
+			"Push through that heel to step up until the leg is straight",
+			"Lower back down slowly with control",
+			"Do all reps on one leg, then switch",
+		],
+		tips: [
+			"Keep your knee in line with your toes - don't let it cave inward",
+			"Don't push off the bottom foot; make the top leg do the work",
+			"Hold dumbbells to progress",
+		],
+		isCustom: false,
+	},
+	{
+		id: "ex_lateral_band_walk",
+		name: "Lateral Band Walk",
+		category: "strength",
+		primaryMuscles: ["glutes"],
+		secondaryMuscles: ["legs"],
+		equipment: ["resistance band"],
+		difficulty: "beginner",
+		description:
+			"Strengthens the side hip muscles that stop your knee collapsing inward when you run",
+		instructions: [
+			"Put a resistance band around your legs just above the knees or around the ankles",
+			"Stand with feet hip-width apart and sit into a small squat",
+			"Step sideways with one foot, then follow with the other, keeping tension on the band",
+			"Take 10-15 steps one way, then come back the other way",
+		],
+		tips: [
+			"Keep your toes pointing forward and your upper body still",
+			"Don't let your feet come together - the band should always stay tight",
+		],
+		isCustom: false,
+	},
+	{
+		id: "ex_pogo_hops",
+		name: "Pogo Hops",
+		category: "plyometrics",
+		primaryMuscles: ["calves"],
+		secondaryMuscles: ["feet", "shins"],
+		equipment: [],
+		difficulty: "intermediate",
+		description:
+			"Small, quick bounces that train your ankles and Achilles to act like springs",
+		instructions: [
+			"Stand tall with feet hip-width apart",
+			"Bounce up and down on the balls of your feet with small, quick hops",
+			"Keep your knees almost straight - the bounce comes from the ankles",
+			"Spend as little time on the ground as possible",
+			"Do 20-30 hops, rest, and repeat",
+		],
+		tips: [
+			"Only start these once you can do 20+ single-leg calf raises without pain",
+			"Land quietly; loud landings mean you're not using your ankles",
+			"Skip these if you have shin or Achilles pain right now",
+		],
+		isCustom: false,
+	},
+	{
+		id: "ex_ankle_knee_to_wall",
+		name: "Knee-to-Wall Ankle Mobility",
+		category: "flexibility",
+		primaryMuscles: ["calves"],
+		secondaryMuscles: ["feet"],
+		equipment: ["wall"],
+		difficulty: "beginner",
+		description:
+			"Improves how far your ankle bends, which helps running form and squats",
+		instructions: [
+			"Face a wall in a half-kneeling or standing lunge position",
+			"Place the front foot a few inches from the wall",
+			"Keeping the heel down, push the knee forward to touch the wall",
+			"Return and repeat, moving the foot back a little as it gets easier",
+		],
+		tips: [
+			"Keep the knee in line with the middle toes",
+			"The heel must stay on the floor the whole time",
+			"About 10 cm (4 inches) from wall to toes is a good target",
+		],
+		isCustom: false,
+	},
+	{
+		id: "ex_leg_swings",
+		name: "Leg Swings",
+		category: "flexibility",
+		primaryMuscles: ["glutes", "hamstrings"],
+		secondaryMuscles: ["legs"],
+		equipment: ["wall"],
+		difficulty: "beginner",
+		description: "A dynamic warm-up that loosens the hips before a run",
+		instructions: [
+			"Hold a wall or post for balance and stand on one leg",
+			"Swing the other leg forward and back in a relaxed, controlled arc",
+			"Do 10-15 swings, then turn and swing the leg side to side across your body",
+			"Switch legs",
+		],
+		tips: [
+			"Start small and let the swings get bigger gradually",
+			"Keep your upper body tall - don't lean to make the swing bigger",
+		],
+		isCustom: false,
+	},
+	{
+		id: "ex_a_skip",
+		name: "A-Skips",
+		category: "cardio",
+		primaryMuscles: ["quadriceps", "calves"],
+		secondaryMuscles: ["glutes", "shins"],
+		equipment: [],
+		difficulty: "beginner",
+		description:
+			"A running drill that teaches quick, springy foot contact under your hips",
+		instructions: [
+			"Skip forward, driving one knee up to hip height",
+			"Bring the foot down quickly so it lands under your hips, on the ball of the foot",
+			"Swing the opposite arm with each knee drive",
+			"Cover 15-20 metres, walk back and repeat",
+		],
+		tips: [
+			"Focus on rhythm and quick contacts, not speed",
+			"Pull your toes up toward the shin while the knee is high",
+		],
+		isCustom: false,
+	},
+	{
+		id: "ex_standing_calf_stretch",
+		name: "Standing Calf Stretch",
+		category: "flexibility",
+		primaryMuscles: ["calves"],
+		secondaryMuscles: [],
+		equipment: ["wall"],
+		difficulty: "beginner",
+		description: "Stretches both calf muscles after a run",
+		instructions: [
+			"Stand facing a wall with your hands on it",
+			"Step one foot back, keeping that leg straight and the heel on the floor",
+			"Lean forward until you feel a stretch in the upper calf; hold 30 seconds",
+			"Then bend the back knee slightly, keeping the heel down, to stretch the lower calf; hold 30 seconds",
+			"Switch legs",
+		],
+		tips: [
+			"Point the back foot straight ahead, not outward",
+			"Stretch gently - you should feel tension, not pain",
+		],
+		isCustom: false,
+	},
+
+	// ==========================================================================
+	// FOOT & ARCH (flat feet, plantar fasciitis)
+	//
+	// These target the small muscles inside the foot and the tibialis
+	// posterior, which together hold the arch up. They help most with
+	// FLEXIBLE flat feet - an arch that appears when you sit or stand on your
+	// toes but collapses under load. A rigid flat foot (no arch even on tiptoe),
+	// a painful one, or one that has recently flattened on one side needs a
+	// physio or podiatrist, which the template note says.
+	// ==========================================================================
+	{
+		id: "ex_short_foot",
+		name: "Short Foot (Arch Doming)",
+		category: "strength",
+		primaryMuscles: ["feet"],
+		secondaryMuscles: [],
+		equipment: [],
+		difficulty: "beginner",
+		description:
+			"The core exercise for flat feet - lifts your arch using the small muscles inside the foot",
+		instructions: [
+			"Sit with your foot flat on the floor (progress to standing, then one leg)",
+			"Without curling your toes, pull the ball of your foot toward your heel so the arch rises",
+			"Keep your toes long and relaxed and the big toe pressed lightly into the floor",
+			"Hold for 5-10 seconds, then relax",
+			"Repeat 10 times on each foot",
+		],
+		tips: [
+			"If your toes scrunch up, you're using the wrong muscles - make the movement smaller",
+			"It feels like almost nothing at first; it gets easier within a couple of weeks",
+			"Practise it during the day, e.g. while brushing your teeth",
+		],
+		isCustom: false,
+	},
+	{
+		id: "ex_towel_scrunch",
+		name: "Towel Scrunches",
+		category: "strength",
+		primaryMuscles: ["feet"],
+		secondaryMuscles: [],
+		equipment: ["towel"],
+		difficulty: "beginner",
+		description: "Strengthens the toe-curling muscles under the foot",
+		instructions: [
+			"Sit with a small towel flat on the floor under your foot",
+			"Keep your heel on the floor",
+			"Curl your toes to pull the towel toward you, bit by bit",
+			"Straighten your toes, reach forward, and pull again until the towel is bunched up",
+			"Flatten the towel and repeat 3-4 times per foot",
+		],
+		tips: [
+			"Put a book or water bottle on the far end of the towel to make it harder",
+		],
+		isCustom: false,
+	},
+	{
+		id: "ex_marble_pickup",
+		name: "Marble Pick-Ups",
+		category: "strength",
+		primaryMuscles: ["feet"],
+		secondaryMuscles: [],
+		equipment: ["marbles or small objects", "cup"],
+		difficulty: "beginner",
+		description: "Improves toe control and strength under the foot",
+		instructions: [
+			"Sit with 10-20 marbles (or small objects) on the floor and a cup nearby",
+			"Pick up one marble at a time with your toes",
+			"Drop it into the cup",
+			"Continue until all are in the cup, then switch feet",
+		],
+		tips: ["Keep your heel on the floor and move only the toes"],
+		isCustom: false,
+	},
+	{
+		id: "ex_toe_yoga",
+		name: "Toe Yoga",
+		category: "strength",
+		primaryMuscles: ["feet"],
+		secondaryMuscles: [],
+		equipment: [],
+		difficulty: "beginner",
+		description: "Trains you to move the big toe separately from the other toes",
+		instructions: [
+			"Sit or stand with your feet flat",
+			"Lift only your big toe while pressing the other four toes into the floor; hold 5 seconds",
+			"Then press the big toe down and lift the other four toes; hold 5 seconds",
+			"Alternate 10 times",
+		],
+		tips: [
+			"Use your hand to hold the other toes down while you learn the movement",
+			"A strong big toe pressing down is what stops the arch rolling in",
+		],
+		isCustom: false,
+	},
+	{
+		id: "ex_toe_splay",
+		name: "Toe Spread (Splay)",
+		category: "strength",
+		primaryMuscles: ["feet"],
+		secondaryMuscles: [],
+		equipment: [],
+		difficulty: "beginner",
+		description: "Spreads the toes wide to strengthen the small muscles that balance the foot",
+		instructions: [
+			"Sit with your feet flat on the floor",
+			"Spread all your toes as wide apart as you can",
+			"Hold for 5 seconds, then relax",
+			"Repeat 10-15 times",
+		],
+		tips: [
+			"Try pressing the little toe and big toe outward into the floor",
+			"Wearing shoes with a wide toe box helps your toes keep this ability",
+		],
+		isCustom: false,
+	},
+	{
+		id: "ex_heel_raise_ball",
+		name: "Heel Raise with Ball Squeeze",
+		category: "strength",
+		primaryMuscles: ["calves", "feet"],
+		secondaryMuscles: ["shins"],
+		equipment: ["small ball"],
+		difficulty: "beginner",
+		description:
+			"A calf raise that trains the arch and stops the ankle rolling inward",
+		instructions: [
+			"Stand holding a wall, with a small ball (tennis ball size) between your heels just below the ankle bones",
+			"Squeeze the ball gently with your heels",
+			"Rise onto your toes while keeping the squeeze",
+			"Lower slowly over 2-3 seconds, still squeezing",
+		],
+		tips: [
+			"The squeeze keeps the weight over the big toe and the arch lifted",
+			"Don't let the ball drop - it shows your ankles are rolling out",
+		],
+		isCustom: false,
+	},
+	{
+		id: "ex_banded_inversion",
+		name: "Banded Foot Inversion",
+		category: "strength",
+		primaryMuscles: ["shins", "feet"],
+		secondaryMuscles: [],
+		equipment: ["resistance band"],
+		difficulty: "beginner",
+		description:
+			"Strengthens the tibialis posterior, the main muscle holding up your arch",
+		instructions: [
+			"Sit with your legs out and loop a band around the front of one foot",
+			"Anchor the other end out to the side (around the other foot or a table leg)",
+			"Keeping your heel still, turn the sole of your foot inward and up against the band",
+			"Return slowly",
+			"Do 15-20 reps, then switch feet",
+		],
+		tips: [
+			"Move from the ankle only - don't rotate your whole leg",
+			"Slow, controlled reps work better than heavy resistance",
+		],
+		isCustom: false,
+	},
+	{
+		id: "ex_single_leg_balance",
+		name: "Single-Leg Balance",
+		category: "flexibility",
+		primaryMuscles: ["feet"],
+		secondaryMuscles: ["calves", "glutes"],
+		equipment: [],
+		difficulty: "beginner",
+		description:
+			"Improves ankle stability and foot control - helps with flat feet and ankle sprains",
+		instructions: [
+			"Stand on one foot near a wall or chair",
+			"Keep a slight bend in the knee and the arch of the foot lifted",
+			"Hold for 30 seconds without touching down",
+			"Switch feet",
+		],
+		tips: [
+			"Make it harder by closing your eyes or standing on a cushion",
+			"Think about spreading your weight across the heel, big toe and little toe",
+		],
+		isCustom: false,
+	},
+	{
+		id: "ex_plantar_fascia_stretch",
+		name: "Plantar Fascia Stretch",
+		category: "flexibility",
+		primaryMuscles: ["feet"],
+		secondaryMuscles: [],
+		equipment: [],
+		difficulty: "beginner",
+		description:
+			"Stretches the band under the foot - best done before your first steps in the morning",
+		instructions: [
+			"Sit and cross the affected foot over your other knee",
+			"Hold your toes and pull them back toward your shin",
+			"You should feel a stretch along the bottom of the foot",
+			"Hold for 10-30 seconds; repeat 3-5 times",
+		],
+		tips: [
+			"Doing this before getting out of bed eases the sharp first-step pain of plantar fasciitis",
+			"Run your thumb along the arch while stretching to check it feels tight",
+		],
+		isCustom: false,
+	},
+	{
+		id: "ex_foot_roll",
+		name: "Foot Rolling",
+		category: "flexibility",
+		primaryMuscles: ["feet"],
+		secondaryMuscles: [],
+		equipment: ["ball or frozen water bottle"],
+		difficulty: "beginner",
+		description: "Massages the sole of the foot to ease tightness and soreness",
+		instructions: [
+			"Sit or stand and place a ball (or frozen water bottle) under your foot",
+			"Roll it slowly from your heel to the ball of your foot",
+			"Pause on tender spots for a few seconds",
+			"Continue for 1-2 minutes per foot",
+		],
+		tips: [
+			"A frozen water bottle also cools down a sore, inflamed foot",
+			"Use moderate pressure - it should feel like a firm massage, not pain",
+		],
+		isCustom: false,
+	},
 ];
 
 // Add targetMuscles computed property to all exercises
@@ -1589,4 +2125,6 @@ export const MUSCLE_GROUP_INFO: Record<
 	lats: { name: "Lats", color: "#FB7185" },
 	lower_back: { name: "Lower Back", color: "#FBBF24" },
 	legs: { name: "Legs", color: "#34D399" },
+	shins: { name: "Shins", color: "#0EA5E9" },
+	feet: { name: "Feet & Ankles", color: "#84CC16" },
 };

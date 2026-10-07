@@ -203,7 +203,12 @@ export const normalizeFrequency = (
 			};
 		case "times_per_day":
 			return {
-				schedule: { kind: "daily" },
+				// toLegacyFrequency writes the weekday restriction into `days`
+				// for multi-time habits; dropping it here turned a Mon-Fri,
+				// 3x/day habit into an every-day one on a legacy-column read.
+				schedule: legacy.days?.length
+					? { kind: "weekdays", days: legacy.days }
+					: { kind: "daily" },
 				perDay: normalizePerDay(
 					{
 						target: value,

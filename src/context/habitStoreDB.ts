@@ -276,17 +276,6 @@ interface HabitStoreDB {
 
 	// Refresh from DB
 	refreshFromDatabase: () => Promise<void>;
-
-	// Import/Export
-	importData: (data: {
-		habits?: Habit[];
-		logs?: HabitLog[];
-		profile?: UserProfile | null;
-		settings?: AppSettings;
-	}) => Promise<void>;
-
-	// Clear
-	clearAllData: () => Promise<void>;
 }
 
 const defaultSettings: AppSettings = {
@@ -687,7 +676,10 @@ export const useHabitStore = create<HabitStoreDB>()((set, get) => ({
 		// Multi-target habits count up one tap at a time (1/5, 2/5 …). Tapping
 		// again once full clears the day, which keeps "tap to undo" working with
 		// a single gesture - long-press is already the archive/delete menu.
-		if (done >= target) {
+		// An unscheduled day (target 0) behaves like a one-tap habit: log it as
+		// a bonus, tap again to clear. Without this, 0 >= 0 meant "already
+		// full" and tapping such a day could only ever delete.
+		if (done >= Math.max(1, target)) {
 			await get().removeLogForDate(habitId, date);
 		} else {
 			await get().logHabitForDate(habitId, date);
@@ -959,84 +951,4 @@ export const useHabitStore = create<HabitStoreDB>()((set, get) => ({
 		);
 	},
 
-	// Import data from file - inserts into database
-	importData: async (data: {
-		habits?: Habit[];
-		logs?: HabitLog[];
-		profile?: UserProfile | null;
-		settings?: AppSettings;
-	}) => {
-		const userId = get().userId;
-		if (!userId) {
-			console.error("No user ID - cannot import data");
-			return;
-		}
-
-		try {
-			// Import habits
-			if (data.habits && data.habits.length > 0) {
-				for (const habit of data.habits) {
-					const dbHabit = habitToDbHabit(habit, userId);
-					await (supabase.from("user_habits") as any).upsert(dbHabit, {
-						onConflict: "id",
-					});
-				}
-			}
-
-			// Import logs
-			if (data.logs && data.logs.length > 0) {
-				for (const log of data.logs) {
-					const dbLog = logToDbLog(log, userId);
-					await (supabase.from("habit_logs") as any).upsert(dbLog, {
-						onConflict: "id",
-					});
-				}
-			}
-
-			// Update local state
-			if (data.profile !== undefined) {
-				set({ profile: data.profile });
-			}
-			if (data.settings) {
-				set({ settings: data.settings });
-			}
-
-			// Refresh from database to get all imported data
-			await get().refreshFromDatabase();
-
-			console.log("✅ Data imported to database successfully");
-		} catch (error: any) {
-			console.error("❌ Failed to import data:", error);
-			set({ error: error.message });
-		}
-	},
-
-	clearAllData: async () => {
-		const { userId } = get();
-		if (!userId) {
-			console.error("No user ID - cannot clear data");
-			return;
-		}
-		console.log("🗑️ Clearing habit data for user:", userId);
-
-		try {
-			// Delete from database with user_id filter
-			await Promise.all([
-				supabase.from("habit_logs").delete().eq("user_id", userId),
-				supabase.from("user_habits").delete().eq("user_id", userId),
-			]);
-
-			// Clear local state
-			set({
-				habits: [],
-				logs: [],
-				profile: null,
-				settings: defaultSettings,
-				stats: new Map(),
-			});
-			console.log("✅ Habit data cleared");
-		} catch (error: any) {
-			console.error("❌ Failed to clear habit data:", error);
-		}
-	},
 }));

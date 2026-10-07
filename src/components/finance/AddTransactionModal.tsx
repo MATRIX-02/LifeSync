@@ -12,16 +12,14 @@ import { Alert } from "@/src/components/CustomAlert";
 import { SubscriptionCheckResult } from "@/src/components/PremiumFeatureGate";
 import { useFinanceStore } from "@/src/context/financeStoreDB";
 import { Theme } from "@/src/context/themeContext";
+import { useFinanceCategories } from "@/src/hooks/useFinanceCategories";
 import {
-	EXPENSE_CATEGORIES,
-	ExpenseCategory,
-	INCOME_CATEGORIES,
-	IncomeCategory,
 	PaymentMethod,
 	Transaction,
 	TransactionType,
 } from "@/src/types/finance";
 import Ionicons from "@expo/vector-icons/Ionicons";
+import DateTimePicker from "@react-native-community/datetimepicker";
 import React, { useEffect, useState } from "react";
 import {
 	Modal,
@@ -33,6 +31,20 @@ import {
 	TouchableOpacity,
 	View,
 } from "react-native";
+
+const pad = (n: number) => String(n).padStart(2, "0");
+// Local date/time strings. toISOString() would use UTC and could save
+// late-night entries under the wrong day.
+const toDateKey = (d: Date) =>
+	`${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+const toTimeKey = (d: Date) =>
+	`${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+const fromTransaction = (t?: Transaction | null) => {
+	if (!t?.date) return new Date();
+	const [y, m, d] = t.date.split("-").map(Number);
+	const [hh = 0, mm = 0, ss = 0] = (t.time || "").split(":").map(Number);
+	return new Date(y, m - 1, d, hh || 0, mm || 0, ss || 0);
+};
 
 const paymentMethods: PaymentMethod[] = [
 	"cash",
@@ -77,9 +89,10 @@ export default function AddTransactionModal({
 		useState<TransactionType>(initialType);
 	const [amount, setAmount] = useState("");
 	const [description, setDescription] = useState("");
-	const [selectedCategory, setSelectedCategory] = useState<
-		ExpenseCategory | IncomeCategory
-	>("food");
+	const [when, setWhen] = useState(() => new Date());
+	const [pickerMode, setPickerMode] = useState<"date" | "time" | null>(null);
+	const [selectedCategory, setSelectedCategory] = useState<string>("food");
+	const categories = useFinanceCategories();
 	const [selectedAccount, setSelectedAccount] = useState<string>("");
 	// Destination account, transfers only.
 	const [selectedToAccount, setSelectedToAccount] = useState<string>("");
@@ -92,8 +105,15 @@ export default function AddTransactionModal({
 		setTransactionType(transaction?.type ?? initialType);
 		setAmount(transaction ? String(transaction.amount) : "");
 		setDescription(transaction?.description ?? "");
+		setWhen(fromTransaction(transaction));
+		setPickerMode(null);
 		setSelectedCategory(
-			transaction?.category ?? (initialType === "income" ? "salary" : "food"),
+			transaction?.category ??
+				// First visible option, so a hidden built-in is never preselected.
+				((initialType === "income"
+					? categories.incomeOptions
+					: categories.expenseOptions)[0]?.key ??
+					"other"),
 		);
 		setSelectedToAccount(transaction?.toAccountId ?? "");
 		setPaymentMethod(transaction?.paymentMethod ?? "upi");
@@ -189,6 +209,8 @@ export default function AddTransactionModal({
 					amount: parseFloat(amount),
 					category: selectedCategory,
 					description: description.trim(),
+					date: toDateKey(when),
+					time: toTimeKey(when),
 					accountId: selectedAccount,
 					toAccountId:
 						transactionType === "transfer" ? selectedToAccount : undefined,
@@ -200,8 +222,8 @@ export default function AddTransactionModal({
 					amount: parseFloat(amount),
 					category: selectedCategory,
 					description: description.trim(),
-					date: new Date().toISOString().split("T")[0],
-					time: new Date().toTimeString().split(" ")[0],
+					date: toDateKey(when),
+					time: toTimeKey(when),
 					accountId: selectedAccount,
 					toAccountId:
 						transactionType === "transfer" ? selectedToAccount : undefined,
@@ -261,8 +283,8 @@ export default function AddTransactionModal({
 										]}
 										onPress={() => {
 											setTransactionType(type);
-											if (type === "income") setSelectedCategory("salary");
-											else if (type === "expense") setSelectedCategory("food");
+											if (type === "income") setSelectedCategory(categories.incomeOptions[0]?.key ?? "other");
+											else if (type === "expense") setSelectedCategory(categories.expenseOptions[0]?.key ?? "other");
 											else {
 												// The category picker is hidden for transfers, so
 												// pin a neutral one instead of keeping whatever the
@@ -314,16 +336,94 @@ export default function AddTransactionModal({
 							/>
 						</View>
 
+						<View style={styles.formGroup}>
+							<Text style={styles.formLabel}>Date & Time</Text>
+							<View style={styles.whenRow}>
+								<TouchableOpacity
+									style={[styles.formInput, styles.whenButton]}
+									onPress={() => setPickerMode("date")}
+								>
+									<Ionicons name="calendar" size={18} color={theme.primary} />
+									<Text style={styles.whenText}>
+										{when.toLocaleDateString(undefined, {
+											day: "numeric",
+											month: "short",
+											year: "numeric",
+										})}
+									</Text>
+								</TouchableOpacity>
+								<TouchableOpacity
+									style={[styles.formInput, styles.whenButton]}
+									onPress={() => setPickerMode("time")}
+								>
+									<Ionicons name="time" size={18} color={theme.primary} />
+									<Text style={styles.whenText}>
+										{when.toLocaleTimeString(undefined, {
+											hour: "numeric",
+											minute: "2-digit",
+										})}
+									</Text>
+								</TouchableOpacity>
+							</View>
+							{pickerMode && (
+								<DateTimePicker
+									value={when}
+									mode={pickerMode}
+									maximumDate={pickerMode === "date" ? new Date() : undefined}
+									display={Platform.OS === "ios" ? "spinner" : "default"}
+									onChange={(event, picked) => {
+										if (Platform.OS !== "ios") setPickerMode(null);
+										if (event.type === "dismissed" || !picked) return;
+										// Keep the other half: a date pick keeps the time and
+										// vice versa.
+										const next = new Date(when);
+										if (pickerMode === "date")
+											next.setFullYear(
+												picked.getFullYear(),
+												picked.getMonth(),
+												picked.getDate(),
+											);
+										else next.setHours(picked.getHours(), picked.getMinutes(), 0);
+										setWhen(next);
+									}}
+								/>
+							)}
+							{Platform.OS === "ios" && pickerMode && (
+								<TouchableOpacity onPress={() => setPickerMode(null)}>
+									<Text style={styles.whenDone}>Done</Text>
+								</TouchableOpacity>
+							)}
+						</View>
+
 						{transactionType !== "transfer" && (
 							<View style={styles.formGroup}>
 								<Text style={styles.formLabel}>Category</Text>
 								<ScrollView horizontal showsHorizontalScrollIndicator={false}>
 									<View style={styles.categorySelector}>
-										{Object.entries(
-											transactionType === "income"
-												? INCOME_CATEGORIES
-												: EXPENSE_CATEGORIES,
-										).map(([key, cat]) => (
+										{(() => {
+											const opts =
+												transactionType === "income"
+													? categories.incomeOptions
+													: categories.expenseOptions;
+											// Editing a transaction whose category has since been hidden:
+											// keep it selectable so saving doesn't silently change it.
+											const extra =
+												transaction &&
+												transaction.type === transactionType &&
+												!opts.some((o) => o.key === transaction.category)
+													? [
+															{
+																key: transaction.category,
+																...categories.getInfo(
+																	transactionType,
+																	transaction.category,
+																),
+															},
+														]
+													: [];
+											return [...extra, ...opts];
+										})()
+										.map(({ key, ...cat }) => (
 											<TouchableOpacity
 												key={`${transactionType}-${key}`}
 												style={[
@@ -333,7 +433,7 @@ export default function AddTransactionModal({
 														borderColor: cat.color,
 													},
 												]}
-												onPress={() => setSelectedCategory(key as any)}
+												onPress={() => setSelectedCategory(key)}
 											>
 												<Ionicons
 													name={cat.icon as any}
@@ -576,6 +676,26 @@ const createStyles = (theme: Theme) =>
 		},
 		transactionTypeTextActive: {
 			color: "#FFF",
+		},
+		whenRow: {
+			flexDirection: "row",
+			gap: 10,
+		},
+		whenButton: {
+			flex: 1,
+			flexDirection: "row",
+			alignItems: "center",
+			gap: 8,
+		},
+		whenText: {
+			fontSize: 15,
+			color: theme.text,
+		},
+		whenDone: {
+			color: theme.primary,
+			fontWeight: "600",
+			textAlign: "right",
+			marginTop: 6,
 		},
 		formGroup: {
 			marginBottom: 20,

@@ -1,15 +1,17 @@
-// Exercise reference sheet - form images, instructions and tips
+// Exercise reference sheet - form video/images, instructions and tips
 
 import { Theme } from "@/src/context/themeContext";
 import { CustomExercise } from "@/src/context/workoutStoreDB/types";
 import { MUSCLE_GROUP_INFO } from "@/src/data/exerciseDatabase";
 import { getExerciseImages } from "@/src/data/exerciseImages";
+import { getExerciseVideo } from "@/src/data/exerciseVideos";
 import { Exercise, MuscleGroup } from "@/src/types/workout";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import React, { useEffect, useRef, useState } from "react";
 import {
 	ActivityIndicator,
 	Image,
+	Linking,
 	Modal,
 	ScrollView,
 	StyleSheet,
@@ -17,6 +19,17 @@ import {
 	TouchableOpacity,
 	View,
 } from "react-native";
+
+// The player sits on react-native-webview, a native module. On a dev build
+// made before it was added, importing it throws at module load and takes the
+// whole Workout route down with it ("No route named workout"). Load it
+// lazily and fall back to the "Watch on YouTube" button instead.
+let YoutubePlayer: React.ComponentType<any> | null = null;
+try {
+	YoutubePlayer = require("react-native-youtube-iframe").default;
+} catch (e) {
+	console.warn("YouTube player unavailable (rebuild the dev client):", e);
+}
 
 // User-created exercises come from the store with looser, partly optional
 // fields, so the sheet normalizes rather than requiring a full Exercise.
@@ -49,23 +62,32 @@ export default function ExerciseDetailSheet<T extends DisplayExercise>({
 	// Custom exercises and unmatched entries legitimately have no imagery.
 	const images = exercise ? getExerciseImages(exercise.id) : [];
 	const loadedRef = useRef<Set<string>>(new Set());
+	const videoId = exercise ? getExerciseVideo(exercise.id) : undefined;
+	// The video replaces the photos; photos are only the fallback when there's
+	// no video, the embed fails, or the player isn't in this build.
+	const [videoFailed, setVideoFailed] = useState(false);
+	const [videoReady, setVideoReady] = useState(false);
+	const [mediaWidth, setMediaWidth] = useState(0);
+	const hasVideo = !!videoId && !videoFailed && !!YoutubePlayer;
 
 	useEffect(() => {
 		setFrame(0);
 		setIsPlaying(true);
 		setImageFailed(false);
 		loadedRef.current = new Set();
+		setVideoFailed(false);
+		setVideoReady(false);
 	}, [exercise?.id]);
 
 	// Alternating the start/end frames reads as motion without shipping video.
 	useEffect(() => {
-		if (!isPlaying || images.length < 2) return;
+		if (!isPlaying || images.length < 2 || hasVideo) return;
 		const id = setInterval(
 			() => setFrame((f) => (f + 1) % images.length),
 			FRAME_INTERVAL_MS,
 		);
 		return () => clearInterval(id);
-	}, [isPlaying, images.length]);
+	}, [isPlaying, images.length, hasVideo]);
 
 	useEffect(() => {
 		if (images.length === 0) return;
@@ -105,7 +127,29 @@ export default function ExerciseDetailSheet<T extends DisplayExercise>({
 						contentContainerStyle={styles.scrollContent}
 						showsVerticalScrollIndicator={false}
 					>
-						{hasImages ? (
+						{hasVideo ? (
+							<View
+								style={styles.videoFrame}
+								onLayout={(e) => setMediaWidth(e.nativeEvent.layout.width)}
+							>
+								{mediaWidth > 0 && YoutubePlayer && (
+									<YoutubePlayer
+										height={Math.round((mediaWidth * 9) / 16)}
+										width={mediaWidth}
+										videoId={videoId}
+										play={false}
+										onReady={() => setVideoReady(true)}
+										onError={() => setVideoFailed(true)}
+										initialPlayerParams={{ modestbranding: true, rel: false }}
+									/>
+								)}
+								{!videoReady && (
+									<View style={styles.imageLoader}>
+										<ActivityIndicator color={theme.primary} />
+									</View>
+								)}
+							</View>
+						) : hasImages ? (
 							<TouchableOpacity
 								activeOpacity={0.9}
 								onPress={() => setIsPlaying((p) => !p)}
@@ -229,9 +273,27 @@ export default function ExerciseDetailSheet<T extends DisplayExercise>({
 							</Section>
 						)}
 
-						{hasImages && (
+						{videoId && (
+							<TouchableOpacity
+								style={styles.youtubeLink}
+								onPress={() =>
+									Linking.openURL(`https://www.youtube.com/watch?v=${videoId}`)
+								}
+							>
+								<Ionicons name="logo-youtube" size={16} color="#FF0000" />
+								<Text style={styles.youtubeLinkText}>Watch on YouTube</Text>
+							</TouchableOpacity>
+						)}
+
+						{(hasVideo || hasImages) && (
 							<Text style={styles.attribution}>
-								Images: free-exercise-db (public domain)
+								{[
+									hasVideo
+										? "Video: YouTube (belongs to its creator)"
+										: "Images: free-exercise-db (public domain)",
+								]
+									.filter(Boolean)
+									.join(" · ")}
 							</Text>
 						)}
 					</ScrollView>
@@ -305,6 +367,28 @@ const createStyles = (theme: Theme) =>
 		},
 		scrollContent: {
 			padding: 16,
+		},
+		videoFrame: {
+			width: "100%",
+			aspectRatio: 16 / 9,
+			borderRadius: 14,
+			overflow: "hidden",
+			backgroundColor: "#000",
+		},
+		youtubeLink: {
+			flexDirection: "row",
+			alignItems: "center",
+			justifyContent: "center",
+			gap: 6,
+			marginTop: 16,
+			paddingVertical: 10,
+			borderRadius: 12,
+			backgroundColor: theme.surface,
+		},
+		youtubeLinkText: {
+			fontSize: 14,
+			fontWeight: "600",
+			color: theme.text,
 		},
 		imageFrame: {
 			width: "100%",

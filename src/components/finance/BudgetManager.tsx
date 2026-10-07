@@ -5,12 +5,20 @@ import { useFinanceStore } from "@/src/context/financeStoreDB";
 import {
 	BillReminder as DBBillReminder,
 	Debt as DBDebt,
-	ExpenseCategory as DBExpenseCategory,
 	SavingsGoal as DBSavingsGoal,
 } from "@/src/context/financeStoreDB/types";
 import { Theme } from "@/src/context/themeContext";
+import { useFinanceCategories } from "@/src/hooks/useFinanceCategories";
 import { NotificationService } from "@/src/services/notificationService";
-import { COLORS, EXPENSE_CATEGORIES } from "@/src/types/finance";
+import { COLORS } from "@/src/types/finance";
+import {
+	getGoalPlan,
+	GoalPace,
+	GoalPlan,
+	monthsUntil,
+	PACE_LABEL,
+	WEEKS_PER_MONTH,
+} from "@/src/utils/savingsGoalPlan";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import React, { useMemo, useState } from "react";
@@ -51,6 +59,7 @@ export default function BudgetManager({
 		debts,
 		accounts,
 		addBudget,
+		updateBudget,
 		deleteBudget,
 		addSavingsGoal,
 		updateSavingsGoal,
@@ -70,6 +79,7 @@ export default function BudgetManager({
 	} = useFinanceStore();
 
 	const styles = createStyles(theme);
+	const financeCategories = useFinanceCategories();
 
 	const [activeTab, setActiveTab] = useState<BudgetTab>("budgets");
 	const [showAddBudget, setShowAddBudget] = useState(false);
@@ -86,6 +96,9 @@ export default function BudgetManager({
 	const [showDebtDetails, setShowDebtDetails] = useState<DBDebt | null>(null);
 	const [showSavingsDetails, setShowSavingsDetails] =
 		useState<DBSavingsGoal | null>(null);
+	// Add modals double as edit modals when these hold an id.
+	const [editingBudgetId, setEditingBudgetId] = useState<string | null>(null);
+	const [editingGoalId, setEditingGoalId] = useState<string | null>(null);
 
 	// Account selection
 	const [selectedAccountId, setSelectedAccountId] = useState<string>("");
@@ -100,23 +113,33 @@ export default function BudgetManager({
 
 	// Form states
 	const [budgetForm, setBudgetForm] = useState({
-		category: "" as DBExpenseCategory | "",
+		category: "",
 		amount: "",
 	});
-	const [savingsForm, setSavingsForm] = useState({
+	const emptySavingsForm = {
 		name: "",
 		targetAmount: "",
 		deadline: "",
 		icon: "wallet" as string,
-	});
-	const [billForm, setBillForm] = useState({
+		category: "",
+		priority: "medium" as DBSavingsGoal["priority"],
+	};
+	const [savingsForm, setSavingsForm] = useState(emptySavingsForm);
+	// "bills" unless the user has hidden it.
+	const defaultBillCategory = () =>
+		financeCategories.expenseOptions.some((c) => c.key === "bills")
+			? "bills"
+			: (financeCategories.expenseOptions[0]?.key ?? "other");
+	const emptyBillForm = () => ({
 		name: "",
 		amount: "",
 		dueDate: "",
-		isRecurring: false,
+		frequency: "once" as DBBillReminder["frequency"],
 		isAutoDeduct: false,
 		notes: "",
+		category: defaultBillCategory(),
 	});
+	const [billForm, setBillForm] = useState(emptyBillForm);
 	const [debtForm, setDebtForm] = useState({
 		name: "",
 		totalAmount: "",
@@ -244,14 +267,55 @@ export default function BudgetManager({
 		});
 	};
 
+	const closeBudgetModal = () => {
+		setBudgetForm({ category: "", amount: "" });
+		setEditingBudgetId(null);
+		setShowAddBudget(false);
+	};
+
+	const openEditBudget = (budget: { id: string; category: string; amount: number }) => {
+		setBudgetForm({ category: budget.category, amount: String(budget.amount) });
+		setEditingBudgetId(budget.id);
+		setShowAddBudget(true);
+	};
+
+	const paceColor = (pace: GoalPace) =>
+		pace === "behind"
+			? theme.error
+			: pace === "ahead"
+				? theme.success
+				: theme.primary;
+
+	const shortDate = (d: Date) =>
+		d.toLocaleDateString(undefined, { month: "short", year: "numeric" });
+
+	const planHeadline = (plan: GoalPlan) => {
+		if (plan.overdue)
+			return `Deadline passed · ${currency}${formatAmount(plan.remaining)} to go`;
+		if (plan.monthlyNeeded !== null)
+			return `Save ${currency}${formatAmount(Math.ceil(plan.monthlyNeeded))}/month to hit your deadline`;
+		if (plan.projectedDate)
+			return `At your pace: done by ${shortDate(plan.projectedDate)}`;
+		return "Add a deadline to get a monthly plan";
+	};
+
 	const handleAddBudget = () => {
-		if (!budgetForm.category || !budgetForm.amount) {
-			Alert.alert("Error", "Please fill all fields");
+		const amount = parseFloat(budgetForm.amount);
+		if (!budgetForm.category || !(amount > 0)) {
+			Alert.alert("Error", "Please pick a category and enter a valid amount");
+			return;
+		}
+		if (editingBudgetId) {
+			updateBudget(editingBudgetId, {
+				category: budgetForm.category,
+				amount,
+			});
+			closeBudgetModal();
 			return;
 		}
 		addBudget({
 			category: budgetForm.category,
-			amount: parseFloat(budgetForm.amount),
+			amount,
 			period: "monthly",
 			startDate: new Date().toISOString().split("T")[0],
 			endDate: new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0)
@@ -260,30 +324,68 @@ export default function BudgetManager({
 			alertThreshold: 80,
 			isActive: true,
 		});
-		setBudgetForm({ category: "", amount: "" });
-		setShowAddBudget(false);
+		closeBudgetModal();
+	};
+
+	const closeSavingsModal = () => {
+		setSavingsForm(emptySavingsForm);
+		setEditingGoalId(null);
+		setShowAddSavings(false);
+	};
+
+	const openEditGoal = (goal: DBSavingsGoal) => {
+		setSavingsForm({
+			name: goal.name,
+			targetAmount: String(goal.targetAmount),
+			deadline: goal.deadline ? goal.deadline.split("T")[0] : "",
+			icon: goal.icon,
+			category: goal.category || "",
+			priority: goal.priority || "medium",
+		});
+		if (goal.deadline) setSavingsDate(new Date(goal.deadline));
+		setEditingGoalId(goal.id);
+		setShowAddSavings(true);
 	};
 
 	const handleAddSavings = () => {
-		if (!savingsForm.name || !savingsForm.targetAmount) {
-			Alert.alert("Error", "Please fill required fields");
+		const targetAmount = parseFloat(savingsForm.targetAmount);
+		if (!savingsForm.name.trim() || !(targetAmount > 0)) {
+			Alert.alert("Error", "Please enter a name and a valid target amount");
 			return;
 		}
+		// A tagged goal takes its category's look.
+		const cat = savingsForm.category
+			? financeCategories.getInfo("expense", savingsForm.category)
+			: null;
+
+		if (editingGoalId) {
+			const goal = savingsGoals.find((g) => g.id === editingGoalId);
+			if (!goal) return closeSavingsModal();
+			const changedCategory = savingsForm.category !== (goal.category || "");
+			updateSavingsGoal(editingGoalId, {
+				name: savingsForm.name.trim(),
+				targetAmount,
+				// null clears the column; undefined would leave the old deadline.
+				deadline: (savingsForm.deadline || null) as any,
+				category: savingsForm.category || null,
+				priority: savingsForm.priority,
+				isCompleted: (goal.currentAmount || 0) >= targetAmount,
+				...(changedCategory && cat && { icon: cat.icon, color: cat.color }),
+			});
+			closeSavingsModal();
+			return;
+		}
+
 		addSavingsGoal({
-			name: savingsForm.name,
-			targetAmount: parseFloat(savingsForm.targetAmount),
+			name: savingsForm.name.trim(),
+			targetAmount,
 			deadline: savingsForm.deadline || undefined,
-			icon: savingsForm.icon,
-			color: COLORS[Math.floor(Math.random() * COLORS.length)],
-			priority: "medium",
+			icon: cat?.icon ?? savingsForm.icon,
+			color: cat?.color ?? COLORS[Math.floor(Math.random() * COLORS.length)],
+			priority: savingsForm.priority,
+			...(savingsForm.category && { category: savingsForm.category }),
 		});
-		setSavingsForm({
-			name: "",
-			targetAmount: "",
-			deadline: "",
-			icon: "wallet",
-		});
-		setShowAddSavings(false);
+		closeSavingsModal();
 	};
 
 	const handleAddBill = async () => {
@@ -310,20 +412,13 @@ export default function BudgetManager({
 			name: billForm.name,
 			amount: parseFloat(billForm.amount),
 			dueDate: billForm.dueDate,
-			category: "bills",
-			frequency: billForm.isRecurring ? "monthly" : "once",
+			category: billForm.category || "bills",
+			frequency: billForm.frequency,
 			reminderDays: 3,
 			isAutoDeduct: false,
 			notes: billForm.notes || undefined,
 		});
-		setBillForm({
-			name: "",
-			amount: "",
-			dueDate: "",
-			isRecurring: false,
-			isAutoDeduct: false,
-			notes: "",
-		});
+		setBillForm(emptyBillForm());
 		setSelectedTemplate(null);
 		setShowAddBill(false);
 	};
@@ -354,18 +449,12 @@ export default function BudgetManager({
 			name: billForm.name,
 			amount: parseFloat(billForm.amount),
 			dueDate: billForm.dueDate,
-			frequency: billForm.isRecurring ? "monthly" : "once",
+			category: billForm.category || "bills",
+			frequency: billForm.frequency,
 			isAutoDeduct: billForm.isAutoDeduct || false,
 			notes: billForm.notes || undefined,
 		});
-		setBillForm({
-			name: "",
-			amount: "",
-			dueDate: "",
-			isRecurring: false,
-			isAutoDeduct: false,
-			notes: "",
-		});
+		setBillForm(emptyBillForm());
 		setSelectedTemplate(null);
 		setShowEditBill(null);
 	};
@@ -444,6 +533,87 @@ export default function BudgetManager({
 		setSelectedAccountId("");
 		setShowPayDebt(null);
 	};
+
+	// Horizontal category chips, shared by the budget, savings and bill modals.
+	// An already-saved category stays visible even if it has since been hidden.
+	const renderCategoryPicker = (
+		selected: string,
+		onSelect: (key: string) => void,
+		options: { key: string; name: string; icon: string; color: string }[],
+		allowNone = false,
+	) => {
+		const list =
+			selected && !options.some((o) => o.key === selected)
+				? [
+						{ key: selected, ...financeCategories.getInfo("expense", selected) },
+						...options,
+					]
+				: options;
+		const chip = (key: string, name: string, icon: string, color: string) => (
+			<TouchableOpacity
+				key={key || "__none"}
+				style={[
+					styles.categoryOption,
+					selected === key && {
+						backgroundColor: color + "20",
+						borderColor: color,
+					},
+				]}
+				onPress={() => onSelect(key)}
+			>
+				<Ionicons
+					name={icon as any}
+					size={18}
+					color={selected === key ? color : theme.textMuted}
+				/>
+				<Text
+					style={[styles.categoryOptionText, selected === key && { color }]}
+				>
+					{name}
+				</Text>
+			</TouchableOpacity>
+		);
+		return (
+			<ScrollView
+				horizontal
+				showsHorizontalScrollIndicator={false}
+				style={styles.categoryScroll}
+			>
+				{allowNone && chip("", "None", "remove-circle-outline", theme.primary)}
+				{list.map((c) => chip(c.key, c.name, c.icon, c.color))}
+			</ScrollView>
+		);
+	};
+
+	const renderBillFrequencyPicker = () => (
+		<View style={styles.priorityRow}>
+			{BILL_FREQUENCIES.map((f) => {
+				const active = billForm.frequency === f.value;
+				return (
+					<TouchableOpacity
+						key={f.value}
+						style={[
+							styles.priorityChip,
+							active && {
+								backgroundColor: theme.primary + "20",
+								borderColor: theme.primary,
+							},
+						]}
+						onPress={() => setBillForm({ ...billForm, frequency: f.value })}
+					>
+						<Text
+							style={[
+								styles.categoryOptionText,
+								active && { color: theme.primary },
+							]}
+						>
+							{f.label}
+						</Text>
+					</TouchableOpacity>
+				);
+			})}
+		</View>
+	);
 
 	// Helper to render account selector
 	const renderAccountSelector = () => {
@@ -594,7 +764,11 @@ export default function BudgetManager({
 				</View>
 				<TouchableOpacity
 					style={styles.addSmallButton}
-					onPress={() => setShowAddBudget(true)}
+					onPress={() => {
+						setEditingBudgetId(null);
+						setBudgetForm({ category: "", amount: "" });
+						setShowAddBudget(true);
+					}}
 				>
 					<Ionicons name="add" size={18} color="#FFF" />
 					<Text style={styles.addSmallText}>Add Budget</Text>
@@ -615,8 +789,7 @@ export default function BudgetManager({
 				</View>
 			) : (
 				budgetData.map((budget) => {
-					const catInfo =
-						EXPENSE_CATEGORIES[budget.category as DBExpenseCategory];
+					const catInfo = financeCategories.getInfo("expense", budget.category);
 					return (
 						<View key={budget.id} style={styles.budgetItem}>
 							<View style={styles.budgetHeader}>
@@ -642,6 +815,17 @@ export default function BudgetManager({
 										</Text>
 									</View>
 								</View>
+								<View style={styles.billActionButtons}>
+								<TouchableOpacity
+									style={styles.billActionBtn}
+									onPress={() => openEditBudget(budget)}
+								>
+									<Ionicons
+										name="pencil-outline"
+										size={18}
+										color={theme.textMuted}
+									/>
+								</TouchableOpacity>
 								<TouchableOpacity
 									onPress={() => {
 										Alert.alert("Delete Budget", "Delete this budget?", [
@@ -660,6 +844,7 @@ export default function BudgetManager({
 										color={theme.textMuted}
 									/>
 								</TouchableOpacity>
+								</View>
 							</View>
 							<View style={styles.budgetProgressContainer}>
 								<View style={styles.budgetProgressBg}>
@@ -742,7 +927,11 @@ export default function BudgetManager({
 				<Text style={styles.sectionTitle}>Savings Goals</Text>
 				<TouchableOpacity
 					style={styles.addSmallButton}
-					onPress={() => setShowAddSavings(true)}
+					onPress={() => {
+						setEditingGoalId(null);
+						setSavingsForm(emptySavingsForm);
+						setShowAddSavings(true);
+					}}
 				>
 					<Ionicons name="add" size={18} color="#FFF" />
 					<Text style={styles.addSmallText}>Add Goal</Text>
@@ -758,11 +947,12 @@ export default function BudgetManager({
 					</Text>
 				</View>
 			) : (
-				savingsGoals.map((goal) => {
+				sortGoals(savingsGoals).map((goal) => {
 					const percentage =
 						goal.targetAmount > 0
 							? ((goal.currentAmount || 0) / goal.targetAmount) * 100
 							: 0;
+					const plan = getGoalPlan(goal);
 					return (
 						<TouchableOpacity
 							key={goal.id}
@@ -837,6 +1027,30 @@ export default function BudgetManager({
 									{percentage.toFixed(0)}%
 								</Text>
 							</View>
+							{!goal.isCompleted && (
+								<View style={styles.goalPlanRow}>
+									<Text style={styles.goalPlanText} numberOfLines={1}>
+										{planHeadline(plan)}
+									</Text>
+									{plan.pace && (
+										<View
+											style={[
+												styles.goalPaceBadge,
+												{ backgroundColor: paceColor(plan.pace) + "20" },
+											]}
+										>
+											<Text
+												style={[
+													styles.goalPaceText,
+													{ color: paceColor(plan.pace) },
+												]}
+											>
+												{PACE_LABEL[plan.pace]}
+											</Text>
+										</View>
+									)}
+								</View>
+							)}
 						</TouchableOpacity>
 					);
 				})
@@ -892,7 +1106,11 @@ export default function BudgetManager({
 					<Text style={styles.sectionTitle}>Bill Reminders</Text>
 					<TouchableOpacity
 						style={styles.addSmallButton}
-						onPress={() => setShowAddBill(true)}
+						onPress={() => {
+							setBillForm(emptyBillForm());
+							setSelectedTemplate(null);
+							setShowAddBill(true);
+						}}
 					>
 						<Ionicons name="add" size={18} color="#FFF" />
 						<Text style={styles.addSmallText}>Add Bill</Text>
@@ -938,9 +1156,10 @@ export default function BudgetManager({
 											name: bill.name,
 											amount: bill.amount.toString(),
 											dueDate: bill.dueDate,
-											isRecurring: bill.frequency !== "once",
+											frequency: bill.frequency,
 											isAutoDeduct: bill.isAutoDeduct ?? false,
 											notes: bill.notes || "",
+											category: bill.category || "bills",
 										});
 										setBillDate(new Date(bill.dueDate));
 										setShowEditBill(bill);
@@ -1037,9 +1256,10 @@ export default function BudgetManager({
 														name: bill.name,
 														amount: bill.amount.toString(),
 														dueDate: bill.dueDate,
-														isRecurring: bill.frequency !== "once",
+														frequency: bill.frequency,
 														isAutoDeduct: bill.isAutoDeduct ?? false,
 														notes: bill.notes || "",
+														category: bill.category || "bills",
 													});
 													setBillDate(new Date(bill.dueDate));
 													setShowEditBill(bill);
@@ -1381,9 +1601,11 @@ export default function BudgetManager({
 		);
 	};
 
-	const categories = Object.entries(EXPENSE_CATEGORIES)
-		.filter(([key]) => !budgets.find((b) => b.category === key))
-		.map(([key, val]) => ({ key, ...val }));
+	// One budget per category; the one being edited keeps its own.
+	const categories = financeCategories.expenseOptions.filter(
+		(c) =>
+			!budgets.find((b) => b.category === c.key && b.id !== editingBudgetId),
+	);
 
 	return (
 		<View style={styles.container}>
@@ -1430,60 +1652,25 @@ export default function BudgetManager({
 				visible={showAddBudget}
 				animationType="slide"
 				transparent
-				onRequestClose={() => setShowAddBudget(false)}
+				onRequestClose={closeBudgetModal}
 			>
 				<View style={styles.modalOverlay}>
 					<View style={styles.modalContent}>
 						<View style={styles.modalHeader}>
-							<Text style={styles.modalTitle}>Set Category Budget</Text>
-							<TouchableOpacity onPress={() => setShowAddBudget(false)}>
+							<Text style={styles.modalTitle}>
+								{editingBudgetId ? "Edit Budget" : "Set Category Budget"}
+							</Text>
+							<TouchableOpacity onPress={closeBudgetModal}>
 								<Ionicons name="close" size={24} color={theme.text} />
 							</TouchableOpacity>
 						</View>
 
 						<Text style={styles.inputLabel}>Category</Text>
-						<ScrollView
-							horizontal
-							showsHorizontalScrollIndicator={false}
-							style={styles.categoryScroll}
-						>
-							{categories.map((cat) => (
-								<TouchableOpacity
-									key={cat.key}
-									style={[
-										styles.categoryOption,
-										budgetForm.category === cat.key && {
-											backgroundColor: cat.color + "20",
-											borderColor: cat.color,
-										},
-									]}
-									onPress={() =>
-										setBudgetForm({
-											...budgetForm,
-											category: cat.key as DBExpenseCategory,
-										})
-									}
-								>
-									<Ionicons
-										name={cat.icon as any}
-										size={18}
-										color={
-											budgetForm.category === cat.key
-												? cat.color
-												: theme.textMuted
-										}
-									/>
-									<Text
-										style={[
-											styles.categoryOptionText,
-											budgetForm.category === cat.key && { color: cat.color },
-										]}
-									>
-										{cat.name}
-									</Text>
-								</TouchableOpacity>
-							))}
-						</ScrollView>
+						{renderCategoryPicker(
+							budgetForm.category,
+							(key) => setBudgetForm({ ...budgetForm, category: key }),
+							categories,
+						)}
 
 						<Text style={styles.inputLabel}>Monthly Limit</Text>
 						<TextInput
@@ -1499,7 +1686,9 @@ export default function BudgetManager({
 							style={styles.submitButton}
 							onPress={handleAddBudget}
 						>
-							<Text style={styles.submitButtonText}>Set Budget</Text>
+							<Text style={styles.submitButtonText}>
+								{editingBudgetId ? "Save Changes" : "Set Budget"}
+							</Text>
 						</TouchableOpacity>
 					</View>
 				</View>
@@ -1510,13 +1699,15 @@ export default function BudgetManager({
 				visible={showAddSavings}
 				animationType="slide"
 				transparent
-				onRequestClose={() => setShowAddSavings(false)}
+				onRequestClose={closeSavingsModal}
 			>
 				<View style={styles.modalOverlay}>
 					<View style={styles.modalContent}>
 						<View style={styles.modalHeader}>
-							<Text style={styles.modalTitle}>New Savings Goal</Text>
-							<TouchableOpacity onPress={() => setShowAddSavings(false)}>
+							<Text style={styles.modalTitle}>
+								{editingGoalId ? "Edit Savings Goal" : "New Savings Goal"}
+							</Text>
+							<TouchableOpacity onPress={closeSavingsModal}>
 								<Ionicons name="close" size={24} color={theme.text} />
 							</TouchableOpacity>
 						</View>
@@ -1569,11 +1760,74 @@ export default function BudgetManager({
 								}}
 							/>
 						)}
+						{savingsForm.deadline !== "" && (
+							<TouchableOpacity
+								onPress={() => setSavingsForm({ ...savingsForm, deadline: "" })}
+							>
+								<Text style={styles.clearLink}>Remove deadline</Text>
+							</TouchableOpacity>
+						)}
+
+						{(() => {
+							// Live preview of the monthly plan while filling the form.
+							const target = parseFloat(savingsForm.targetAmount);
+							if (!(target > 0) || !savingsForm.deadline) return null;
+							const saved = editingGoalId
+								? savingsGoals.find((g) => g.id === editingGoalId)
+										?.currentAmount || 0
+								: 0;
+							const months = monthsUntil(savingsForm.deadline);
+							if (months <= 0) return null;
+							const perMonth = Math.max(0, target - saved) / months;
+							const roundedMonths = Math.max(1, Math.round(months));
+							return (
+								<Text style={styles.goalPlanPreview}>
+									{`≈ ${currency}${formatAmount(Math.ceil(perMonth))}/month (${currency}${formatAmount(Math.ceil(perMonth / WEEKS_PER_MONTH))}/week) for ${roundedMonths} month${roundedMonths === 1 ? "" : "s"}`}
+								</Text>
+							);
+						})()}
+
+						<Text style={styles.inputLabel}>Priority</Text>
+						<View style={styles.priorityRow}>
+							{(["low", "medium", "high"] as const).map((p) => (
+								<TouchableOpacity
+									key={p}
+									style={[
+										styles.priorityChip,
+										savingsForm.priority === p && {
+											backgroundColor: theme.primary + "20",
+											borderColor: theme.primary,
+										},
+									]}
+									onPress={() => setSavingsForm({ ...savingsForm, priority: p })}
+								>
+									<Text
+										style={[
+											styles.categoryOptionText,
+											savingsForm.priority === p && { color: theme.primary },
+										]}
+									>
+										{p[0].toUpperCase() + p.slice(1)}
+									</Text>
+								</TouchableOpacity>
+							))}
+						</View>
+
+						<Text style={styles.inputLabel}>Category (Optional)</Text>
+						{renderCategoryPicker(
+							savingsForm.category,
+							(key) => setSavingsForm({ ...savingsForm, category: key }),
+							financeCategories.expenseOptions,
+							true,
+						)}
+
 						<TouchableOpacity
 							style={styles.submitButton}
 							onPress={handleAddSavings}
 						>
-							<Text style={styles.submitButtonText}>Create Goal</Text>
+							<Text style={styles.submitButtonText}>
+								{editingGoalId ? "Save Changes" : "Create Goal"}
+							</Text>
 						</TouchableOpacity>
 					</View>
 				</View>
@@ -1627,7 +1881,7 @@ export default function BudgetManager({
 												setBillForm({
 													...billForm,
 													name: template.fullName,
-													isRecurring: true,
+													frequency: "monthly",
 												});
 											}}
 										>
@@ -1718,24 +1972,15 @@ export default function BudgetManager({
 								}}
 							/>
 						)}
-						<TouchableOpacity
-							style={styles.checkboxRow}
-							onPress={() =>
-								setBillForm({ ...billForm, isRecurring: !billForm.isRecurring })
-							}
-						>
-							<View
-								style={[
-									styles.checkbox,
-									billForm.isRecurring && styles.checkboxChecked,
-								]}
-							>
-								{billForm.isRecurring && (
-									<Ionicons name="checkmark" size={14} color="#FFF" />
-								)}
-							</View>
-							<Text style={styles.checkboxLabel}>Recurring monthly</Text>
-						</TouchableOpacity>
+						<Text style={styles.inputLabel}>Category</Text>
+						{renderCategoryPicker(
+							billForm.category,
+							(key) => setBillForm({ ...billForm, category: key }),
+							financeCategories.expenseOptions,
+						)}
+
+						<Text style={styles.inputLabel}>Repeats</Text>
+						{renderBillFrequencyPicker()}
 
 						<TouchableOpacity
 							style={styles.submitButton}
@@ -2023,6 +2268,97 @@ export default function BudgetManager({
 									</View>
 								</View>
 
+								{/* Savings plan */}
+								{!showSavingsDetails.isCompleted &&
+									(() => {
+										const plan = getGoalPlan(showSavingsDetails);
+										const rows: [string, string][] = [
+											["Remaining", `${currency}${formatAmount(plan.remaining)}`],
+										];
+										if (plan.daysLeft !== null)
+											rows.push([
+												"Time left",
+												plan.overdue
+													? `Overdue by ${Math.abs(plan.daysLeft)} days`
+													: `${plan.daysLeft} days`,
+											]);
+										if (plan.monthlyNeeded !== null && !plan.overdue) {
+											rows.push([
+												"Save per month",
+												`${currency}${formatAmount(Math.ceil(plan.monthlyNeeded))}`,
+											]);
+											rows.push([
+												"Save per week",
+												`${currency}${formatAmount(Math.ceil(plan.monthlyNeeded / WEEKS_PER_MONTH))}`,
+											]);
+										}
+										if (plan.expectedByNow !== null)
+											rows.push([
+												"Should have by now",
+												`${currency}${formatAmount(Math.round(plan.expectedByNow))}`,
+											]);
+										if (plan.avgMonthly > 0)
+											rows.push([
+												"Your average",
+												`${currency}${formatAmount(Math.round(plan.avgMonthly))}/month`,
+											]);
+										if (plan.projectedDate)
+											rows.push([
+												"Projected finish",
+												shortDate(plan.projectedDate),
+											]);
+										if (plan.thisMonth !== 0)
+											rows.push([
+												"Added this month",
+												`${currency}${formatAmount(plan.thisMonth)}`,
+											]);
+										return (
+											<View style={styles.goalPlanCard}>
+												<View style={styles.goalPlanCardHeader}>
+													<Text style={styles.paymentHistoryTitle}>Plan</Text>
+													{plan.pace && (
+														<View
+															style={[
+																styles.goalPaceBadge,
+																{ backgroundColor: paceColor(plan.pace) + "20" },
+															]}
+														>
+															<Text
+																style={[
+																	styles.goalPaceText,
+																	{ color: paceColor(plan.pace) },
+																]}
+															>
+																{PACE_LABEL[plan.pace]}
+															</Text>
+														</View>
+													)}
+												</View>
+												{rows.map(([label, value]) => (
+													<View key={label} style={styles.paymentHistoryItem}>
+														<Text style={styles.paymentHistoryDate}>{label}</Text>
+														<Text style={styles.goalPlanValue}>{value}</Text>
+													</View>
+												))}
+												{plan.monthlyNeeded === null && (
+													<Text style={styles.goalPlanHint}>
+														{plan.suggestions
+															.map(
+																(sg) =>
+																	`${currency}${formatAmount(Math.ceil(sg.perMonth))}/mo → ${sg.months} months`,
+															)
+															.join("  ·  ")}
+													</Text>
+												)}
+												{plan.pace === "behind" && plan.catchUp !== null && (
+													<Text style={styles.goalPlanHint}>
+														{`Add ${currency}${formatAmount(Math.ceil(plan.catchUp))} to get back on track.`}
+													</Text>
+												)}
+											</View>
+										);
+									})()}
+
 								{/* Contribution History */}
 								{showSavingsDetails.contributions &&
 									showSavingsDetails.contributions.length > 0 && (
@@ -2110,6 +2446,29 @@ export default function BudgetManager({
 										</TouchableOpacity>
 									)}
 								</View>
+
+								<TouchableOpacity
+									style={[
+										styles.savingsActionButton,
+										{ backgroundColor: theme.primary + "10", marginTop: 12 },
+									]}
+									onPress={() => {
+										const goal = showSavingsDetails;
+										setShowSavingsDetails(null);
+										openEditGoal(goal);
+									}}
+								>
+									<Ionicons
+										name="create-outline"
+										size={18}
+										color={theme.primary}
+									/>
+									<Text
+										style={[styles.savingsActionText, { color: theme.primary }]}
+									>
+										Edit Goal
+									</Text>
+								</TouchableOpacity>
 
 								<TouchableOpacity
 									style={styles.deleteDebtButton}
@@ -2406,7 +2765,7 @@ export default function BudgetManager({
 														setBillForm({
 															...billForm,
 															name: template.fullName,
-															isRecurring: true,
+															frequency: "monthly",
 														});
 													}}
 												>
@@ -2503,27 +2862,15 @@ export default function BudgetManager({
 									/>
 								)}
 
-								<TouchableOpacity
-									style={styles.checkboxRow}
-									onPress={() =>
-										setBillForm({
-											...billForm,
-											isRecurring: !billForm.isRecurring,
-										})
-									}
-								>
-									<View
-										style={[
-											styles.checkbox,
-											billForm.isRecurring && styles.checkboxChecked,
-										]}
-									>
-										{billForm.isRecurring && (
-											<Ionicons name="checkmark" size={14} color="#FFF" />
-										)}
-									</View>
-									<Text style={styles.checkboxLabel}>Recurring monthly</Text>
-								</TouchableOpacity>
+								<Text style={styles.inputLabel}>Category</Text>
+								{renderCategoryPicker(
+									billForm.category,
+									(key) => setBillForm({ ...billForm, category: key }),
+									financeCategories.expenseOptions,
+								)}
+
+								<Text style={styles.inputLabel}>Repeats</Text>
+								{renderBillFrequencyPicker()}
 
 								<TouchableOpacity
 									style={styles.submitButton}
@@ -2583,8 +2930,93 @@ export default function BudgetManager({
 	);
 }
 
+// markBillPaid rolls the due date forward by this period.
+const BILL_FREQUENCIES: { value: DBBillReminder["frequency"]; label: string }[] = [
+	{ value: "once", label: "Once" },
+	{ value: "weekly", label: "Weekly" },
+	{ value: "monthly", label: "Monthly" },
+	{ value: "yearly", label: "Yearly" },
+];
+
+const PRIORITY_RANK = { high: 0, medium: 1, low: 2 } as const;
+
+/** Unfinished first, then by priority, then nearest deadline. */
+const sortGoals = (goals: DBSavingsGoal[]) =>
+	[...goals].sort(
+		(a, b) =>
+			Number(a.isCompleted) - Number(b.isCompleted) ||
+			(PRIORITY_RANK[a.priority] ?? 1) - (PRIORITY_RANK[b.priority] ?? 1) ||
+			(a.deadline ? new Date(a.deadline).getTime() : Infinity) -
+				(b.deadline ? new Date(b.deadline).getTime() : Infinity),
+	);
+
 const createStyles = (theme: Theme) =>
 	StyleSheet.create({
+		goalPlanRow: {
+			flexDirection: "row",
+			alignItems: "center",
+			justifyContent: "space-between",
+			marginTop: 10,
+			gap: 8,
+		},
+		goalPlanText: {
+			flex: 1,
+			fontSize: 12,
+			color: theme.textSecondary,
+		},
+		goalPaceBadge: {
+			paddingHorizontal: 8,
+			paddingVertical: 2,
+			borderRadius: 10,
+		},
+		goalPaceText: {
+			fontSize: 11,
+			fontWeight: "700",
+		},
+		goalPlanPreview: {
+			fontSize: 13,
+			color: theme.primary,
+			marginTop: 8,
+			fontWeight: "600",
+		},
+		goalPlanCard: {
+			backgroundColor: theme.surface,
+			borderRadius: 12,
+			padding: 12,
+			marginTop: 12,
+		},
+		goalPlanCardHeader: {
+			flexDirection: "row",
+			alignItems: "center",
+			justifyContent: "space-between",
+		},
+		goalPlanValue: {
+			fontSize: 14,
+			fontWeight: "600",
+			color: theme.text,
+		},
+		goalPlanHint: {
+			fontSize: 12,
+			color: theme.textSecondary,
+			marginTop: 8,
+		},
+		clearLink: {
+			fontSize: 12,
+			color: theme.error,
+			marginTop: 6,
+		},
+		priorityRow: {
+			flexDirection: "row",
+			gap: 8,
+		},
+		priorityChip: {
+			flex: 1,
+			alignItems: "center",
+			paddingVertical: 8,
+			borderRadius: 10,
+			borderWidth: 1,
+			borderColor: theme.border,
+		},
 		container: {
 			flex: 1,
 			backgroundColor: theme.background,

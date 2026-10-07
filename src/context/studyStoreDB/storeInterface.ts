@@ -202,16 +202,4 @@ export interface StudyStore {
 	// ============ IMPORT/EXPORT ============
 	exportStudyData: () => string;
 	importStudyData: (data: string) => Promise<void>;
-	importData: (data: {
-		studyGoals?: StudyGoal[];
-		subjects?: Subject[];
-		studySessions?: StudySession[];
-		flashcardDecks?: FlashcardDeck[];
-		flashcards?: Flashcard[];
-		revisionSchedule?: RevisionSchedule[];
-		mockTests?: MockTest[];
-		dailyPlans?: DailyPlan[];
-		studyNotes?: StudyNote[];
-	}) => Promise<void>;
-	clearAllData: () => Promise<void>;
 }

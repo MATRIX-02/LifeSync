@@ -29,7 +29,9 @@ export type MuscleGroup =
 	| "traps"
 	| "lats"
 	| "lower_back"
-	| "legs";
+	| "legs"
+	| "shins"
+	| "feet";
 
 export type ExerciseCategory =
 	| "strength"
