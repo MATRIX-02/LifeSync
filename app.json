@@ -2,7 +2,7 @@
 	"expo": {
 		"name": "LifeSync",
 		"slug": "lifesync",
-		"version": "1.4.0",
+		"version": "1.4.1",
 		"orientation": "portrait",
 		"icon": "./assets/images/icon.png",
 		"scheme": "lifesync",
@@ -39,7 +39,7 @@
 			"edgeToEdgeEnabled": true,
 			"predictiveBackGestureEnabled": false,
 			"package": "com.matrix122001.HabitTrackerApp",
-			"versionCode": 7,
+			"versionCode": 8,
 			"permissions": [
 				"android.permission.RECEIVE_BOOT_COMPLETED",
 				"android.permission.SCHEDULE_EXACT_ALARM",
