@@ -6,10 +6,14 @@
 import { BANK_SENDER_IDS, ParsedBankSms, SmsData } from "./types";
 
 // Regex patterns for bank SMS parsing
+// Most specific first. SBI's UPI alerts have no currency at all ("A/C X8019
+// credited by 50.00"), so the verb form must win; and a bare number before a
+// verb is only an amount when it has decimals or a currency - otherwise the
+// account digits in "X8019 credited" were read as ₹8019.
 const AMOUNT_PATTERNS = [
-	/(?:Rs\.?|INR|₹)\s*([\d,]+(?:\.\d{2})?)/i,
-	/(?:debited|credited|withdrawn|deposited|sent|received)\s*(?:Rs\.?|INR|₹)?\s*([\d,]+(?:\.\d{2})?)/i,
-	/([\d,]+(?:\.\d{2})?)\s*(?:Rs\.?|INR|₹)?\s*(?:debited|credited|withdrawn|deposited)/i,
+	/(?:debited|credited|withdrawn|deposited|sent|received|paid|spent)\s+(?:by|with|for|of)?\s*(?:Rs\.?|INR|₹)?\s*([\d,]*\d(?:\.\d{1,2})?)\b/i,
+	/(?:Rs\.?|INR|₹)\s*([\d,]*\d(?:\.\d{1,2})?)/i,
+	/(?:(?:Rs\.?|INR|₹)\s*([\d,]*\d(?:\.\d{1,2})?)|\b(\d[\d,]*\.\d{1,2}))\s*(?:debited|credited|withdrawn|deposited)/i,
 ];
 
 // "A/c XX1234", "acct *1234", "Card XX1234", "card ending 1234".
@@ -79,11 +83,25 @@ const BANK_NAMES: Record<string, string> = {
 /**
  * Check if SMS is from a known bank
  */
+// Bank name stems found inside DLT sender IDs ("VM-SBIUPI", "AD-HDFCBK-S",
+// "JK-ICICIT"). Banks keep adding new IDs per product (UPI, cards, loans), so
+// matching the stem catches ones BANK_SENDER_IDS doesn't list yet.
+const BANK_STEMS = [
+	"SBI", "HDFC", "ICICI", "AXIS", "KOTAK", "YESB", "PNB", "PUNB", "BOB", "BARODA",
+	"CANBNK", "CANARA", "UNION", "UBOI", "IDFC", "INDUS", "FEDBNK", "FEDERAL", "RBL",
+	"AUBANK", "BOI", "BOIIND", "CENTBK", "IOB", "UCO", "IPPB", "AIRBNK", "JUPITR",
+	"PAYTMB", "FINOBK", "EQUTAS", "UJJIVN", "DBS", "SCBANK", "CITI", "HSBC", "SCB",
+];
+
 export function isBankSms(sender: string): boolean {
 	const normalizedSender = sender.replace(/[^A-Za-z]/g, "").toUpperCase();
 	// A phone number normalises to "" (and a short name to "AU"), which every
 	// bank ID "includes" - so the reverse check needs a real sender ID.
 	if (normalizedSender.length < 4) return false;
+
+	// DLT format "XX-NAME" or "XX-NAME-S": check the NAME part for a bank stem.
+	const dlt = sender.trim().toUpperCase().match(/^[A-Z]{2}-([A-Z0-9]{3,9})(?:-[A-Z])?$/);
+	if (dlt && BANK_STEMS.some((stem) => dlt[1].includes(stem))) return true;
 
 	return BANK_SENDER_IDS.some((bankId) => {
 		const normalizedBankId = bankId.toUpperCase();
@@ -116,7 +134,8 @@ function extractAmount(text: string): number | null {
 	for (const pattern of AMOUNT_PATTERNS) {
 		const match = text.match(pattern);
 		if (match) {
-			const amountStr = match[1].replace(/,/g, "");
+			// The last pattern has two alternative groups.
+			const amountStr = (match[1] ?? match[2] ?? "").replace(/,/g, "");
 			const amount = parseFloat(amountStr);
 			if (!isNaN(amount) && amount > 0) {
 				return amount;

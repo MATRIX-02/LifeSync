@@ -31,8 +31,12 @@ const OUTCOME_LABEL: Record<SeenOutcome, string> = {
 	queued: "Offered to you",
 	duplicate: "Already seen (same payment)",
 	not_payment: "Not a completed payment",
+	hidden: "Hidden by Android - checking bank SMS instead",
+	from_sms: "Found in bank SMS · offered to you",
 	disabled: "Detection was off",
 };
+
+const ADB_UNHIDE = "adb shell appops set com.matrix122001.HabitTrackerApp RECEIVE_SENSITIVE_NOTIFICATIONS allow";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import React, { useCallback, useEffect, useState } from "react";
 import {
@@ -447,6 +451,41 @@ export default function TransactionDetectionSettings({ visible, onClose, theme }
 						</Text>
 					)}
 
+					{seen.some((s) => s.outcome === "hidden") && (
+						<View style={[styles.card, styles.warnCard]}>
+							<View style={[styles.row, { alignItems: "flex-start" }]}>
+								<Ionicons name="eye-off" size={20} color={theme.warning} />
+								<View style={{ flex: 1 }}>
+									<Text style={styles.rowName}>Android is hiding payment alerts</Text>
+									<Text style={styles.rowDesc}>
+										Your phone shows the full text, but Android 15+ hides
+										"sensitive" notifications (like some Paytm alerts) from other
+										apps. LifeSync falls back to the bank SMS for these, which works
+										if your bank texts you for the payment.{"\n\n"}To let LifeSync
+										read them directly, do one of these:{"\n"}• Settings →
+										Notifications → turn off "Enhanced notifications" (if your
+										phone has it).{"\n"}• Or, from a computer with the phone
+										connected (USB debugging on), run once:
+									</Text>
+									<Text selectable style={styles.code}>
+										{ADB_UNHIDE}
+									</Text>
+									<TouchableOpacity
+										onPress={() =>
+											Linking.sendIntent("android.settings.NOTIFICATION_SETTINGS").catch(
+												() => Linking.openSettings(),
+											)
+										}
+									>
+										<Text style={[styles.grantText, { marginTop: 8 }]}>
+											Open notification settings
+										</Text>
+									</TouchableOpacity>
+								</View>
+							</View>
+						</View>
+					)}
+
 					<View style={styles.sectionHeader}>
 						<Text style={styles.sectionLabel}>RECENT ALERTS SEEN</Text>
 						<View style={{ flexDirection: "row", gap: 16 }}>
@@ -486,7 +525,7 @@ export default function TransactionDetectionSettings({ visible, onClose, theme }
 												styles.outcomeDot,
 												{
 													backgroundColor:
-														s.outcome === "queued"
+														s.outcome === "queued" || s.outcome === "from_sms"
 															? theme.success
 															: s.outcome === "duplicate"
 																? theme.primary
@@ -589,6 +628,17 @@ const createStyles = (theme: Theme) =>
 			justifyContent: "space-between",
 			alignItems: "center",
 			marginRight: 4,
+		},
+		warnCard: { borderWidth: 1, borderColor: theme.warning + "60" },
+		code: {
+			marginTop: 8,
+			padding: 10,
+			borderRadius: 8,
+			fontSize: 11,
+			lineHeight: 16,
+			color: theme.text,
+			backgroundColor: theme.background,
+			fontFamily: Platform.OS === "android" ? "monospace" : "Menlo",
 		},
 		outcomeDot: { width: 10, height: 10, borderRadius: 5, marginTop: 6, marginHorizontal: 12 },
 		grantedPill: {

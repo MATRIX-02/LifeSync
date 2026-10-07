@@ -22,14 +22,54 @@ import {
 	SeenOutcome,
 } from "./detectionQueue";
 import {
+	isContentHidden,
 	isPaymentSource,
 	parseNotification,
 	RawNotification,
 	sourceLabel,
 } from "./notificationListener";
+import { getRecentTransactionSms } from "./smsReader";
 
 /** Our own notifications also reach the listener; never parse those. */
 const OWN_PACKAGE = "com.matrix122001.HabitTrackerApp";
+
+const isSmsSource = (pkg: string) => sourceLabel(pkg) === "SMS";
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * After a hidden UPI/bank alert: the same payment normally lands as a bank
+ * SMS within seconds, and reading the SMS inbox isn't affected by the
+ * redaction. The task has 15 s (library HeadlessJsTaskConfig timeout), so
+ * check a few times inside ~12 s. Anything later is still caught by the SMS
+ * app's own notification or the catch-up scan when the app opens.
+ */
+async function catchUpFromBankSms(notify: boolean): Promise<void> {
+	for (const wait of [1500, 4000, 5500]) {
+		await sleep(wait);
+		let found;
+		try {
+			found = await getRecentTransactionSms({ maxCount: 20, hoursBack: 0.25 });
+		} catch {
+			return; // no SMS permission / module - nothing more we can do
+		}
+		let added = false;
+		for (const tx of found) {
+			const stored = await enqueue(tx);
+			if (!stored) continue;
+			added = true;
+			await recordSeen({
+				time: Date.now(),
+				app: tx.bankName ?? "Bank SMS",
+				title: "",
+				text: tx.rawText,
+				outcome: "from_sms",
+				summary: `₹${tx.amount} ${tx.type === "income" ? "received" : "spent"}`,
+			});
+			if (notify) await NotificationService.showDetectedTransaction(stored);
+		}
+		if (added) return;
+	}
+}
 
 export async function handleIncomingNotification({
 	notification,
@@ -70,6 +110,14 @@ export async function handleIncomingNotification({
 		const settings = await getDetectionSettings();
 		if (!settings.enabled) {
 			await log("disabled");
+			return;
+		}
+
+		// Android hid the content (sensitive notification protection). The
+		// payment usually also arrives as a bank SMS - look for it.
+		if (isContentHidden(raw)) {
+			await log("hidden");
+			if (!isSmsSource(raw.app)) await catchUpFromBankSms(settings.notify);
 			return;
 		}
 

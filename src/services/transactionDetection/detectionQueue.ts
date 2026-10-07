@@ -88,6 +88,8 @@ export type SeenOutcome =
 	| "queued" // offered to the user
 	| "duplicate" // same payment already waiting or handled
 	| "not_payment" // from a payment app, but not a completed payment
+	| "hidden" // Android redacted the content (sensitive notification protection)
+	| "from_sms" // found in the bank SMS after a hidden alert
 	| "disabled"; // detection switched off
 
 export interface SeenAlert {

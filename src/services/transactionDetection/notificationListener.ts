@@ -125,6 +125,23 @@ function looksLikeInstitution(sender: string): boolean {
 	return isBankSms(s) || /^[A-Z]{2}-[A-Z0-9]{3,9}(?:-[A-Z])?$/i.test(s);
 }
 
+/**
+ * Android 15+ "sensitive notification protection": when the system's
+ * notification assistant classifies a notification as sensitive (OTPs, and in
+ * practice many payment alerts - Paytm's, for one), listeners without the
+ * RECEIVE_SENSITIVE_NOTIFICATIONS app-op get placeholder text instead of the
+ * content. That permission is signature/role-only, so LifeSync can't request
+ * it; the user can stop the redaction (Enhanced notifications off, or
+ * `adb shell appops set <pkg> RECEIVE_SENSITIVE_NOTIFICATIONS allow`), and the
+ * headless task falls back to the matching bank SMS.
+ */
+export function isContentHidden(raw: RawNotification): boolean {
+	const text = [raw.title, raw.text, raw.bigText].filter(Boolean).join(" ");
+	return /sensitive notification content hidden|content hidden|sensitive content/i.test(
+		text,
+	);
+}
+
 /** Human name for the app that posted a notification (for the log). */
 export function sourceLabel(pkg: string): string {
 	if (isUpiNotification(pkg)) return getAppName(pkg);
