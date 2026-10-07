@@ -86,6 +86,14 @@ Android channels (`habit-reminders`, `study-reminders`, `hydration-reminders`, `
 - **Formatting**: tabs, not spaces. There is no prettier config or dependency — running prettier with defaults will reformat entire files and bury your diff. If you must format, restrict it to `--use-tabs` on the exact files you touched.
 - **Feature gating**: `useSubscriptionCheck()` (`src/components/PremiumFeatureGate.tsx`) supplies `canAddHabit(count)`, `canAddAccount`, etc. against plan limits from the DB, where `-1` means unlimited. `moduleContext.ts` separately lets users disable whole modules (`habits | workout | finance | study`).
 
+## Releasing
+
+Tag-driven: pushing to `main` releases nothing. `npm run release -- patch|minor|major` (on `main`, clean tree) bumps `expo.version` **and** `expo.android.versionCode` in `app.json`, creates `docs/releases/vX.Y.Z.md` for user-facing notes, commits and tags - without pushing. Pushing the `vX.Y.Z` tag runs `.github/workflows/release-apk.yml`, which builds a signed APK and publishes the GitHub Release. Full process, secrets and the no-Actions fallback: `docs/RELEASING.md`.
+
+- Never build a release with the debug key - it can't install over existing installs. The workflow refuses to.
+- Release notes are for users: plain language, grouped by module, no file paths.
+- `EXPO_PUBLIC_*` values ship inside the APK. Never put a server secret in one.
+
 ## Setup docs
 
 `docs/` covers the external integrations that can't be inferred from code — `SUPABASE_SETUP.md`, `RLS_SETUP_FIX.md`, `GOOGLE_OAUTH_*.md`, `RAZORPAY_PHONEPE_SETUP.md`, `TRANSACTION_DETECTION_SETUP.md`. `README.md` and `ARCHITECTURE.md` predate the multi-module rewrite and describe a habits-only app at an old path; treat them as historical.
