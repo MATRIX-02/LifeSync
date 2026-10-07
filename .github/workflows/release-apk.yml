@@ -95,7 +95,12 @@ jobs:
           distribution: temurin
           java-version: 17
 
+      # The runner image already ships the SDK; this sets ANDROID_HOME and
+      # licenses. Its default package list includes the long-removed "tools"
+      # package, which makes the current sdkmanager fail - so list ours.
       - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
 
       - name: Install dependencies
         run: npm ci
