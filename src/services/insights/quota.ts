@@ -1,7 +1,7 @@
 /**
- * Tracks the Groq free-tier quota left, read from the rate-limit headers Groq
- * returns on every call. There is no standalone quota endpoint, so this is only
- * as fresh as the last request the app made.
+ * Tracks the AI quota left for the shared proxy: the user's own daily request
+ * allowance (counted by `ai-proxy`) and Groq's per-minute token budget, read
+ * from the rate-limit headers on each call. Not used with the user's own key.
  */
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -107,28 +107,36 @@ export function subscribeToQuota(
 }
 
 /**
- * Groq only reports quota in the headers of a completion call — /models returns
- * none — so this sends the smallest possible one. It costs 1 request and 1
- * output token out of 1000/day.
+ * Asks the proxy for this user's remaining daily allowance. A probe neither
+ * calls Groq nor counts against the allowance. The token budget is only
+ * refreshed by real analyses.
  */
 export async function refreshQuota(): Promise<QuotaSnapshot | null> {
 	const controller = new AbortController();
 	const timer = setTimeout(() => controller.abort(), 15000);
 
 	try {
-		const response = await groqFetch(
-			{
-				model: GROQ_MODEL,
-				max_completion_tokens: 1,
-				messages: [{ role: "user", content: "." }],
-			},
-			controller.signal,
-		);
-		if (response.status === 401 || response.status === 503) return null;
+		const response = await groqFetch({ probe: true }, controller.signal);
+		if (!response.ok) return null;
 
-		// A 429 still carries the headers, which is exactly what we want to show.
-		captureQuotaFromHeaders(response.headers);
-		return cached;
+		const limit = toNumber(response.headers.get("x-ratelimit-limit-requests"));
+		const remaining = toNumber(
+			response.headers.get("x-ratelimit-remaining-requests"),
+		);
+		if (remaining === undefined) return null;
+
+		// Keep the last token reading rather than blanking it.
+		const previous = await getQuotaSnapshot();
+		const snapshot: QuotaSnapshot = {
+			...previous,
+			limitRequests: limit,
+			remainingRequests: remaining,
+			capturedAt: new Date().toISOString(),
+		};
+		cached = snapshot;
+		AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot)).catch(() => {});
+		listeners.forEach((fn) => fn(snapshot));
+		return snapshot;
 	} catch {
 		return null;
 	} finally {
@@ -136,7 +144,7 @@ export async function refreshQuota(): Promise<QuotaSnapshot | null> {
 	}
 }
 
-/** Groq's daily request allowance resets at midnight UTC. */
+/** The proxy's daily allowance resets at midnight UTC. */
 export function describeDailyReset(): string {
 	const now = new Date();
 	const midnightUtc = Date.UTC(

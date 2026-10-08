@@ -1,12 +1,14 @@
 /**
- * Shared Groq client and analysis schema used by every module's insights.
+ * Shared AI client and analysis schema used by every module's insights.
  *
- * The Groq key ships inside the app bundle (EXPO_PUBLIC_*), so its free-tier
- * quota is shared by every install, not per user. Keep call volume low: cache
- * results in the UI and gate the feature behind a subscription check.
+ * Calls go to the user's own Gemini key when they have set one (userKey.ts),
+ * otherwise through the `ai-proxy` Edge Function, whose Groq quota is shared by
+ * every user and capped per user per day. Keep call volume low: cache results
+ * in the UI and gate the feature behind a subscription check.
  */
 
 import { captureQuotaFromHeaders, GROQ_MODEL, groqFetch } from "./quota";
+import { geminiFetch, GEMINI_MODEL, getUserGeminiKey } from "./userKey";
 
 export { GROQ_MODEL };
 
@@ -174,16 +176,41 @@ export async function callGroq(opts: {
 	const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
 	try {
+		const messages = [
+			{ role: "system", content: opts.systemPrompt },
+			{ role: "user", content: JSON.stringify(opts.payload) },
+		];
+		const temperature = opts.jsonMode ? 0.2 : 0.4;
+		const responseFormat = opts.jsonMode
+			? { response_format: { type: "json_object" } }
+			: {};
+
+		const userKey = await getUserGeminiKey();
+		if (userKey) {
+			const response = await geminiFetch(
+				userKey,
+				{
+					model: GEMINI_MODEL,
+					temperature,
+					// Gemini counts its thinking against max_tokens, so leave room
+					// for it on top of the answer budget.
+					reasoning_effort: "low",
+					max_tokens: opts.maxTokens + GEMINI_THINKING_HEADROOM,
+					...responseFormat,
+					messages,
+				},
+				controller.signal,
+			);
+			return readCompletion(response, "gemini");
+		}
+
 		const response = await groqFetch(
 			{
 				model: GROQ_MODEL,
-				temperature: opts.jsonMode ? 0.2 : 0.4,
+				temperature,
 				max_completion_tokens: opts.maxTokens,
-				...(opts.jsonMode ? { response_format: { type: "json_object" } } : {}),
-				messages: [
-					{ role: "system", content: opts.systemPrompt },
-					{ role: "user", content: JSON.stringify(opts.payload) },
-				],
+				...responseFormat,
+				messages,
 			},
 			controller.signal,
 		);
@@ -206,35 +233,7 @@ export async function callGroq(opts: {
 		// Headers are present on rejections too, which is when quota matters most.
 		captureQuotaFromHeaders(response.headers);
 
-		if (response.status === 429) {
-			return {
-				ok: false,
-				code: "rate_limited",
-				message:
-					"AI insights are busy right now. Please try again in a few minutes.",
-			};
-		}
-
-		if (!response.ok) {
-			return {
-				ok: false,
-				code: "server",
-				message: `Insights service returned an error (${response.status}). Please try again later.`,
-			};
-		}
-
-		const data = await response.json();
-		const text: string | undefined = data?.choices?.[0]?.message?.content;
-
-		if (!text || !text.trim()) {
-			return {
-				ok: false,
-				code: "empty_response",
-				message: "No insights were generated. Please try again.",
-			};
-		}
-
-		return { ok: true, text: text.trim() };
+		return readCompletion(response, "shared");
 	} catch (error) {
 		if (error instanceof Error && error.name === "AbortError") {
 			return {
@@ -252,6 +251,66 @@ export async function callGroq(opts: {
 	} finally {
 		clearTimeout(timer);
 	}
+}
+
+const GEMINI_THINKING_HEADROOM = 1536;
+
+async function readCompletion(
+	response: Response,
+	source: "shared" | "gemini",
+): Promise<RawCallResult> {
+	if (response.status === 429) {
+		if (source === "gemini") {
+			return {
+				ok: false,
+				code: "rate_limited",
+				message:
+					"Your Gemini key has hit Google's free limit. Try again in a minute, or tomorrow if the daily limit is used up.",
+			};
+		}
+		const body = await response.json().catch(() => null);
+		return {
+			ok: false,
+			code: "rate_limited",
+			message:
+				body?.error === "daily_limit"
+					? "You've used today's free AI analyses. Add your own free Gemini key in Settings > AI Usage for more."
+					: "AI insights are busy right now. Please try again in a few minutes.",
+		};
+	}
+
+	if (source === "gemini" && [400, 401, 403].includes(response.status)) {
+		const text = await response.text().catch(() => "");
+		if (response.status !== 400 || /api[_ ]?key/i.test(text)) {
+			return {
+				ok: false,
+				code: "missing_key",
+				message:
+					"Google rejected your Gemini key. Update or remove it in Settings > AI Usage.",
+			};
+		}
+	}
+
+	if (!response.ok) {
+		return {
+			ok: false,
+			code: "server",
+			message: `Insights service returned an error (${response.status}). Please try again later.`,
+		};
+	}
+
+	const data = await response.json();
+	const text: string | undefined = data?.choices?.[0]?.message?.content;
+
+	if (!text || !text.trim()) {
+		return {
+			ok: false,
+			code: "empty_response",
+			message: "No insights were generated. Please try again.",
+		};
+	}
+
+	return { ok: true, text: text.trim() };
 }
 
 // ===================== RESPONSE VALIDATION =====================

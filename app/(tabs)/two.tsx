@@ -7,6 +7,9 @@ import { useTransactionDetectionStore } from "@/src/context/transactionDetection
 import { useFinanceStore } from "@/src/context/financeStoreDB";
 import { useHabitStore } from "@/src/context/habitStoreDB";
 import { SoundPickerModal } from "@/src/components/SoundPickerModal";
+import GeminiKeySettings, {
+	useUserGeminiKey,
+} from "@/src/components/settings/GeminiKeySettings";
 import {
 	SoundKind,
 	soundLabel,
@@ -341,6 +344,8 @@ export default function SettingsScreen() {
 	);
 	const [aiQuota, setAiQuota] = useState<QuotaSnapshot | null>(null);
 	const [isCheckingQuota, setIsCheckingQuota] = useState(false);
+	const [showGeminiKey, setShowGeminiKey] = useState(false);
+	const geminiKey = useUserGeminiKey();
 	const [aiSmsEnabled, setAiSmsEnabled] = useState(false);
 
 	useEffect(() => {
@@ -1475,83 +1480,24 @@ export default function SettingsScreen() {
 				{/* AI Usage Section */}
 				<SettingsSection title="AI USAGE" styles={styles}>
 					<View style={styles.settingCard}>
-						{aiQuota ? (
-							<>
-								<SettingRow
-									icon="sparkles-outline"
-									iconColor={theme.primary}
-									iconBg={theme.primary + "20"}
-									label="Analyses Left Today"
-									description={
-										aiQuota.remainingRequests !== undefined &&
-										aiQuota.limitRequests !== undefined
-											? `${aiQuota.remainingRequests.toLocaleString()} of ${aiQuota.limitRequests.toLocaleString()} · ${describeDailyReset()}`
-											: "Not reported"
-									}
-									theme={theme}
-								/>
-
-								<View style={styles.divider} />
-
-								<SettingRow
-									icon="speedometer-outline"
-									iconColor={theme.accent}
-									iconBg={theme.accent + "20"}
-									label="Token Budget"
-									description={
-										aiQuota.remainingTokens !== undefined &&
-										aiQuota.limitTokens !== undefined
-											? `${aiQuota.remainingTokens.toLocaleString()} of ${aiQuota.limitTokens.toLocaleString()} this minute`
-											: "Not reported"
-									}
-									theme={theme}
-								/>
-
-								<View style={styles.divider} />
-
-								<SettingRow
-									icon="time-outline"
-									iconColor={theme.textSecondary}
-									iconBg={theme.textSecondary + "20"}
-									label="Last Checked"
-									description={new Date(aiQuota.capturedAt).toLocaleString()}
-									theme={theme}
-								/>
-							</>
-						) : (
-							<SettingRow
-								icon="sparkles-outline"
-								iconColor={theme.textMuted}
-								iconBg={theme.textMuted + "20"}
-								label="Analyses Left Today"
-								description="Tap Check Usage below to see your remaining quota"
-								theme={theme}
-							/>
-						)}
-
-						<View style={styles.divider} />
-
 						<TouchableOpacity
 							style={styles.settingRow}
-							onPress={handleCheckQuota}
-							disabled={isCheckingQuota}
+							onPress={() => setShowGeminiKey(true)}
 						>
 							<View
 								style={[
 									styles.settingIcon,
-									{ backgroundColor: theme.primary + "20" },
+									{ backgroundColor: theme.success + "20" },
 								]}
 							>
-								{isCheckingQuota ? (
-									<ActivityIndicator size="small" color={theme.primary} />
-								) : (
-									<Ionicons name="refresh" size={20} color={theme.primary} />
-								)}
+								<Ionicons name="key-outline" size={20} color={theme.success} />
 							</View>
 							<View style={styles.settingContent}>
-								<Text style={styles.settingLabel}>Check Usage</Text>
+								<Text style={styles.settingLabel}>Your Gemini Key</Text>
 								<Text style={styles.settingDescription}>
-									{isCheckingQuota ? "Checking…" : "Fetch the latest quota"}
+									{geminiKey
+										? "In use · AI runs on your own free allowance"
+										: "Add a free key for your own AI allowance"}
 								</Text>
 							</View>
 							<Ionicons
@@ -1560,13 +1506,109 @@ export default function SettingsScreen() {
 								color={theme.textMuted}
 							/>
 						</TouchableOpacity>
+
+						{!geminiKey && (
+							<>
+								<View style={styles.divider} />
+
+								{aiQuota ? (
+									<>
+										<SettingRow
+											icon="sparkles-outline"
+											iconColor={theme.primary}
+											iconBg={theme.primary + "20"}
+											label="Analyses Left Today"
+											description={
+												aiQuota.remainingRequests !== undefined &&
+												aiQuota.limitRequests !== undefined
+													? `${aiQuota.remainingRequests.toLocaleString()} of ${aiQuota.limitRequests.toLocaleString()} · ${describeDailyReset()}`
+													: "Not reported"
+											}
+											theme={theme}
+										/>
+
+										<View style={styles.divider} />
+
+										<SettingRow
+											icon="speedometer-outline"
+											iconColor={theme.accent}
+											iconBg={theme.accent + "20"}
+											label="Token Budget"
+											description={
+												aiQuota.remainingTokens !== undefined &&
+												aiQuota.limitTokens !== undefined
+													? `${aiQuota.remainingTokens.toLocaleString()} of ${aiQuota.limitTokens.toLocaleString()} this minute`
+													: "Not reported"
+											}
+											theme={theme}
+										/>
+
+										<View style={styles.divider} />
+
+										<SettingRow
+											icon="time-outline"
+											iconColor={theme.textSecondary}
+											iconBg={theme.textSecondary + "20"}
+											label="Last Checked"
+											description={new Date(aiQuota.capturedAt).toLocaleString()}
+											theme={theme}
+										/>
+									</>
+								) : (
+									<SettingRow
+										icon="sparkles-outline"
+										iconColor={theme.textMuted}
+										iconBg={theme.textMuted + "20"}
+										label="Analyses Left Today"
+										description="Tap Check Usage below to see your remaining quota"
+										theme={theme}
+									/>
+								)}
+
+								<View style={styles.divider} />
+
+								<TouchableOpacity
+									style={styles.settingRow}
+									onPress={handleCheckQuota}
+									disabled={isCheckingQuota}
+								>
+									<View
+										style={[
+											styles.settingIcon,
+											{ backgroundColor: theme.primary + "20" },
+										]}
+									>
+										{isCheckingQuota ? (
+											<ActivityIndicator size="small" color={theme.primary} />
+										) : (
+											<Ionicons name="refresh" size={20} color={theme.primary} />
+										)}
+									</View>
+									<View style={styles.settingContent}>
+										<Text style={styles.settingLabel}>Check Usage</Text>
+										<Text style={styles.settingDescription}>
+											{isCheckingQuota ? "Checking…" : "Fetch the latest quota"}
+										</Text>
+									</View>
+									<Ionicons
+										name="chevron-forward"
+										size={18}
+										color={theme.textMuted}
+									/>
+								</TouchableOpacity>
+							</>
+						)}
 					</View>
 
 					<Text style={styles.quotaNote}>
-						The AI allowance is shared across everyone using LifeSync, not
-						reserved per account. Checking uses one request of your daily
-						allowance.
+						{geminiKey
+							? "Your key's limits are set by Google and reset daily. Remove the key to go back to the shared allowance."
+							: "Without your own key, each account gets a small free allowance per day. Checking usage doesn't use any of it."}
 					</Text>
+					<GeminiKeySettings
+						visible={showGeminiKey}
+						onClose={() => setShowGeminiKey(false)}
+					/>
 				</SettingsSection>
 
 				{/* About Section */}
