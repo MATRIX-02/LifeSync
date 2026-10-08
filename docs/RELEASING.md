@@ -96,7 +96,6 @@ Settings → Secrets and variables → Actions. Already configured; only needed 
 | `ANDROID_KEY_PASSWORD` | `LIFESYNC_UPLOAD_KEY_PASSWORD` |
 | `EXPO_PUBLIC_SUPABASE_URL` | `.env.local` |
 | `EXPO_PUBLIC_SUPABASE_ANON_KEY` | `.env.local` |
-| `EXPO_PUBLIC_GROQ_API_KEY` | `.env.local` |
 
 > **Never lose the keystore.** Every LifeSync APK must be signed with
 > `lifesync-release.jks`. Android refuses to update an app signed with a

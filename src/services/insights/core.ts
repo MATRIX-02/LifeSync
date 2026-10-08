@@ -6,7 +6,7 @@
  * results in the UI and gate the feature behind a subscription check.
  */
 
-import { captureQuotaFromHeaders, GROQ_ENDPOINT, GROQ_MODEL } from "./quota";
+import { captureQuotaFromHeaders, GROQ_MODEL, groqFetch } from "./quota";
 
 export { GROQ_MODEL };
 
@@ -170,28 +170,12 @@ export async function callGroq(opts: {
 	maxTokens: number;
 	jsonMode?: boolean;
 }): Promise<RawCallResult> {
-	const apiKey = process.env.EXPO_PUBLIC_GROQ_API_KEY;
-
-	if (!apiKey) {
-		return {
-			ok: false,
-			code: "missing_key",
-			message:
-				"AI insights are not configured. Set EXPO_PUBLIC_GROQ_API_KEY and restart the app.",
-		};
-	}
-
 	const controller = new AbortController();
 	const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
 	try {
-		const response = await fetch(GROQ_ENDPOINT, {
-			method: "POST",
-			headers: {
-				Authorization: `Bearer ${apiKey}`,
-				"Content-Type": "application/json",
-			},
-			body: JSON.stringify({
+		const response = await groqFetch(
+			{
 				model: GROQ_MODEL,
 				temperature: opts.jsonMode ? 0.2 : 0.4,
 				max_completion_tokens: opts.maxTokens,
@@ -200,9 +184,24 @@ export async function callGroq(opts: {
 					{ role: "system", content: opts.systemPrompt },
 					{ role: "user", content: JSON.stringify(opts.payload) },
 				],
-			}),
-			signal: controller.signal,
-		});
+			},
+			controller.signal,
+		);
+
+		if (response.status === 503) {
+			return {
+				ok: false,
+				code: "missing_key",
+				message: "AI insights are not set up on the server yet.",
+			};
+		}
+		if (response.status === 401) {
+			return {
+				ok: false,
+				code: "server",
+				message: "Please sign in to use AI insights.",
+			};
+		}
 
 		// Headers are present on rejections too, which is when quota matters most.
 		captureQuotaFromHeaders(response.headers);

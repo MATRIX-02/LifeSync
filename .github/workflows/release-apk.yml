@@ -16,7 +16,9 @@
 #   ANDROID_KEY_PASSWORD        LIFESYNC_UPLOAD_KEY_PASSWORD
 #   EXPO_PUBLIC_SUPABASE_URL
 #   EXPO_PUBLIC_SUPABASE_ANON_KEY
-#   EXPO_PUBLIC_GROQ_API_KEY
+#
+# The Groq key is NOT an app secret: it lives in the ai-proxy Edge Function
+# (Supabase > Edge Functions > Secrets), so it never ships in the APK.
 #
 # The build REFUSES to run without the signing secrets. Falling back to the
 # debug key (what plugins/withReleaseSigning.js does locally) would produce an
@@ -109,12 +111,10 @@ jobs:
         env:
           SB_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
           SB_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_ANON_KEY }}
-          GROQ: ${{ secrets.EXPO_PUBLIC_GROQ_API_KEY }}
         run: |
           {
             echo "EXPO_PUBLIC_SUPABASE_URL=$SB_URL"
             echo "EXPO_PUBLIC_SUPABASE_ANON_KEY=$SB_KEY"
-            echo "EXPO_PUBLIC_GROQ_API_KEY=$GROQ"
           } > .env.local
 
       - name: Set up release signing

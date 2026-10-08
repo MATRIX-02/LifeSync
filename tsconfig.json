@@ -13,5 +13,7 @@
 		".expo/types/**/*.ts",
 		"expo-env.d.ts",
 		"src/types/**/*.d.ts"
-	]
+	],
+	// Edge Functions run on Deno, not React Native.
+	"exclude": ["node_modules", "supabase/functions"]
 }
