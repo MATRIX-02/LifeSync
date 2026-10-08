@@ -12,6 +12,7 @@ import { supabase } from "../config/supabase";
 import { FrequencyConfig, Frequency } from "../types";
 import {
 	getSound,
+	NOTIFICATION_SOUNDS,
 	NotificationSound,
 	SYSTEM_SOUND_ID,
 } from "../constants/notificationSounds";
@@ -25,6 +26,22 @@ import { useSoundPrefsStore } from "../context/soundPrefsStore";
 const ALARM_CHANNEL_ID = "alarms-v2";
 const REMINDER_CHANNEL_ID = "habit-reminders";
 const WATER_CHANNEL_ID = "hydration-reminders";
+const TONE_PREVIEW_ID = "tone-preview";
+const HABIT_CATEGORY = "habit_reminder";
+
+/**
+ * Android reads the channel - and so the sound - from the TRIGGER, not the
+ * content (expo-notifications ignores content.channelId). A notification
+ * without one lands on the fallback channel and plays the default sound,
+ * which is why custom tones never played.
+ */
+export function withChannel(
+	trigger: Notifications.NotificationTriggerInput,
+	channelId: string
+): Notifications.NotificationTriggerInput {
+	if (Platform.OS !== "android") return trigger;
+	return trigger ? ({ ...trigger, channelId } as Notifications.NotificationTriggerInput) : { channelId };
+}
 const WATER_CATEGORY = "water_reminder";
 
 // Settings shared by the base channel and every per-tone copy of it.
@@ -191,12 +208,10 @@ export class NotificationService {
 			console.error("Error clearing push token:", error);
 		}
 	}
+	// Local notifications work on emulators too; only push tokens need a real
+	// device, and registerPushToken() checks that itself. (A device check here
+	// made every local reminder, preview and channel silently no-op on emulators.)
 	static async requestPermissions(): Promise<boolean> {
-		if (!Device.isDevice) {
-			console.warn("Notifications only work on physical devices");
-			return false;
-		}
-
 		const { status: existingStatus } =
 			await Notifications.getPermissionsAsync();
 		let finalStatus = existingStatus;
@@ -215,6 +230,14 @@ export class NotificationService {
 
 			// Study Hub was removed; drop its channel from system settings.
 			await Notifications.deleteNotificationChannelAsync("study-reminders");
+
+			// Tone channels from before the "-t2" ids were frozen on the default
+			// sound; drop them so Android settings doesn't list each tone twice.
+			for (const tone of NOTIFICATION_SOUNDS) {
+				for (const base of [REMINDER_CHANNEL_ID, ALARM_CHANNEL_ID]) {
+					await Notifications.deleteNotificationChannelAsync(`${base}-${tone.id}`).catch(() => {});
+				}
+			}
 
 			// Alarm channel.
 			//
@@ -267,12 +290,9 @@ export class NotificationService {
 					sound,
 					badge: 1,
 					...(categoryIdentifier ? { categoryIdentifier } : {}),
-					// Android routes sound/vibration/DND through the channel
-					...(Platform.OS === "android" && {
-						channelId,
-					}),
 				},
-				trigger,
+				// Android routes sound/vibration/DND through the channel
+				trigger: withChannel(trigger, channelId),
 			});
 			console.log(
 				`📅 Scheduled notification: ${notificationId} for "${title}"`
@@ -374,11 +394,50 @@ export class NotificationService {
 		};
 	}
 
+	/**
+	 * Plays a tone the way a real reminder would: as a notification on that
+	 * tone's channel, so it uses the notification volume. (In-app playback uses
+	 * the media volume, which is often muted while notifications are not.)
+	 * Dismissed after a few seconds.
+	 */
+	static async previewTone(toneId: string, kind: "reminder" | "alarm"): Promise<boolean> {
+		// Creates the base channels too, which "System default" relies on.
+		if (!(await this.requestPermissions())) return false;
+		const { channelId, sound } = await this.resolveHabitSound(
+			kind === "alarm" ? { alarmEnabled: true, alarmSound: toneId } : { reminderSound: toneId }
+		);
+		const label = toneId === SYSTEM_SOUND_ID ? "System default" : getSound(toneId)?.label ?? "Tone";
+		try {
+			await Notifications.dismissNotificationAsync(TONE_PREVIEW_ID);
+			await Notifications.scheduleNotificationAsync({
+				identifier: TONE_PREVIEW_ID,
+				content: {
+					title: "🔔 Tone preview",
+					body: `${label} - this is how your reminder will sound`,
+					sound,
+					data: { type: "tone_preview" },
+				},
+				trigger: withChannel(null, channelId),
+			});
+			setTimeout(() => {
+				void Notifications.dismissNotificationAsync(TONE_PREVIEW_ID).catch(() => {});
+			}, 5000);
+			return true;
+		} catch (error) {
+			console.warn("Tone preview failed:", error);
+			return false;
+		}
+	}
+
 	private static async ensureToneChannel(
 		isAlarm: boolean,
 		tone: NotificationSound
 	): Promise<string> {
-		const channelId = `${isAlarm ? ALARM_CHANNEL_ID : REMINDER_CHANNEL_ID}-${tone.id}`;
+		// "-t2": tone channels made before their sound file was bundled (e.g. by
+		// an older build) were frozen with the default sound, and Android
+		// restores a deleted channel's settings when the same id is recreated -
+		// so a new id is the only repair. Bump again if that ever recurs.
+		const channelId = `${isAlarm ? ALARM_CHANNEL_ID : REMINDER_CHANNEL_ID}-${tone.id}-t2`;
 		if (Platform.OS !== "android" || ensuredChannels.has(channelId)) {
 			return channelId;
 		}
@@ -447,6 +506,17 @@ export class NotificationService {
 		const label = (i: number) =>
 			times.length > 1 ? `(${i + 1}/${times.length})` : undefined;
 
+		// Everything the Done/Snooze buttons need, so they work with the app
+		// closed (habitReminderActions.ts) without loading the habit.
+		await this.ensureHabitCategory();
+		const reminderData = {
+			habitId: habit.id,
+			type: "habit_reminder",
+			target: Math.max(1, times.length),
+			channelId,
+			sound,
+		};
+
 		outer: for (let i = 0; i < times.length; i++) {
 			const [hour, minute] = times[i].split(":").map(Number);
 			const suffix = label(i);
@@ -466,9 +536,10 @@ export class NotificationService {
 							hour,
 							minute,
 						},
-						{ habitId: habit.id, type: "habit_reminder" },
+						reminderData,
 						channelId,
-						sound
+						sound,
+						HABIT_CATEGORY
 					);
 					ids.push(id);
 				}
@@ -483,15 +554,77 @@ export class NotificationService {
 						hour,
 						minute,
 					},
-					{ habitId: habit.id, type: "habit_reminder" },
+					reminderData,
 					channelId,
-					sound
+					sound,
+					HABIT_CATEGORY
 				);
 				ids.push(id);
 			}
 		}
 
 		return ids;
+	}
+
+	static readonly HABIT_ACTION_DONE = "habit_done";
+	static readonly HABIT_ACTION_SNOOZE = "habit_snooze";
+
+	// Buttons on habit reminders. Neither opens the app: handled by the
+	// listener in app/_layout.tsx, or the background task in index.js.
+	static async ensureHabitCategory(): Promise<void> {
+		await Notifications.setNotificationCategoryAsync(HABIT_CATEGORY, [
+			{
+				identifier: NotificationService.HABIT_ACTION_DONE,
+				buttonTitle: "Done ✓",
+				options: { opensAppToForeground: false },
+			},
+			{
+				identifier: NotificationService.HABIT_ACTION_SNOOZE,
+				buttonTitle: "Snooze 10 min",
+				options: { opensAppToForeground: false },
+			},
+		]);
+	}
+
+	/**
+	 * A habit-style reminder in a few seconds, with the default reminder tone
+	 * and the Done/Snooze buttons - what Settings > Test Notification sends.
+	 * `test: true` makes Done a no-op instead of logging a habit.
+	 */
+	static async sendTestReminder(seconds = 3): Promise<string> {
+		await this.ensureHabitCategory();
+		const { channelId, sound } = await this.resolveHabitSound({});
+		return this.scheduleNotification(
+			"🎯 Habit Reminder",
+			"This is how your reminders will look and sound. Try the buttons.",
+			{ type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL, seconds },
+			{ type: "habit_reminder_test", habitId: "test", test: true, channelId, sound },
+			channelId,
+			sound,
+			HABIT_CATEGORY
+		);
+	}
+
+	/** Re-sends a habit reminder after `minutes`, on the same channel and tone. */
+	static async snoozeHabitReminder(
+		data: { habitId: string; target?: number; channelId?: string; sound?: string },
+		title: string,
+		body: string,
+		minutes = 10
+	): Promise<string> {
+		await this.ensureHabitCategory();
+		return this.scheduleNotification(
+			title,
+			body,
+			{
+				type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
+				seconds: minutes * 60,
+			},
+			{ ...data, type: "habit_reminder_snooze" },
+			data.channelId ?? REMINDER_CHANNEL_ID,
+			data.sound ?? "default",
+			HABIT_CATEGORY
+		);
 	}
 
 	// Cancel every reminder belonging to a habit, found by its data payload.
@@ -792,25 +925,10 @@ export class NotificationService {
 	): Promise<string[]> {
 		await this.cancelWaterReminders();
 
-		if (Platform.OS === "android") {
-			await Notifications.setNotificationChannelAsync(WATER_CHANNEL_ID, {
-				name: "Hydration Reminders",
-				importance: Notifications.AndroidImportance.HIGH,
-				vibrationPattern: [0, 250, 250, 250],
-				lightColor: "#4FC3F7",
-				sound: "default",
-				enableVibrate: true,
-				showBadge: true,
-			});
-		}
-
 		// Same tone channels as habits; the "system" tone keeps its own channel
 		// so hydration stays separately configurable in Android settings.
-		const resolved = await this.resolveHabitSound({ reminderSound: sound });
-		const channelId =
-			resolved.channelId === REMINDER_CHANNEL_ID
-				? WATER_CHANNEL_ID
-				: resolved.channelId;
+		const resolved = await this.resolveWaterSound(sound);
+		const channelId = resolved.channelId;
 
 		await this.ensureWaterCategory();
 		const weekdays = days && days.length > 0 && days.length < 7 ? days : null;
@@ -901,12 +1019,15 @@ export class NotificationService {
 	}
 
 	// A one-off water reminder after X minutes (also used by Snooze), with the
-	// same buttons as the daily ones.
+	// same buttons and tone as the daily ones.
 	static async scheduleNextWaterReminder(
 		minutesFromNow: number,
-		customMessage?: string
+		customMessage?: string,
+		/** The water reminder tone; "" or omitted plays the plain hydration channel. */
+		toneId?: string
 	): Promise<string> {
 		await this.ensureWaterCategory();
+		const { channelId, sound } = await this.resolveWaterSound(toneId ?? "");
 		const trigger: Notifications.TimeIntervalTriggerInput = {
 			type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
 			seconds: Math.max(1, Math.round(minutesFromNow * 60)),
@@ -917,10 +1038,31 @@ export class NotificationService {
 			customMessage || "Time to drink some water! Stay hydrated!",
 			trigger,
 			{ type: "water_reminder_single" },
-			WATER_CHANNEL_ID,
-			"default",
+			channelId,
+			sound,
 			WATER_CATEGORY
 		);
+	}
+
+	/** Tone channels are shared with habits; "system" keeps the hydration channel. */
+	private static async resolveWaterSound(toneId: string): Promise<{ channelId: string; sound: string }> {
+		if (Platform.OS === "android") {
+			await Notifications.setNotificationChannelAsync(WATER_CHANNEL_ID, {
+				name: "Hydration Reminders",
+				importance: Notifications.AndroidImportance.HIGH,
+				vibrationPattern: [0, 250, 250, 250],
+				lightColor: "#4FC3F7",
+				sound: "default",
+				enableVibrate: true,
+				showBadge: true,
+			});
+		}
+		if (!toneId) return { channelId: WATER_CHANNEL_ID, sound: "default" };
+		const resolved = await this.resolveHabitSound({ reminderSound: toneId });
+		return {
+			channelId: resolved.channelId === REMINDER_CHANNEL_ID ? WATER_CHANNEL_ID : resolved.channelId,
+			sound: resolved.sound,
+		};
 	}
 
 	// ============ FASTING TIMER NOTIFICATIONS ============
@@ -967,11 +1109,8 @@ export class NotificationService {
 								} hours remaining.`,
 								data: { type: "fasting_milestone", milestone },
 								sound: "default",
-								...(Platform.OS === "android" && {
-									channelId: "fasting-timer",
-								}),
 							},
-							trigger,
+							trigger: withChannel(trigger, "fasting-timer"),
 						});
 						notificationIds.push(notifId);
 					}
@@ -994,11 +1133,8 @@ export class NotificationService {
 						body: `Congratulations! You completed your ${targetHours}-hour ${fastType} fast!`,
 						data: { type: "fasting_complete" },
 						sound: "default",
-						...(Platform.OS === "android" && {
-							channelId: "fasting-timer",
-						}),
 					},
-					trigger: completionTrigger,
+					trigger: withChannel(completionTrigger, "fasting-timer"),
 				});
 				notificationIds.push(completionId);
 			}
@@ -1061,11 +1197,8 @@ export class NotificationService {
 				body: `Session ${sessionNumber} finished! Time for a break.`,
 				data: { type: "pomodoro_end", sessionNumber },
 				sound: "default",
-				...(Platform.OS === "android" && {
-					channelId: "pomodoro-timer",
-				}),
 			},
-			trigger,
+			trigger: withChannel(trigger, "pomodoro-timer"),
 		});
 
 		console.log(
@@ -1094,11 +1227,8 @@ export class NotificationService {
 					: "Short break done! Time to focus again.",
 				data: { type: "break_end", isLongBreak },
 				sound: "default",
-				...(Platform.OS === "android" && {
-					channelId: "pomodoro-timer",
-				}),
 			},
-			trigger,
+			trigger: withChannel(trigger, "pomodoro-timer"),
 		});
 
 		console.log(

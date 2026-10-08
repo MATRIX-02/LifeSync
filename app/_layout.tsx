@@ -1,4 +1,9 @@
-import { handleWaterNotificationAction } from "@/src/services/waterReminders";
+import { handleHabitNotificationAction } from "@/src/services/habitReminderActions";
+import {
+	applyWaterConfig,
+	handleWaterNotificationAction,
+	loadWaterConfig,
+} from "@/src/services/waterReminders";
 import FontAwesome from "@expo/vector-icons/FontAwesome";
 import {
 	DarkTheme,
@@ -133,6 +138,15 @@ export default function RootLayout() {
 				}
 			}
 
+			// Water reminders too, so a fix to their channel or tone reaches
+			// reminders scheduled by an older version.
+			try {
+				const water = await loadWaterConfig();
+				if (water.enabled) await applyWaterConfig(water, water.scheduledForGoalMl ?? 2500);
+			} catch (error) {
+				console.error("Failed to reschedule water reminders:", error);
+			}
+
 			await NotificationService.debugListScheduledNotifications();
 		})();
 	}, [notificationsPermitted, habitsHasLoaded]);
@@ -263,6 +277,14 @@ function RootLayoutNav() {
 				const data = response.notification.request.content.data;
 
 				if (handleAppUpdate(data)) return;
+
+				if (
+					String(data?.type ?? "").startsWith("habit_reminder") &&
+					response.actionIdentifier !== Notifications.DEFAULT_ACTION_IDENTIFIER
+				) {
+					void handleHabitNotificationAction(response);
+					return;
+				}
 
 				if (String(data?.type ?? "").startsWith("water_reminder") && response.actionIdentifier) {
 					// Resolves false for a plain tap, which just opens the app.

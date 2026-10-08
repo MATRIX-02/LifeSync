@@ -24,7 +24,8 @@ if (Platform.OS === "android") {
 	);
 
 	// Action buttons that don't open the app ("Ignore" on a detected payment,
-	// "+250 ml" / "Snooze" on a water reminder) are delivered to this task when
+	// "+250 ml" / "Snooze" on a water reminder, "Done" / "Snooze" on a habit
+	// reminder) are delivered to this task when
 	// LifeSync isn't in the foreground.
 	const TaskManager = require("expo-task-manager");
 	const Notifications = require("expo-notifications");
@@ -32,7 +33,11 @@ if (Platform.OS === "android") {
 	const {
 		handleWaterNotificationAction,
 	} = require("./src/services/waterReminders");
+	const {
+		handleHabitNotificationAction,
+	} = require("./src/services/habitReminderActions");
 	TaskManager.defineTask(NOTIFICATION_ACTION_TASK, async ({ data }) => {
+		if (await handleHabitNotificationAction(data)) return;
 		if (await handleWaterNotificationAction(data)) return;
 		await handleDetectedNotificationAction(data);
 	});

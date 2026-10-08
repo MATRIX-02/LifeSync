@@ -115,9 +115,9 @@ async function showProgressNotification(version: string, percent: number | null)
 				autoDismiss: false,
 				sound: false,
 				data: { type: "app_update_progress" },
-				...(Platform.OS === "android" && { channelId: PROGRESS_CHANNEL }),
 			} as Notifications.NotificationContentInput,
-			trigger: null,
+			// The channel must be on the trigger; content.channelId is ignored.
+			trigger: Platform.OS === "android" ? { channelId: PROGRESS_CHANNEL } : null,
 		});
 	} catch {
 		// Progress is still shown in the app.

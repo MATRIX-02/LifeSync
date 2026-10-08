@@ -360,6 +360,7 @@ export function WaterReminderModal({ visible, onClose, config, onChange, goalMl 
 									await NotificationService.scheduleNextWaterReminder(
 										5 / 60,
 										"Test reminder - try the +250 ml, +500 ml and Snooze buttons.",
+										config.sound,
 									);
 									Alert.success("Test scheduled", "Arrives in 5 seconds.");
 								}}

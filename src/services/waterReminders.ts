@@ -188,6 +188,7 @@ export async function handleWaterNotificationAction(payload: unknown): Promise<b
 			await NotificationService.scheduleNextWaterReminder(
 				SNOOZE_MINUTES,
 				"Snoozed reminder - time for that glass of water 💧",
+				(await loadWaterConfig()).sound,
 			);
 		} else {
 			await logWaterInBackground(amount);

@@ -5,11 +5,13 @@ import {
 	SYSTEM_SOUND_ID,
 } from "@/src/constants/notificationSounds";
 import { Theme, useColors } from "@/src/context/themeContext";
+import { NotificationService } from "@/src/services/notificationService";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { Audio } from "expo-av";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
 	Modal,
+	Platform,
 	ScrollView,
 	StyleSheet,
 	Text,
@@ -90,6 +92,17 @@ export const SoundPickerModal: React.FC<SoundPickerModalProps> = ({
 
 	const choose = (id: string, asset?: number) => {
 		onSelect(id);
+		if (id === USE_DEFAULT_SOUND) return void stop();
+		if (Platform.OS === "android") {
+			// Through a real notification, at notification volume - media
+			// volume is often muted, which made previews silent.
+			void stop();
+			setPlaying(id);
+			void NotificationService.previewTone(id, kind).finally(() =>
+				setTimeout(() => setPlaying((p) => (p === id ? null : p)), 2500),
+			);
+			return;
+		}
 		if (asset !== undefined) preview(id, asset);
 		else stop();
 	};

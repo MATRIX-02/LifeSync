@@ -1733,14 +1733,10 @@ export default function SettingsScreen() {
 											);
 											return;
 										}
-										await NotificationService.scheduleInstantNotification(
-											"🔔 Test Notification",
-											"Notifications are working! Your habit reminders will appear like this.",
-											{ type: "test" },
-										);
-										Alert.alert(
-											"Success!",
-											"A test notification has been sent. Check your notification tray!",
+										await NotificationService.sendTestReminder(3);
+										Alert.success(
+											"Test reminder on its way",
+											"It arrives in 3 seconds with your default reminder tone, plus Done and Snooze buttons.",
 										);
 									} catch (error) {
 										Alert.alert(
@@ -1761,7 +1757,7 @@ export default function SettingsScreen() {
 								<View style={styles.settingContent}>
 									<Text style={styles.settingLabel}>Test Notification</Text>
 									<Text style={styles.settingDescription}>
-										Send a test push notification
+										A sample reminder with your tone and buttons
 									</Text>
 								</View>
 								<Ionicons
