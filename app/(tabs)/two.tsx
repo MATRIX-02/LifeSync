@@ -7,7 +7,6 @@ import { useTransactionDetectionStore } from "@/src/context/transactionDetection
 import { useFinanceStore } from "@/src/context/financeStoreDB";
 import { useHabitStore } from "@/src/context/habitStoreDB";
 import { ModuleType, useModuleStore } from "@/src/context/moduleContext";
-import { useStudyStore } from "@/src/context/studyStoreDB/index";
 import { Theme, useColors, useTheme } from "@/src/context/themeContext";
 import { useWorkoutStore } from "@/src/context/workoutStoreDB";
 import {
@@ -31,7 +30,6 @@ import {
 	syncFinanceToCloud,
 	syncHabitsToCloud,
 	SyncModule,
-	syncStudyToCloud,
 	syncWorkoutsToCloud,
 } from "@/src/services/syncService";
 import {
@@ -174,10 +172,6 @@ const REMINDER_KINDS: Record<
 		icon: "water",
 		color: "#60A5FA",
 	},
-	study_reminder: { label: "Study", icon: "school", color: "#06B6D4" },
-	revision_reminder: { label: "Revision", icon: "repeat", color: "#06B6D4" },
-	flashcard_review: { label: "Flashcards", icon: "albums", color: "#06B6D4" },
-	goal_deadline: { label: "Goals", icon: "flag", color: "#34D399" },
 	pomodoro_end: { label: "Pomodoro", icon: "timer", color: "#F87171" },
 	break_end: { label: "Breaks", icon: "cafe", color: "#F87171" },
 	fasting_milestone: { label: "Fasting", icon: "hourglass", color: "#FB923C" },
@@ -215,12 +209,6 @@ const MODULE_OPTIONS: Record<
 		description: "Manage your finances and budgets",
 		icon: "wallet",
 		color: "warning",
-	},
-	study: {
-		label: "Study Hub",
-		description: "Track your study sessions and goals",
-		icon: "book",
-		color: "accent",
 	},
 };
 
@@ -309,7 +297,6 @@ export default function SettingsScreen() {
 	const habitStore = useHabitStore();
 	const workoutStore = useWorkoutStore();
 	const financeStore = useFinanceStore();
-	const studyStore = useStudyStore();
 	const moduleStore = useModuleStore();
 	const { user, isAdmin, profile: authProfile } = useAuthStore();
 
@@ -376,7 +363,6 @@ export default function SettingsScreen() {
 		habits_synced_at?: string;
 		workouts_synced_at?: string;
 		finance_synced_at?: string;
-		study_synced_at?: string;
 	}>({});
 
 	const styles = createStyles(theme);
@@ -552,20 +538,6 @@ export default function SettingsScreen() {
 				});
 				if (!result.success) throw new Error(result.error);
 				Alert.alert("Success", "Finance data synced to cloud!");
-			} else if (module === "study") {
-				const result = await syncStudyToCloud(user.id, {
-					studyGoals: studyStore.studyGoals,
-					subjects: studyStore.subjects,
-					studySessions: studyStore.studySessions,
-					flashcardDecks: studyStore.flashcardDecks,
-					flashcards: studyStore.flashcards,
-					revisionSchedule: studyStore.revisionSchedule,
-					mockTests: studyStore.mockTests,
-					dailyPlans: studyStore.dailyPlans,
-					studyNotes: studyStore.studyNotes,
-				});
-				if (!result.success) throw new Error(result.error);
-				Alert.alert("Success", "Study data synced to cloud!");
 			}
 
 			// Refresh sync status
@@ -590,13 +562,11 @@ export default function SettingsScreen() {
 			return;
 		}
 
-		// Habits and Study are database-first - just refresh from DB
-		if (module === "habits" || module === "study") {
+		// Habits are database-first - just refresh from DB
+		if (module === "habits") {
 			Alert.alert(
 				"Refresh Data",
-				`This will refresh your ${
-					module === "habits" ? "habits" : "study"
-				} data from the database.`,
+				"This will refresh your habits data from the database.",
 				[
 					{ text: "Cancel", style: "cancel" },
 					{
@@ -604,11 +574,7 @@ export default function SettingsScreen() {
 						onPress: async () => {
 							setIsRestoring(module);
 							try {
-								if (module === "habits") {
-									await habitStore.refreshFromDatabase();
-								} else {
-									await studyStore.initialize(user.id);
-								}
+								await habitStore.refreshFromDatabase();
 								Alert.alert("Success", "Data refreshed from database!");
 							} catch (error: any) {
 								Alert.alert(
@@ -642,7 +608,7 @@ export default function SettingsScreen() {
 							if (module === "finance" || module === "all") {
 								await financeStore.initialize(user.id);
 							}
-							// Note: Habits and Study have their own refresh methods
+							// Note: Habits have their own refresh method
 							// and are not part of the SyncModule type
 
 							Alert.alert("Success", "Data refreshed from database!");
@@ -1435,61 +1401,6 @@ export default function SettingsScreen() {
 									</>
 								)}
 
-								{/* Study Hub Cloud */}
-								{moduleStore.isModuleEnabled("study") && (
-									<>
-										<View style={styles.thinDivider} />
-										<View style={styles.moduleRow}>
-											<View style={styles.moduleInfo}>
-												<Ionicons name="book" size={16} color="#06B6D4" />
-												<View>
-													<Text style={styles.moduleLabel}>Study Hub</Text>
-													<Text style={styles.syncTimeText}>
-														{formatSyncTime(syncStatus.study_synced_at)}
-													</Text>
-												</View>
-											</View>
-											<View style={styles.moduleActions}>
-												<TouchableOpacity
-													style={styles.iconButton}
-													onPress={() => handleSyncToCloud("study")}
-													disabled={isSyncing !== null}
-												>
-													{isSyncing === "study" ? (
-														<ActivityIndicator
-															size="small"
-															color={theme.success}
-														/>
-													) : (
-														<Ionicons
-															name="cloud-upload"
-															size={18}
-															color={theme.success}
-														/>
-													)}
-												</TouchableOpacity>
-												<TouchableOpacity
-													style={styles.iconButton}
-													onPress={() => handleRestoreFromCloud("study")}
-													disabled={isRestoring !== null}
-												>
-													{isRestoring === "study" ? (
-														<ActivityIndicator
-															size="small"
-															color={theme.primary}
-														/>
-													) : (
-														<Ionicons
-															name="cloud-download"
-															size={18}
-															color={theme.primary}
-														/>
-													)}
-												</TouchableOpacity>
-											</View>
-										</View>
-									</>
-								)}
 							</View>
 
 							{/* Destructive */}

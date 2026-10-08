@@ -7,7 +7,6 @@ import { useFinanceCategoryStore } from "../context/financeCategoryStore";
 import { useFinanceStore } from "../context/financeStoreDB";
 import { useHabitStore } from "../context/habitStoreDB";
 import { useModuleStore } from "../context/moduleContext";
-import { useStudyStore } from "../context/studyStoreDB/index";
 import { useWorkoutStore } from "../context/workoutStoreDB";
 import { migrateLocalFinanceToCloud } from "../services/financeLocalMigration";
 import { NotificationService } from "../services/notificationService";
@@ -182,7 +181,6 @@ export const useSyncManager = () => {
 		useHabitStore.getState().setUserId(id);
 		useWorkoutStore.getState().setUserId(id);
 		useFinanceStore.getState().setUserId(id);
-		useStudyStore.getState().setUserId(id);
 	}, [isInitialized, user?.id]);
 
 	// OS notifications are separate from the habit row in Supabase. Rebuild
@@ -210,6 +208,7 @@ export const useSyncManager = () => {
 		let cancelled = false;
 		void (async () => {
 			try {
+				await NotificationService.cancelRetiredStudyNotifications();
 				await NotificationService.cancelAllHabitNotifications();
 				if (cancelled) return;
 				const activeHabits = useHabitStore

@@ -5,7 +5,6 @@
 import { useAuthStore } from "../context/authStore";
 import { useFinanceStore } from "../context/financeStoreDB";
 import { useHabitStore } from "../context/habitStoreDB";
-import { useStudyStore } from "../context/studyStoreDB/index";
 import { useWorkoutStore } from "../context/workoutStoreDB";
 
 export const buildSyncPayload = async () => {
@@ -13,7 +12,6 @@ export const buildSyncPayload = async () => {
 	const habitStore = useHabitStore.getState();
 	const workoutStore = useWorkoutStore.getState();
 	const financeStore = useFinanceStore.getState();
-	const studyStore = useStudyStore.getState();
 
 	return {
 		profile: authProfile || null,
@@ -41,17 +39,6 @@ export const buildSyncPayload = async () => {
 			debts: financeStore.debts || [],
 			splitGroups: financeStore.splitGroups || [],
 			currency: financeStore.currency || "INR",
-		},
-		study: {
-			studyGoals: studyStore.studyGoals,
-			subjects: studyStore.subjects,
-			studySessions: studyStore.studySessions,
-			flashcardDecks: studyStore.flashcardDecks,
-			flashcards: studyStore.flashcards,
-			revisionSchedule: studyStore.revisionSchedule,
-			mockTests: studyStore.mockTests,
-			dailyPlans: studyStore.dailyPlans,
-			studyNotes: studyStore.studyNotes,
 		},
 	};
 };

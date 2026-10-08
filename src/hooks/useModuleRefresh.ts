@@ -14,11 +14,10 @@ import { supabaseDirect } from "../config/supabase";
 import { useAuthStore } from "../context/authStore";
 import { useFinanceStore } from "../context/financeStoreDB";
 import { useHabitStore } from "../context/habitStoreDB";
-import { useStudyStore } from "../context/studyStoreDB/index";
 import { useWorkoutStore } from "../context/workoutStoreDB";
 import { flushQueue } from "../services/writeQueue";
 
-export type RefreshableModule = "habits" | "workout" | "finance" | "study";
+export type RefreshableModule = "habits" | "workout" | "finance";
 
 export const useModuleRefresh = (module: RefreshableModule) => {
 	const [refreshing, setRefreshing] = useState(false);
@@ -47,9 +46,6 @@ export const useModuleRefresh = (module: RefreshableModule) => {
 					await useFinanceStore.getState().initialize(userId);
 					// Anything that fell due since the last check posts now too.
 					await useFinanceStore.getState().processRecurringTransactions();
-					break;
-				case "study":
-					await useStudyStore.getState().initialize(userId);
 					break;
 			}
 		} catch (error) {

@@ -166,16 +166,8 @@ export class NotificationService {
 				showBadge: true,
 			});
 
-			// Study Hub channel
-			await Notifications.setNotificationChannelAsync("study-reminders", {
-				name: "Study Reminders",
-				importance: Notifications.AndroidImportance.HIGH,
-				vibrationPattern: [0, 250, 250, 250],
-				lightColor: "#3B82F6",
-				sound: "default",
-				enableVibrate: true,
-				showBadge: true,
-			});
+			// Study Hub was removed; drop its channel from system settings.
+			await Notifications.deleteNotificationChannelAsync("study-reminders");
 
 			// Alarm channel.
 			//
@@ -432,7 +424,7 @@ export class NotificationService {
 		}
 	}
 
-	// Cancel every habit reminder, leaving bills/water/study/timers untouched.
+	// Cancel every habit reminder, leaving bills/water/timers untouched.
 	static async cancelAllHabitNotifications(): Promise<void> {
 		const scheduled = await this.getAllScheduledNotifications();
 		for (const notif of scheduled) {
@@ -604,120 +596,20 @@ export class NotificationService {
 		};
 	}
 
-	// ============ STUDY HUB NOTIFICATIONS ============
-
-	// Schedule daily study reminder at a specific time
-	static async scheduleStudyReminder(
-		timeString: string, // HH:mm format
-		message?: string
-	): Promise<string> {
-		const [hours, minutes] = timeString.split(":").map(Number);
-
-		const trigger: Notifications.DailyTriggerInput = {
-			type: Notifications.SchedulableTriggerInputTypes.DAILY,
-			hour: hours,
-			minute: minutes,
-		};
-
-		return this.scheduleNotification(
-			"📚 Time to Study!",
-			message || "Start your study session and stay on track with your goals.",
-			trigger,
-			{ type: "study_reminder" }
-		);
-	}
-
-	// Schedule flashcard review reminder
-	static async scheduleFlashcardReviewReminder(
-		deckId: string,
-		deckName: string,
-		dueCount: number,
-		scheduledTime?: Date
-	): Promise<string> {
-		const trigger = scheduledTime
-			? {
-					type: Notifications.SchedulableTriggerInputTypes.DATE as const,
-					date: scheduledTime,
-			  }
-			: null;
-
-		return this.scheduleNotification(
-			"🃏 Flashcards Due",
-			`You have ${dueCount} cards due for review in "${deckName}"`,
-			trigger,
-			{ type: "flashcard_review", deckId, dueCount }
-		);
-	}
-
-	// Schedule revision reminder
-	static async scheduleRevisionReminder(
-		scheduleId: string,
-		title: string,
-		scheduledDate: Date
-	): Promise<string> {
-		const trigger: Notifications.DateTriggerInput = {
-			type: Notifications.SchedulableTriggerInputTypes.DATE,
-			date: scheduledDate,
-		};
-
-		return this.scheduleNotification(
-			"📖 Revision Reminder",
-			`Time to revise: ${title}`,
-			trigger,
-			{ type: "revision_reminder", scheduleId }
-		);
-	}
-
-	// Schedule goal deadline reminder
-	static async scheduleGoalDeadlineReminder(
-		goalId: string,
-		goalName: string,
-		deadline: Date,
-		daysLeft: number
-	): Promise<string> {
-		const reminderDate = new Date(deadline);
-		reminderDate.setDate(reminderDate.getDate() - daysLeft);
-		reminderDate.setHours(9, 0, 0, 0);
-
-		if (reminderDate <= new Date()) {
-			console.log(`⏭️ Goal deadline reminder already passed, skipping`);
-			return "";
-		}
-
-		const trigger: Notifications.DateTriggerInput = {
-			type: Notifications.SchedulableTriggerInputTypes.DATE,
-			date: reminderDate,
-		};
-
-		const urgency = daysLeft <= 1 ? "⚠️" : daysLeft <= 3 ? "🎯" : "📅";
-		const message =
-			daysLeft === 1
-				? `Your goal "${goalName}" is due tomorrow!`
-				: `Your goal "${goalName}" is due in ${daysLeft} days!`;
-
-		return this.scheduleNotification(
-			`${urgency} Goal Deadline`,
-			message,
-			trigger,
-			{ type: "goal_deadline", goalId, daysLeft }
-		);
-	}
-
-	// Cancel study-related notification by ID
-	static async cancelStudyNotification(
-		type: "revision_reminder" | "goal_deadline" | "flashcard_review",
-		entityId: string
-	): Promise<void> {
+	// Study Hub was removed. Its reminders were scheduled on-device, so they
+	// keep firing until cancelled - clear them by payload type.
+	static async cancelRetiredStudyNotifications(): Promise<void> {
+		const retired = new Set([
+			"study_reminder",
+			"flashcard_review",
+			"revision_reminder",
+			"goal_deadline",
+		]);
 		const scheduled = await this.getAllScheduledNotifications();
 		for (const notif of scheduled) {
-			const data = notif.content.data;
-			if (
-				(type === "revision_reminder" && data?.scheduleId === entityId) ||
-				(type === "goal_deadline" && data?.goalId === entityId) ||
-				(type === "flashcard_review" && data?.deckId === entityId)
-			) {
+			const type = notif.content.data?.type;
+			if (typeof type === "string" && retired.has(type)) {
 				await this.cancelNotification(notif.identifier);
-				console.log(`🗑️ Cancelled ${type} notification for: ${entityId}`);
 			}
 		}
 	}

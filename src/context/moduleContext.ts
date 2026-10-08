@@ -3,7 +3,7 @@ import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import { NotificationService } from "../services/notificationService";
 
-export type ModuleType = "habits" | "workout" | "finance" | "study";
+export type ModuleType = "habits" | "workout" | "finance";
 
 interface ModuleStore {
 	// Module states
@@ -18,12 +18,11 @@ interface ModuleStore {
 	getDefaultModuleRoute: () => string;
 }
 
-const defaultModules: ModuleType[] = ["habits", "workout", "finance", "study"];
+const defaultModules: ModuleType[] = ["habits", "workout", "finance"];
 const moduleRoutes: Record<ModuleType, string> = {
 	habits: "/(tabs)",
 	workout: "/(tabs)/workout",
 	finance: "/(tabs)/finance",
-	study: "/(tabs)/study",
 };
 
 // Create store with persist
@@ -90,7 +89,7 @@ const useModuleStoreBase = create<ModuleStore>()(
 						try {
 							// Cancels by matching data.habitId, so it catches every
 							// reminder a habit owns - not just one stored id. It also
-							// leaves bill, water, study and timer reminders alone.
+							// leaves bill, water and timer reminders alone.
 							await NotificationService.cancelAllHabitNotifications();
 							console.log("✅ Canceled all habit reminders");
 						} catch (error) {
@@ -144,6 +143,12 @@ const useModuleStoreBase = create<ModuleStore>()(
 			name: "module-store",
 			storage: createJSONStorage(() => AsyncStorage),
 			onRehydrateStorage: () => (state) => {
+				// Drop modules that no longer exist (Study Hub was removed).
+				if (state && Array.isArray(state.enabledModules)) {
+					state.enabledModules = state.enabledModules.filter((m) =>
+						defaultModules.includes(m),
+					);
+				}
 				// Ensure we always have valid data after rehydration
 				if (
 					state &&
