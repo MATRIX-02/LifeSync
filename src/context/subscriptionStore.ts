@@ -1,7 +1,10 @@
 import { create } from "zustand";
 import { supabase } from "../config/supabase";
-import { PhonePeOrder, phonepeService } from "../services/phonepeService";
-import { RazorpayOrder, razorpayService } from "../services/razorpayService";
+import {
+	CheckoutResult,
+	PaymentProvider,
+	startCheckout,
+} from "../services/paymentService";
 import {
 	Coupon,
 	SubscriptionPlan,
@@ -42,27 +45,12 @@ interface SubscriptionActions {
 	cancelSubscription: (
 		subscriptionId: string,
 	) => Promise<{ error: Error | null }>;
-	createRazorpayOrder: (
-		userId: string,
+	/** Paid plans only. Activation happens server-side after payment. */
+	startCheckout: (
 		planId: string,
-		amount: number,
-		planName: string,
 		billingCycle: "monthly" | "yearly",
-		userEmail: string,
-		userName: string,
-		couponId?: string,
-	) => Promise<{ error: Error | null; order: RazorpayOrder | null }>;
-	createPhonePePayment: (
-		userId: string,
-		planId: string,
-		amount: number,
-		planName: string,
-		billingCycle: "monthly" | "yearly",
-		userEmail: string,
-		userName: string,
-		userPhone: string,
-		couponId?: string,
-	) => Promise<{ error: Error | null; order: PhonePeOrder | null }>;
+		provider: PaymentProvider,
+	) => Promise<CheckoutResult>;
 	clearCoupon: () => void;
 	clearError: () => void;
 }
@@ -110,12 +98,13 @@ export const useSubscriptionStore = create<SubscriptionStore>((set, get) => ({
 	) => {
 		set({ isLoading: true, error: null });
 		try {
-			const { data: coupon, error } = await supabase
-				.from("coupons")
-				.select("*")
-				.eq("code", code.toUpperCase())
-				.eq("is_active", true)
-				.single();
+			// The coupons table is admin-only; validate_coupon() answers for one
+			// code at a time, so the full list of codes cannot be read.
+			const { data: rows, error } = await (supabase.rpc as any)(
+				"validate_coupon",
+				{ p_code: code.trim().toUpperCase() },
+			);
+			const coupon = Array.isArray(rows) ? rows[0] : rows;
 
 			if (error || !coupon) {
 				set({ currentCoupon: null });
@@ -228,6 +217,14 @@ export const useSubscriptionStore = create<SubscriptionStore>((set, get) => ({
 		const run = async () => {
 			set({ isLoading: true, error: null });
 			try {
+				// The app may only switch a user onto the free plan. Paid plans are
+				// activated by the payment webhook or by an admin, and the database
+				// rejects a client insert for any other plan.
+				const plan = get().plans.find((p) => p.id === planId);
+				if (!plan || plan.slug !== "free") {
+					throw new Error("Paid plans are activated after payment.");
+				}
+
 				// Calculate period dates
 				const now = new Date();
 				const endDate = new Date();
@@ -277,32 +274,6 @@ export const useSubscriptionStore = create<SubscriptionStore>((set, get) => ({
 
 				if (error) throw error;
 
-				// Update coupon usage if used
-				if (couponId) {
-					await (supabase.rpc as any)("increment_coupon_usage", {
-						coupon_id: couponId,
-					});
-
-					// Record coupon redemption
-					const { currentCoupon } = get();
-					if (currentCoupon) {
-						const plan = get().plans.find((p) => p.id === planId);
-						if (plan) {
-							const { discount } = get().calculatePrice(
-								plan,
-								billingCycle,
-								currentCoupon,
-							);
-							await (supabase.from("coupon_redemptions") as any).insert({
-								coupon_id: couponId,
-								user_id: userId,
-								subscription_id: (subscription as any).id,
-								discount_applied: discount,
-							});
-						}
-					}
-				}
-
 				set({ currentCoupon: null });
 				return { error: null, subscription };
 			} catch (error) {
@@ -339,69 +310,15 @@ export const useSubscriptionStore = create<SubscriptionStore>((set, get) => ({
 		}
 	},
 
-	createRazorpayOrder: async (
-		userId: string,
-		planId: string,
-		amount: number,
-		planName: string,
-		billingCycle: "monthly" | "yearly",
-		userEmail: string,
-		userName: string,
-		couponId?: string,
-	) => {
+	startCheckout: async (planId, billingCycle, provider) => {
 		set({ isLoading: true, error: null });
 		try {
-			const order = await razorpayService.createOrder({
-				userId,
+			return await startCheckout({
 				planId,
-				amount: Math.round(amount * 100), // Convert to paise
-				planName,
 				billingCycle,
-				couponId,
-				userEmail,
-				userName,
+				provider,
+				couponCode: get().currentCoupon?.code,
 			});
-
-			return { error: null, order };
-		} catch (error) {
-			const errorMsg = (error as Error).message;
-			set({ error: errorMsg });
-			return { error: new Error(errorMsg), order: null };
-		} finally {
-			set({ isLoading: false });
-		}
-	},
-
-	createPhonePePayment: async (
-		userId: string,
-		planId: string,
-		amount: number,
-		planName: string,
-		billingCycle: "monthly" | "yearly",
-		userEmail: string,
-		userName: string,
-		userPhone: string,
-		couponId?: string,
-	) => {
-		set({ isLoading: true, error: null });
-		try {
-			const order = await phonepeService.createPayment({
-				userId,
-				planId,
-				amount: Math.round(amount * 100), // Convert to paise
-				planName,
-				billingCycle,
-				couponId,
-				userEmail,
-				userName,
-				userPhone,
-			});
-
-			return { error: null, order };
-		} catch (error) {
-			const errorMsg = (error as Error).message;
-			set({ error: errorMsg });
-			return { error: new Error(errorMsg), order: null };
 		} finally {
 			set({ isLoading: false });
 		}

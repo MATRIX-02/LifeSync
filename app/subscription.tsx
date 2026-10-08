@@ -27,8 +27,7 @@ export default function SubscriptionScreen() {
 		validateCoupon,
 		calculatePrice,
 		subscribeToPlan,
-		createRazorpayOrder,
-		createPhonePePayment,
+		startCheckout,
 		clearCoupon,
 		isLoading,
 	} = useSubscriptionStore();
@@ -89,162 +88,38 @@ export default function SubscriptionScreen() {
 	};
 
 	const handlePayment = async (method: "razorpay" | "phonepe") => {
-		if (!selectedPlan || !user || !user.email) return;
-
-		const { originalPrice, finalPrice } = calculatePrice(
-			selectedPlan,
-			billingCycle,
-			currentCoupon
-		);
-
-		try {
-			if (method === "razorpay") {
-				const { error, order } = await createRazorpayOrder(
-					user.id,
-					selectedPlan.id,
-					finalPrice,
-					selectedPlan.name,
-					billingCycle,
-					user.email,
-					profile?.full_name || user.user_metadata?.full_name || "User",
-					currentCoupon?.id
-				);
-
-				if (!error && order) {
-					// In a real app, you would open the Razorpay modal here
-					// For now, we simulate a successful payment
-					Alert.alert(
-						"Razorpay Payment",
-						`Order created for ₹${finalPrice.toFixed(
-							2
-						)}. In production, this would open Razorpay payment gateway.`,
-						[
-							{ text: "Cancel", style: "cancel" },
-							{
-								text: "Simulate Success",
-								onPress: async () => {
-									await completeSubscription();
-								},
-							},
-						]
-					);
-				} else {
-					Alert.alert("Error", error?.message || "Failed to create order");
-				}
-			} else if (method === "phonepe") {
-				// Get user phone from profile or prompt
-				Alert.prompt(
-					"PhonePe Payment",
-					"Enter your mobile number for UPI/PhonePe payment",
-					[
-						{
-							text: "Cancel",
-							style: "cancel",
-						},
-						{
-							text: "Pay",
-							onPress: async (phone: string | undefined) => {
-								if (!phone) return;
-
-								const { error, order } = await createPhonePePayment(
-									user.id,
-									selectedPlan.id,
-									finalPrice,
-									selectedPlan.name,
-									billingCycle,
-									user.email || "",
-									profile?.full_name || user.user_metadata?.full_name || "User",
-									phone,
-									currentCoupon?.id
-								);
-
-								if (!error && order) {
-									Alert.alert(
-										"PhonePe Payment",
-										`Payment link created for ₹${finalPrice.toFixed(
-											2
-										)}. In production, this would open PhonePe UPI payment.`,
-										[
-											{ text: "Cancel", style: "cancel" },
-											{
-												text: "Simulate Success",
-												onPress: async () => {
-													await completeSubscription();
-												},
-											},
-										]
-									);
-								} else {
-									Alert.alert(
-										"Error",
-										error?.message || "Failed to create payment"
-									);
-								}
-							},
-						},
-					],
-					"plain-text"
-				);
-			}
-		} catch (error) {
-			Alert.alert("Error", (error as Error).message);
-		}
-	};
-
-	const completeSubscription = async () => {
 		if (!selectedPlan || !user) return;
 
-		const { error } = await subscribeToPlan(
-			user.id,
-			selectedPlan.id,
-			billingCycle,
-			currentCoupon?.id
-		);
+		const result = await startCheckout(selectedPlan.id, billingCycle, method);
 
-		if (!error) {
-			await fetchSubscription();
-			setShowPayment(false);
-			setPaymentMethod(null);
+		if (result.status === "unavailable") {
 			Alert.alert(
-				"Success",
-				`You are now subscribed to ${selectedPlan.name}!`,
-				[{ text: "OK", onPress: () => router.back() }]
+				"Online payments coming soon",
+				"Paying in the app isn't available yet. To upgrade now, contact support and your plan will be activated on your account.",
+			);
+			return;
+		}
+		if (result.status === "error") {
+			Alert.alert("Payment failed", result.message);
+			return;
+		}
+
+		// The plan is activated by the server once the provider confirms the
+		// payment, which can land a moment after the browser closes.
+		await fetchSubscription();
+		setShowPayment(false);
+		setPaymentMethod(null);
+		const active = useAuthStore.getState().subscription;
+		if (active?.subscription_plans?.slug === selectedPlan.slug) {
+			Alert.alert("Success", `You are now subscribed to ${selectedPlan.name}!`, [
+				{ text: "OK", onPress: () => router.back() },
+			]);
+		} else {
+			Alert.alert(
+				"Payment processing",
+				"If you completed the payment, your plan will be active within a few minutes.",
 			);
 		}
-	};
-
-	const handlePaymentOld = async () => {
-		if (!selectedPlan || !user) return;
-
-		// Here you would integrate with Stripe
-		// For now, we'll simulate a successful payment
-		Alert.alert(
-			"Payment",
-			"This would integrate with Stripe for payment processing. For demo purposes, proceeding with subscription.",
-			[
-				{ text: "Cancel", style: "cancel" },
-				{
-					text: "Simulate Payment",
-					onPress: async () => {
-						const { error } = await subscribeToPlan(
-							user.id,
-							selectedPlan.id,
-							billingCycle,
-							currentCoupon?.id
-						);
-
-						if (!error) {
-							await fetchSubscription();
-							Alert.alert(
-								"Success",
-								`You are now subscribed to ${selectedPlan.name}!`,
-								[{ text: "OK", onPress: () => router.back() }]
-							);
-						}
-					},
-				},
-			]
-		);
 	};
 
 	const styles = createStyles(theme);
