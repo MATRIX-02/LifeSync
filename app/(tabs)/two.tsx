@@ -7,6 +7,7 @@ import { useTransactionDetectionStore } from "@/src/context/transactionDetection
 import { useFinanceStore } from "@/src/context/financeStoreDB";
 import { useHabitStore } from "@/src/context/habitStoreDB";
 import { SoundPickerModal } from "@/src/components/SoundPickerModal";
+import { AppUpdatesSheet } from "@/src/components/settings/AppUpdatesSheet";
 import GeminiKeySettings, {
 	useUserGeminiKey,
 } from "@/src/components/settings/GeminiKeySettings";
@@ -345,6 +346,7 @@ export default function SettingsScreen() {
 	const [aiQuota, setAiQuota] = useState<QuotaSnapshot | null>(null);
 	const [isCheckingQuota, setIsCheckingQuota] = useState(false);
 	const [showGeminiKey, setShowGeminiKey] = useState(false);
+	const [showUpdates, setShowUpdates] = useState(false);
 	const geminiKey = useUserGeminiKey();
 	const [aiSmsEnabled, setAiSmsEnabled] = useState(false);
 
@@ -1611,6 +1613,8 @@ export default function SettingsScreen() {
 					/>
 				</SettingsSection>
 
+				<AppUpdatesSheet visible={showUpdates} onClose={() => setShowUpdates(false)} />
+
 				{/* About Section */}
 				<SettingsSection title="ABOUT" styles={styles}>
 					<View style={styles.settingCard}>
@@ -1638,6 +1642,29 @@ export default function SettingsScreen() {
 								</Text>
 							</View>
 						</View>
+
+						<View style={styles.divider} />
+
+						<TouchableOpacity
+							style={styles.settingRow}
+							onPress={() => setShowUpdates(true)}
+						>
+							<View
+								style={[
+									styles.settingIcon,
+									{ backgroundColor: theme.success + "20" },
+								]}
+							>
+								<Ionicons name="cloud-download-outline" size={20} color={theme.success} />
+							</View>
+							<View style={styles.settingContent}>
+								<Text style={styles.settingLabel}>Check for updates</Text>
+								<Text style={styles.settingDescription}>
+									See what's new and install the latest version
+								</Text>
+							</View>
+							<Ionicons name="chevron-forward" size={18} color={theme.textMuted} />
+						</TouchableOpacity>
 
 						<View style={styles.divider} />
 

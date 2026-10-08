@@ -36,6 +36,7 @@ import { useSyncManager } from "@/src/hooks/useSyncManager";
 import { AudioService } from "@/src/services/audioService";
 import { NotificationService } from "@/src/services/notificationService";
 import { ensureUpdateChannel, installUpdate } from "@/src/services/appUpdateService";
+import { UpdateProgressSheet } from "@/src/components/UpdateProgressSheet";
 
 export {
 	// Catch any errors thrown by the Layout component.
@@ -153,6 +154,7 @@ export default function RootLayout() {
 						    change is saved locally but not yet on the server. */}
 						<SyncStatusBanner />
 						<RootLayoutNav />
+						<UpdateProgressSheet />
 					</SafeAreaFrame>
 				</AlertProvider>
 			</ThemeProvider>
