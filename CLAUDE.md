@@ -12,7 +12,7 @@ npx tsc --noEmit       # the only static check in the repo
 eas build -p android --profile preview   # APK; profiles: development | preview | production
 ```
 
-**There is no test runner and no linter.** `components/__tests__/StyledText-test.js` is orphaned — no jest config, no jest dependency, no test script. Don't claim tests pass; `tsc --noEmit` is the whole verification story. It currently reports 13 pre-existing errors — capture a baseline before editing so you can tell yours apart from the noise.
+**There is no test runner and no linter.** Don't claim tests pass; `tsc --noEmit` is the whole verification story. It currently reports 6 pre-existing errors — capture a baseline before editing so you can tell yours apart from the noise.
 
 **Expo Go will not run this app.** Two custom config plugins (`plugins/withSmsPermission.js`, `plugins/withNotificationListener.js`) plus native modules (`react-native-android-notification-listener`, `react-native-get-sms-android`, `react-native-sound-level`) require a dev build. `android/` and `ios/` are prebuild output and gitignored.
 
@@ -20,17 +20,15 @@ eas build -p android --profile preview   # APK; profiles: development | preview 
 
 `package.json` sets `main: expo-router/entry`, so **routing is file-based under `app/`**.
 
-`AppEntry.tsx`, `src/navigation/RootNavigator.tsx`, `src/features/habit-tracker/`, and `src/features/settings/` are an older React Navigation entry path that **nothing imports**. Editing `src/features/habit-tracker/screens/HabitTrackerScreen.tsx` changes nothing users see — it is a stale duplicate of the real habits screen. Verify with a grep for importers before working in `src/features/` or `src/navigation/`.
-
 Two route-naming traps in `app/(tabs)/`:
 - **`two.tsx` is the Settings screen** (`export default function SettingsScreen`), not a second tab.
 - `(tabs)/_layout.tsx` renders a **`Stack`**, not tabs. Navigation is a custom drawer (`SharedDrawer`).
 
-Screens are large and self-contained; feature UI is usually inline rather than extracted:
-- `app/(tabs)/index.tsx` (~4000 lines) — habits list **and** the Create Habit modal
-- `app/(tabs)/statistics.tsx` (~3000 lines) — habit stats **and** the Edit Habit modal
+Screens are large and self-contained; feature UI is often inline rather than extracted.
 
-A change to habit creation almost always needs the matching change in the edit modal, in the other file.
+- **Habit create and edit share one form:** `src/components/habits/HabitFormModal.tsx`, rendered by `app/(tabs)/index.tsx` (create) and `app/(tabs)/statistics.tsx` (edit). The modal only collects values; each screen does its own persistence and reminder scheduling.
+- **Styles:** big files import `createStyles` from a sibling `*.styles.ts`. Screen styles live in `src/styles/`, because any file under `app/` becomes a route.
+- **Split Wise** lives in `src/components/finance/splitwise/` (one file per view/modal).
 
 ## State: `*StoreDB` vs legacy stores
 
@@ -40,12 +38,11 @@ Zustand throughout, but in two generations:
 |---|---|
 | `habitStoreDB.ts` | Genuinely database-first — every operation hits Supabase directly |
 | `financeStoreDB/` | Genuinely database-first — every mutator is `async` and writes to Supabase. Its `types.ts` re-exports `src/types/finance.ts`; do not fork a local copy, the divergence silently dropped fields |
-| `workoutStoreDB.ts` | **Re-export shim** over the legacy store (`export { useWorkoutStore } from "./workoutStore"`) |
-| `habitStore.ts`, `financeStore.ts` | Legacy AsyncStorage + `persist`. `habitStore` is still imported by `moduleContext.ts`; `financeStore` is now only referenced by the dead `SettingsScreen` |
+| `workoutStoreDB/` | Database-first workout store |
 
-So `habitStore.ts` and `habitStoreDB.ts` are **different stores with different data**. App code should use `habitStoreDB`; be aware `moduleContext.toggleModule` reads the legacy one when rescheduling notifications.
+The legacy AsyncStorage stores (`habitStore.ts`, `workoutStore.ts`, `financeStore.ts`) have been deleted.
 
-**Watch for shadowed modules.** `src/context/financeStoreDB.ts` (a shim) sat next to `src/context/financeStoreDB/` (a complete database-first store) for a long time. Metro resolves `"./financeStoreDB"` to the **file**, not the directory, so the real store was dead code and the whole Money Hub silently ran on the legacy AsyncStorage store. The shim has been deleted. If you add a `*StoreDB.ts` alongside a `*StoreDB/`, you will reintroduce this.
+**Watch for shadowed modules.** `src/context/financeStoreDB.ts` (a shim) sat next to `src/context/financeStoreDB/` (a complete database-first store) for a long time. Metro resolves `"./financeStoreDB"` to the **file**, not the directory, so the real store was dead code and the whole Money Hub silently ran on the legacy AsyncStorage store. The shim has been deleted. If you add a `*StoreDB.ts` alongside a `*StoreDB/`, you will reintroduce this (it happened again with `studyStoreDB`).
 
 `useSyncManager` (mounted in the root layout) calls `store.initialize(userId)` for habits/workouts/finance on auth, and `src/services/syncService.ts` provides explicit `syncXToCloud` / `fetchXFromCloud` plus auto-sync on a user-set interval.
 
@@ -68,13 +65,13 @@ Miss one and the field is silently dropped on save or lost on cloud restore. Any
 
 ## Notifications
 
-`src/services/notificationService.ts` is a single static class serving **every** module — habits, bills, water, study/revision/goals, pomodoro, fasting. Each notification carries a `data.type` discriminator (`habit_reminder`, `bill_reminder`, `water_reminder`, …).
+`src/services/notificationService.ts` is a single static class serving **every** module — habits, bills, water, pomodoro, fasting. Each notification carries a `data.type` discriminator (`habit_reminder`, `bill_reminder`, `water_reminder`, …).
 
 Because all modules share one queue, **never call `cancelAllNotifications()`** outside an explicit user "clear everything" action. Cancel by filtering on the `data` payload instead — `cancelHabitNotifications(habitId)`, `cancelAllHabitNotifications()`, `cancelBillReminder(billId)`, and friends. Only habit reminders are rescheduled on launch, so a blanket cancel permanently destroys every other module's reminders.
 
 `scheduleHabitReminders(habit)` is frequency-aware: `specific_days` produces one WEEKLY trigger per day, `times_per_day` expands a start/end/interval window into N DAILY triggers, everything else gets a single DAILY trigger. Notification ids are deliberately **not** persisted — cancellation matches on the payload.
 
-Android channels (`habit-reminders`, `study-reminders`, `hydration-reminders`, `pomodoro-timer`, `fasting-timer`, `default`) are created in `requestPermissions()` and per-feature schedulers.
+Android channels (`habit-reminders`, `hydration-reminders`, `pomodoro-timer`, `fasting-timer`, `default`) are created in `requestPermissions()` and per-feature schedulers.
 
 **`Habit.alarmEnabled` and `ringtoneEnabled` are inert.** Both modals toggle and persist them, and `AudioService.playRingtone()` exists, but nothing reads either flag — the alarm feature is unimplemented UI.
 
@@ -84,7 +81,11 @@ Android channels (`habit-reminders`, `study-reminders`, `hydration-reminders`, `
 - **Theming**: `const theme = useColors()` returns the full palette; screens build styles via a module-level `const createStyles = (theme: Theme) => StyleSheet.create({...})`. Don't hardcode colors.
 - **Path alias**: `@/*` maps to the repo root (`@/src/...`).
 - **Formatting**: tabs, not spaces. There is no prettier config or dependency — running prettier with defaults will reformat entire files and bury your diff. If you must format, restrict it to `--use-tabs` on the exact files you touched.
-- **Feature gating**: `useSubscriptionCheck()` (`src/components/PremiumFeatureGate.tsx`) supplies `canAddHabit(count)`, `canAddAccount`, etc. against plan limits from the DB, where `-1` means unlimited. `moduleContext.ts` separately lets users disable whole modules (`habits | workout | finance | study`).
+- **Feature gating**: `useSubscriptionCheck()` (`src/components/PremiumFeatureGate.tsx`) supplies `canAddHabit(count)`, `canAddAccount`, etc. against plan limits from the DB, where `-1` means unlimited. `moduleContext.ts` separately lets users disable whole modules (`habits | workout | finance`).
+
+## Removed: Study Hub
+
+The Study module was removed; its code is preserved on the `archive/study-hub` branch. Its Supabase tables (`study_*`, `flashcard*`, `revision_schedule`, `mock_tests`, `daily_plans`) still exist and still hold users' rows; "delete all cloud data" clears them. On launch the app cancels leftover study notifications and deletes the `study-reminders` channel.
 
 ## Releasing
 
