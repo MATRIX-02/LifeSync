@@ -34,6 +34,7 @@ import { useNavigationPersistence } from "@/src/hooks/useNavigationPersistence";
 import { useSyncManager } from "@/src/hooks/useSyncManager";
 import { AudioService } from "@/src/services/audioService";
 import { NotificationService } from "@/src/services/notificationService";
+import { ensureUpdateChannel, installUpdate } from "@/src/services/appUpdateService";
 
 export {
 	// Catch any errors thrown by the Layout component.
@@ -182,9 +183,13 @@ function RootLayoutNav() {
 	// an effect here gets overwritten by the startup route.)
 	const [launchDetectionId] = useState<string | null>(() => {
 		try {
-			const data = Notifications.getLastNotificationResponse()?.notification.request
-				.content.data;
-			if (data?.type === "detected_transaction" && typeof data.id === "string") {
+			const last = Notifications.getLastNotificationResponse();
+			const data = last?.notification.request.content.data;
+			if (
+				data?.type === "detected_transaction" &&
+				typeof data.id === "string" &&
+				last?.actionIdentifier !== NotificationService.DETECTED_ACTION_IGNORE
+			) {
 				Notifications.clearLastNotificationResponse();
 				useTransactionDetectionStore.getState().setFocusId(data.id);
 				return data.id;
@@ -227,13 +232,41 @@ function RootLayoutNav() {
 		router.push("/(tabs)/finance");
 	};
 
+	// "Update available" push (scripts/notify-update.mjs): download + install.
+	const handleAppUpdate = (data: Record<string, unknown> | undefined) => {
+		if (data?.type !== "app_update") return false;
+		if (typeof data.version === "string" && typeof data.apkUrl === "string") {
+			void installUpdate(data.version, data.apkUrl);
+		}
+		return true;
+	};
+
+	// Cold start from tapping an update push. The listener below isn't attached
+	// yet when the launching tap happens, so read it once here.
+	useEffect(() => {
+		void ensureUpdateChannel();
+		try {
+			const data = Notifications.getLastNotificationResponse()?.notification.request
+				.content.data;
+			if (handleAppUpdate(data)) Notifications.clearLastNotificationResponse();
+		} catch {
+			// No notification module (web).
+		}
+	}, []);
+
 	// Set up notification response listener (when user taps notification)
 	useEffect(() => {
 		const subscription = Notifications.addNotificationResponseReceivedListener(
 			(response) => {
 				const data = response.notification.request.content.data;
 
+				if (handleAppUpdate(data)) return;
+
 				if (data?.type === "detected_transaction" && typeof data.id === "string") {
+					if (response.actionIdentifier === NotificationService.DETECTED_ACTION_IGNORE) {
+						void useTransactionDetectionStore.getState().dismissTransaction(data.id);
+						return;
+					}
 					openDetectedTransaction(data.id);
 					return;
 				}

@@ -20,6 +20,7 @@ import type { PaymentMethod } from "@/src/types/finance";
 import { Ionicons } from "@expo/vector-icons";
 import React, { useEffect, useState } from "react";
 import {
+	KeyboardAvoidingView,
 	Modal,
 	Platform,
 	ScrollView,
@@ -29,6 +30,7 @@ import {
 	TouchableOpacity,
 	View,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 interface TransactionPromptProps {
 	visible: boolean;
@@ -47,6 +49,7 @@ export function TransactionPrompt({
 }: TransactionPromptProps) {
 	const { theme } = useTheme();
 	const styles = createStyles(theme);
+	const insets = useSafeAreaInsets();
 	const financeCategories = useFinanceCategories();
 	const { accounts, addTransaction, updateAccount } = useFinanceStore();
 	const { markAsProcessed, dismissTransaction } =
@@ -205,9 +208,17 @@ export function TransactionPrompt({
 	};
 
 	return (
-		<Modal visible={visible} transparent animationType="slide">
-			<View style={styles.overlay}>
-				<View style={styles.container}>
+		<Modal
+			visible={visible}
+			transparent
+			animationType="slide"
+			onRequestClose={onClose}
+		>
+			<KeyboardAvoidingView
+				style={styles.overlay}
+				behavior={Platform.OS === "ios" ? "padding" : "height"}
+			>
+				<View style={[styles.container, { paddingBottom: insets.bottom }]}>
 					{/* Header */}
 					<View style={styles.header}>
 						<View style={styles.headerLeft}>
@@ -255,6 +266,7 @@ export function TransactionPrompt({
 					<ScrollView
 						style={styles.content}
 						showsVerticalScrollIndicator={false}
+						keyboardShouldPersistTaps="handled"
 					>
 						{/* Amount */}
 						<View style={styles.amountSection}>
@@ -397,6 +409,8 @@ export function TransactionPrompt({
 									horizontal
 									showsHorizontalScrollIndicator={false}
 									style={styles.categoryScroll}
+									contentContainerStyle={styles.chipRow}
+									keyboardShouldPersistTaps="handled"
 								>
 									{categories.map((cat) => (
 										<TouchableOpacity
@@ -440,6 +454,8 @@ export function TransactionPrompt({
 										horizontal
 										showsHorizontalScrollIndicator={false}
 										style={styles.accountScroll}
+										contentContainerStyle={styles.chipRow}
+										keyboardShouldPersistTaps="handled"
 									>
 										{accounts.map((acc) => (
 											<TouchableOpacity
@@ -520,7 +536,7 @@ export function TransactionPrompt({
 						</TouchableOpacity>
 					</View>
 				</View>
-			</View>
+			</KeyboardAvoidingView>
 		</Modal>
 	);
 }
@@ -611,6 +627,14 @@ const createStyles = (theme: Theme) =>
 			borderTopRightRadius: 24,
 			maxHeight: "90%",
 		},
+		// Without these the ScrollView takes its full content height and pushes
+		// the actions past maxHeight instead of scrolling between header and
+		// buttons.
+		content: {
+			flexGrow: 0,
+			flexShrink: 1,
+			padding: 16,
+		},
 		header: {
 			flexDirection: "row",
 			alignItems: "center",
@@ -642,9 +666,6 @@ const createStyles = (theme: Theme) =>
 		},
 		closeButton: {
 			padding: 8,
-		},
-		content: {
-			padding: 16,
 		},
 		amountSection: {
 			alignItems: "center",
@@ -735,8 +756,12 @@ const createStyles = (theme: Theme) =>
 			borderWidth: 1,
 			borderColor: theme.border,
 		},
+		// Full-bleed chip rows. The padding goes on the content, not the
+		// ScrollView, or the last chip scrolls to a hard edge with no gutter.
 		categoryScroll: {
 			marginHorizontal: -16,
+		},
+		chipRow: {
 			paddingHorizontal: 16,
 		},
 		categoryChip: {
@@ -757,7 +782,6 @@ const createStyles = (theme: Theme) =>
 		},
 		accountScroll: {
 			marginHorizontal: -16,
-			paddingHorizontal: 16,
 		},
 		accountChip: {
 			flexDirection: "row",

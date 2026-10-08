@@ -17,6 +17,7 @@ import {
 	DETECTION_TEST_TITLE,
 	enqueue,
 	getDetectionSettings,
+	markHandled,
 	markTestReceived,
 	recordSeen,
 	SeenOutcome,
@@ -137,5 +138,29 @@ export async function handleIncomingNotification({
 	} catch (error) {
 		// A headless task must never throw - that crashes the task service.
 		console.warn("Transaction detection failed for a notification:", error);
+	}
+}
+
+/**
+ * "Ignore" pressed on a detected-payment notification while LifeSync
+ * is closed or in the background (Android runs the expo-notifications
+ * background task for action presses; registered in /index.js). In the
+ * foreground the response listener in app/_layout.tsx handles it instead.
+ */
+export async function handleDetectedNotificationAction(payload: unknown): Promise<void> {
+	try {
+		const response = payload as {
+			actionIdentifier?: string;
+			notification?: { request?: { content?: { data?: any; dataString?: string } } };
+		};
+		if (response?.actionIdentifier !== NotificationService.DETECTED_ACTION_IGNORE) return;
+		const content = response.notification?.request?.content;
+		let data = content?.data;
+		if (!data && content?.dataString) data = JSON.parse(content.dataString);
+		if (data?.type !== "detected_transaction" || typeof data.id !== "string") return;
+		await markHandled(data.id, "ignored");
+		await NotificationService.cancelDetectedTransaction(data.id);
+	} catch (error) {
+		console.warn("Could not handle detected-payment action:", error);
 	}
 }

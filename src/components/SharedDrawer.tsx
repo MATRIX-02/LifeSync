@@ -275,7 +275,10 @@ const createStyles = (theme: Theme) =>
 			top: 0,
 			left: 0,
 			bottom: 0,
-			width: width * 0.8,
+			// Capped so it stays a side panel in landscape (the screens' hidden
+			// offset, -width * 0.8, is always at least this wide).
+			width: "80%",
+			maxWidth: 320,
 			backgroundColor: theme.background,
 			zIndex: 20,
 			paddingTop: 50,

@@ -3,7 +3,7 @@
 		"name": "LifeSync",
 		"slug": "lifesync",
 		"version": "1.4.2",
-		"orientation": "portrait",
+		"orientation": "default",
 		"icon": "./assets/images/icon.png",
 		"scheme": "lifesync",
 		"userInterfaceStyle": "automatic",
@@ -39,6 +39,7 @@
 			"edgeToEdgeEnabled": true,
 			"predictiveBackGestureEnabled": false,
 			"package": "com.matrix122001.HabitTrackerApp",
+			"googleServicesFile": "./google-services.json",
 			"versionCode": 9,
 			"permissions": [
 				"android.permission.RECEIVE_BOOT_COMPLETED",
@@ -47,7 +48,8 @@
 				"android.permission.VIBRATE",
 				"android.permission.POST_NOTIFICATIONS",
 				"android.permission.READ_SMS",
-				"android.permission.RECEIVE_SMS"
+				"android.permission.RECEIVE_SMS",
+				"android.permission.REQUEST_INSTALL_PACKAGES"
 			]
 		},
 		"web": {
@@ -81,6 +83,17 @@
 				"projectId": "14a97a0e-a9fd-4c69-ad41-e5227ec32f6c"
 			}
 		},
-		"owner": "matrix122001"
+		"owner": "matrix122001",
+		"runtimeVersion": {
+			"policy": "fingerprint"
+		},
+		"updates": {
+			"url": "https://u.expo.dev/14a97a0e-a9fd-4c69-ad41-e5227ec32f6c",
+			"checkAutomatically": "ON_LOAD",
+			"fallbackToCacheTimeout": 0,
+			"requestHeaders": {
+				"expo-channel-name": "production"
+			}
+		}
 	}
 }

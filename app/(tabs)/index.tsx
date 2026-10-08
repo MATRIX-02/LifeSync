@@ -12,6 +12,7 @@ import React, {
 import {
 	Animated,
 	Dimensions,
+	useWindowDimensions,
 	Image,
 	Modal,
 	PanResponder,
@@ -1160,6 +1161,8 @@ const HabitGridItem: React.FC<HabitGridItemProps> = ({
 	isDark,
 	zoomLevel = 1,
 }) => {
+	// Live width - the module-level one is frozen at load and goes stale on rotation.
+	const { width } = useWindowDimensions();
 	// State for infinite scrolling - number of extra weeks to load to the left
 	const [extraWeeks, setExtraWeeks] = useState(0);
 	const scrollViewRef = useRef<ScrollView>(null);

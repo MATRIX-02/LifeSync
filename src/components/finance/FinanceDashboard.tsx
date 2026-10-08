@@ -536,8 +536,17 @@ export default function FinanceDashboard({
 								<Text style={styles.accountName} numberOfLines={1}>
 									{account.name}
 								</Text>
-								<Text style={styles.accountType}>
+								<Text style={styles.accountType} numberOfLines={1}>
 									{account.type.replace("_", " ")}
+									{account.linkedDigits?.length ? (
+										// Same line as the type so the fixed-height card doesn't grow.
+										<Text style={styles.accountDigits}>
+											{`  ••${account.linkedDigits[0]}`}
+											{account.linkedDigits.length > 1
+												? ` +${account.linkedDigits.length - 1}`
+												: ""}
+										</Text>
+									) : null}
 								</Text>
 								<View style={styles.accountBalanceBlock}>
 									<Text style={styles.accountBalanceLabel}>
@@ -1391,6 +1400,10 @@ const createStyles = (theme: Theme) =>
 			color: theme.textMuted,
 			textTransform: "capitalize",
 			marginTop: 2,
+		},
+		accountDigits: {
+			textTransform: "none",
+			letterSpacing: 0.5,
 		},
 		accountBalanceBlock: {
 			width: "100%",

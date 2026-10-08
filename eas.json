@@ -18,7 +18,8 @@
 			"distribution": "internal",
 			"cache": {
 				"disabled": false
-			}
+			},
+			"channel": "production"
 		},
 		"production": {
 			"android": {
@@ -26,7 +27,8 @@
 			},
 			"cache": {
 				"disabled": false
-			}
+			},
+			"channel": "production"
 		}
 	},
 	"submit": {

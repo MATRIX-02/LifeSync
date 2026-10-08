@@ -20,6 +20,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import React, { useEffect, useMemo, useState } from "react";
 import {
 	Dimensions,
+	useWindowDimensions,
 	FlatList,
 	Modal,
 	ScrollView,
@@ -52,6 +53,8 @@ interface NutriPlanProps {
 }
 
 export default function NutriPlan({ theme }: NutriPlanProps) {
+	// Live width - the module-level one is frozen at load and goes stale on rotation.
+	const { width } = useWindowDimensions();
 	const store = useNutritionStore();
 	const profile = useAuthStore((state) => state.profile);
 

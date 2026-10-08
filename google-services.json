@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "905036175986",
+    "project_id": "lifesync-77894",
+    "storage_bucket": "lifesync-77894.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:905036175986:android:7cb6fbd7f31762869280eb",
+        "android_client_info": {
+          "package_name": "com.matrix122001.HabitTrackerApp"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAKEV-wA90BZhV7NKxFSdL9aagaPRtCoTM"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

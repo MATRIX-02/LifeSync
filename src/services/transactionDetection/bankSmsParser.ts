@@ -274,6 +274,10 @@ export function cleanMerchant(raw: string): string | undefined {
  * Check if this is a transaction SMS (not OTP/promotional)
  */
 export function isTransactionSms(sms: SmsData): boolean {
+	// TRAI DLT suffix: "JD-JIOMRT-P" is promotional. Banks can't send a debit
+	// or credit alert on a -P header (only -T/-S/-G), so it's always an ad.
+	if (/-P$/i.test(sms.address.trim())) return false;
+
 	const text = sms.body.toLowerCase();
 
 	// OTPs, payment requests, failed/declined, "will be debited", bills due.

@@ -5,6 +5,7 @@ import Ionicons from "@expo/vector-icons/Ionicons";
 import React from "react";
 import {
 	Dimensions,
+	useWindowDimensions,
 	ScrollView,
 	Text,
 	TextInput,
@@ -42,6 +43,8 @@ export const FastingTab = ({
 	handleStartFast,
 	handleEndFast,
 }: FastingTabProps) => {
+	// Live width - the module-level one is frozen at load and goes stale on rotation.
+	const { width } = useWindowDimensions();
 	return (
 		<ScrollView showsVerticalScrollIndicator={false}>
 			{store.currentFasting && currentFast ? (

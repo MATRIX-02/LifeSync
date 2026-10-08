@@ -74,7 +74,6 @@ export function getAppName(packageName: string): string {
 			cred: "CRED",
 			mobikwik: "MobiKwik",
 			freecharge: "Freecharge",
-			whatsapp: "WhatsApp Pay",
 			bhim: "BHIM",
 			paytmbusiness: "Paytm for Business",
 			airtel: "Airtel Thanks",
@@ -262,6 +261,12 @@ export function parseUpiNotification(
 	};
 }
 
+// Marketing copy, never a payment alert: "₹50 cashback just landed - claim
+// now", "To opt-out, type STOP", links, vouchers, loan offers. Ads also say
+// "received ₹300", so these veto the transaction keywords.
+const PROMO_PATTERN =
+	/(?:claim|opt[- ]?out|type stop|unsubscribe|landed|voucher|coupon|gift|t&c|tnc|apply now|shop now|limited time|hurry|lucky|congratulations|congrats|pre-?approved|loan offer|eligible)|www\.|https?:\/\//i;
+
 /**
  * Check if this is a transaction notification (not promotional)
  */
@@ -274,6 +279,7 @@ export function isTransactionNotification(
 		.toLowerCase();
 
 	if (isNotCompletedTransaction(fullText)) return false;
+	if (PROMO_PATTERN.test(fullText)) return false;
 
 	// Must contain amount
 	const hasAmount = AMOUNT_PATTERNS.some((p) => p.test(fullText));

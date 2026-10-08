@@ -15,10 +15,21 @@ if (Platform.OS === "android") {
 		RNAndroidNotificationListenerHeadlessJsName,
 	} = require("react-native-android-notification-listener");
 	const {
+		handleDetectedNotificationAction,
 		handleIncomingNotification,
 	} = require("./src/services/transactionDetection/headlessTask");
 	AppRegistry.registerHeadlessTask(
 		RNAndroidNotificationListenerHeadlessJsName,
 		() => handleIncomingNotification,
 	);
+
+	// Action buttons that don't open the app ("Ignore" on a detected
+	// payment) are delivered to this task when LifeSync isn't in the foreground.
+	const TaskManager = require("expo-task-manager");
+	const Notifications = require("expo-notifications");
+	const NOTIFICATION_ACTION_TASK = "lifesync-notification-action";
+	TaskManager.defineTask(NOTIFICATION_ACTION_TASK, ({ data }) =>
+		handleDetectedNotificationAction(data),
+	);
+	Notifications.registerTaskAsync(NOTIFICATION_ACTION_TASK).catch(() => undefined);
 }

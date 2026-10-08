@@ -1463,7 +1463,9 @@ const createStyles = (theme: Theme) =>
 			gap: 12,
 		},
 		quickStartCard: {
-			width: (width - 44) / 2,
+			// Two per row at any width (fixed px went stale on rotation).
+			flexGrow: 1,
+			flexBasis: "40%",
 			padding: 20,
 			borderRadius: 16,
 			alignItems: "center",
@@ -2142,7 +2144,8 @@ const createStyles = (theme: Theme) =>
 			alignItems: "center",
 		},
 		timerModal: {
-			width: width - 48,
+			width: "88%",
+			maxWidth: 420,
 			backgroundColor: theme.background,
 			borderRadius: 24,
 			padding: 24,

@@ -69,7 +69,9 @@ export const UPI_APP_PACKAGES = {
 	cred: "com.dreamplug.androidapp",
 	mobikwik: "com.mobikwik_new",
 	freecharge: "com.freecharge.android",
-	whatsapp: "com.whatsapp", // WhatsApp Pay
+	// WhatsApp is deliberately absent: it's a chat app, so every message
+	// ("Rs. 300 just landed in your wallet!") looked like a payment. WhatsApp
+	// Pay payments still arrive as a bank SMS.
 	bhim: "in.org.npci.upiapp",
 	paytmbusiness: "com.paytm.business", // Paytm for Business (payments received)
 	airtel: "com.myairtelapp", // Airtel Thanks / Airtel Payments Bank

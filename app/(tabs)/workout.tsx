@@ -25,6 +25,7 @@ import React, { useEffect, useState } from "react";
 import {
 	Animated,
 	Dimensions,
+	useWindowDimensions,
 	Image,
 	Modal,
 	StatusBar,
@@ -55,6 +56,8 @@ const tabs: { key: TabType; label: string; icon: string }[] = [
 ];
 
 export default function WorkoutTrackerScreen() {
+	// Live width - the module-level one is frozen at load and goes stale on rotation.
+	const { width } = useWindowDimensions();
 	const router = useRouter();
 	const { isDark, toggleTheme } = useTheme();
 	const theme = useColors();

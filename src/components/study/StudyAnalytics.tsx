@@ -635,7 +635,9 @@ const createStyles = (theme: Theme) =>
 			marginBottom: 24,
 		},
 		summaryCard: {
-			width: (width - 44) / 2,
+			// Two per row at any width (fixed px went stale on rotation).
+			flexGrow: 1,
+			flexBasis: "40%",
 			backgroundColor: theme.surface,
 			borderRadius: 16,
 			padding: 16,

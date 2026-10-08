@@ -1110,6 +1110,27 @@ export class NotificationService {
 	// detected. Tapping it opens Money Hub on a pre-filled review sheet
 	// (routed in app/_layout.tsx by data.type). Cancelled by payload id.
 
+	/** Action buttons on a detected-payment notification. */
+	static readonly DETECTED_ACTION_REVIEW = "detected_review";
+	static readonly DETECTED_ACTION_IGNORE = "detected_ignore";
+
+	private static async ensureDetectedCategory(): Promise<void> {
+		await Notifications.setNotificationCategoryAsync("detected_transaction", [
+			{
+				identifier: NotificationService.DETECTED_ACTION_REVIEW,
+				buttonTitle: "Add",
+				options: { opensAppToForeground: true },
+			},
+			{
+				// Handled without opening the app: by the listener in app/_layout.tsx
+				// when it's running, otherwise by the background task in index.js.
+				identifier: NotificationService.DETECTED_ACTION_IGNORE,
+				buttonTitle: "Ignore",
+				options: { opensAppToForeground: false },
+			},
+		]);
+	}
+
 	static async showDetectedTransaction(tx: {
 		id: string;
 		type: "income" | "expense" | "transfer";
@@ -1130,6 +1151,7 @@ export class NotificationService {
 			const amount = `${currency}${tx.amount.toLocaleString("en-IN", {
 				maximumFractionDigits: 2,
 			})}`;
+			await NotificationService.ensureDetectedCategory();
 			const who = tx.merchant ? ` ${tx.type === "income" ? "from" : "at"} ${tx.merchant}` : "";
 			const title =
 				tx.type === "income" ? `${amount} received${who}` : `${amount} spent${who}`;
@@ -1145,6 +1167,7 @@ export class NotificationService {
 					title,
 					body: `${via ? `${via} · ` : ""}Tap to add to Money Hub`,
 					data: { type: "detected_transaction", id: tx.id },
+					categoryIdentifier: "detected_transaction",
 				},
 				// The Android channel goes on the trigger in this expo-notifications
 				// version; on `content` it is ignored and the fallback channel is used.

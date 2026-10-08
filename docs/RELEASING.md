@@ -133,7 +133,84 @@ gh release create v1.4.0 LifeSync-v1.4.0.apk \
 `apksigner` and `aapt2` are in `$ANDROID_HOME/build-tools/<version>/`.
 Don't re-run the failed Actions job afterwards - the release already exists.
 
-## 6. When something goes wrong
+## 6. Update notifications
+
+After the GitHub Release with the APK is live, tell every user:
+
+```
+npm run notify-update -- --dry-run     how many devices would get it
+npm run notify-update                  send (version from app.json)
+```
+
+Each signed-in user gets "LifeSync X.Y.Z is available". Tapping it downloads
+`LifeSync-vX.Y.Z.apk` from the release and opens Android's installer - the
+user confirms with one tap (Android never allows a silent install for apps
+outside the Play Store). Users already on that version are told they're up to
+date. The script refuses to send if the APK isn't on the release yet.
+
+Only apps from 1.4.3 onwards can act on the notification; older installs need
+this one update by hand.
+
+### One-time setup
+
+1. **Firebase (Android push delivery).** Expo's push service delivers through
+   Firebase Cloud Messaging; without it every send fails with
+   `InvalidCredentials`.
+   - [console.firebase.google.com](https://console.firebase.google.com) → add
+     project → add an **Android app** with package
+     `com.matrix122001.HabitTrackerApp` → download `google-services.json` to
+     the repo root.
+   - In `app.json`, under `expo.android`, add
+     `"googleServicesFile": "./google-services.json"`. Commit the file - it
+     holds only public identifiers, and the CI build needs it.
+   - Firebase → Project settings → Service accounts → **Generate new private
+     key**. Upload that JSON with `eas credentials` → Android → production →
+     Google Service Account → *FCM V1*. Do **not** commit this one.
+   - Rebuild and reinstall. Push tokens are saved on sign-in.
+2. **Service-role key** for the script, in `.env.release.local` (gitignored):
+   ```
+   SUPABASE_SERVICE_ROLE_KEY=eyJ...
+   ```
+   Supabase → Project Settings → API Keys → **Secret keys** (`sb_secret_...`;
+   on older projects, Legacy API Keys → `service_role`). It bypasses RLS - it
+   must never go in an `EXPO_PUBLIC_*` variable.
+
+## 7. Over-the-air updates (JavaScript-only changes)
+
+Most releases only change JavaScript - screens, parsing, fixes. Those don't
+need a new APK: `expo-updates` (built into the app) downloads them on launch
+and switches to them on the **next** launch. Nothing to install, no prompt.
+
+```
+npm run ota -- --message "Fix detected-payment scrolling"
+```
+
+That publishes the current code to the `production` channel. Each installed
+APK checks on launch; users get it after their next restart.
+
+**When an OTA isn't enough.** An update only reaches APKs with the same
+*runtime version*, a fingerprint of everything native (`app.json`
+`runtimeVersion: { policy: "fingerprint" }`; version numbers are excluded in
+`fingerprint.config.js`). Adding or upgrading a native package, a config
+plugin, permissions or other native `app.json` settings changes the
+fingerprint - then the OTA reaches nobody, and you need a normal APK release
+(sections 2-6). Check before publishing:
+
+```
+npx expo-updates fingerprint:generate --platform android   # compare with the last APK's
+```
+
+or simply: if `package.json`'s dependencies, `plugins/` or `app.json`'s
+native sections changed since the last APK, do an APK release.
+
+**Rules**
+- Bumping `expo.version` for an OTA is fine (it's excluded from the
+  fingerprint) and makes Preferences show the new number.
+- A bad OTA: `eas update:rollback` or publish a fixed one. Users get it on the
+  next launch.
+- Only APKs from 1.4.3 onwards include `expo-updates`.
+
+## 8. When something goes wrong
 
 | Problem | Fix |
 |---|---|

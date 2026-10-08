@@ -1,4 +1,5 @@
 import { Alert } from "@/src/components/CustomAlert";
+import Constants from "expo-constants";
 import { useAuthStore } from "@/src/context/authStore";
 import FinanceCategorySettings from "@/src/components/finance/FinanceCategorySettings";
 import TransactionDetectionSettings from "@/src/components/finance/TransactionDetectionSettings";
@@ -1658,7 +1659,13 @@ export default function SettingsScreen() {
 							</View>
 							<View style={styles.settingContent}>
 								<Text style={styles.settingLabel}>App Version</Text>
-								<Text style={styles.settingDescription}>2.1.0 (Build 2)</Text>
+								<Text style={styles.settingDescription}>
+									{/* From app.json, which `npm run release` bumps. */}
+									{Constants.expoConfig?.version ?? "?"}
+									{Constants.expoConfig?.android?.versionCode
+										? ` (Build ${Constants.expoConfig.android.versionCode})`
+										: ""}
+								</Text>
 							</View>
 						</View>
 

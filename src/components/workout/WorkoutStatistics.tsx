@@ -14,6 +14,7 @@ import Ionicons from "@expo/vector-icons/Ionicons";
 import React, { useMemo, useRef, useState } from "react";
 import {
 	Dimensions,
+	useWindowDimensions,
 	PanResponder,
 	ScrollView,
 	StyleSheet,
@@ -35,6 +36,8 @@ export default function WorkoutStatistics({
 	gender,
 	subscriptionCheck,
 }: WorkoutStatisticsProps) {
+	// Live width - the module-level one is frozen at load and goes stale on rotation.
+	const { width } = useWindowDimensions();
 	const {
 		getWorkoutStats,
 		workoutSessions,
