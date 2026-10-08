@@ -65,6 +65,12 @@ export interface Habit {
 	notificationEnabled: boolean;
 	alarmEnabled?: boolean;
 	ringtoneEnabled: boolean;
+	/**
+	 * Tone ids from constants/notificationSounds. Unset means "use the default
+	 * from Settings". Persisted as user_habits.reminder_sound / alarm_sound.
+	 */
+	reminderSound?: string | null;
+	alarmSound?: string | null;
 
 	// Archiving
 	isArchived: boolean;

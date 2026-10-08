@@ -65,7 +65,21 @@
 					"icon": "./assets/images/icon.png",
 					"color": "#000000",
 					"defaultChannel": "default",
-					"modes": "productionMode"
+					"modes": "productionMode",
+					"sounds": [
+						"./assets/sounds/notifications/ls_alarm_classic.wav",
+						"./assets/sounds/notifications/ls_alarm_digital.wav",
+						"./assets/sounds/notifications/ls_alarm_morning.wav",
+						"./assets/sounds/notifications/ls_alarm_pulse.wav",
+						"./assets/sounds/notifications/ls_alarm_rising.wav",
+						"./assets/sounds/notifications/ls_alarm_siren.wav",
+						"./assets/sounds/notifications/ls_bell.wav",
+						"./assets/sounds/notifications/ls_chime.wav",
+						"./assets/sounds/notifications/ls_ding.wav",
+						"./assets/sounds/notifications/ls_harp.wav",
+						"./assets/sounds/notifications/ls_marimba.wav",
+						"./assets/sounds/notifications/ls_pop.wav"
+					]
 				}
 			],
 			"expo-web-browser",

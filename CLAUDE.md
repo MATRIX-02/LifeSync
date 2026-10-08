@@ -73,6 +73,8 @@ Because all modules share one queue, **never call `cancelAllNotifications()`** o
 
 Android channels (`habit-reminders`, `hydration-reminders`, `pomodoro-timer`, `fasting-timer`, `default`) are created in `requestPermissions()` and per-feature schedulers.
 
+**Tones.** Bundled tones live in `assets/sounds/notifications/`, are listed in `app.json` (expo-notifications `sounds`) and catalogued in `src/constants/notificationSounds.ts`; adding one needs all three plus a new native build. Android freezes a channel's sound at creation, so `NotificationService.resolveHabitSound` creates one channel per tone (`habit-reminders-<id>`, `alarms-v2-<id>`) on first use. A habit's `reminderSound` / `alarmSound` override the per-device defaults in `soundPrefsStore`; `"system"` uses the base channel, whose tone the user changes in Android's settings. Changing a default reschedules every habit.
+
 **`Habit.alarmEnabled` and `ringtoneEnabled` are inert.** Both modals toggle and persist them, and `AudioService.playRingtone()` exists, but nothing reads either flag — the alarm feature is unimplemented UI.
 
 ## Conventions

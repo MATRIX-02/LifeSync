@@ -412,6 +412,8 @@ export default function StatisticsScreen() {
 					frequency: values.frequency,
 					question: values.question || undefined,
 					alarmEnabled: values.alarmEnabled,
+					reminderSound: values.reminderSound,
+					alarmSound: values.alarmSound,
 				});
 			}
 		} catch (error) {

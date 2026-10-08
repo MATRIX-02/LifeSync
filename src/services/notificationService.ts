@@ -10,6 +10,12 @@ import * as Notifications from "expo-notifications";
 import { AppState, Linking, Platform } from "react-native";
 import { supabase } from "../config/supabase";
 import { FrequencyConfig, Frequency } from "../types";
+import {
+	getSound,
+	NotificationSound,
+	SYSTEM_SOUND_ID,
+} from "../constants/notificationSounds";
+import { useSoundPrefsStore } from "../context/soundPrefsStore";
 
 /**
  * Bump this suffix whenever the alarm channel's settings must change: Android
@@ -17,6 +23,50 @@ import { FrequencyConfig, Frequency } from "../types";
  * publish a new id and delete the old.
  */
 const ALARM_CHANNEL_ID = "alarms-v2";
+const REMINDER_CHANNEL_ID = "habit-reminders";
+
+// Settings shared by the base channel and every per-tone copy of it.
+const reminderChannelBase = (): Notifications.NotificationChannelInput => ({
+	name: "Habit Reminders",
+	importance: Notifications.AndroidImportance.MAX,
+	vibrationPattern: [0, 250, 250, 250],
+	lightColor: "#A78BFA",
+	enableVibrate: true,
+	showBadge: true,
+});
+
+const alarmChannelBase = (): Notifications.NotificationChannelInput => ({
+	name: "Alarms",
+	importance: Notifications.AndroidImportance.MAX,
+	audioAttributes: {
+		usage: Notifications.AndroidAudioUsage.ALARM,
+		contentType: Notifications.AndroidAudioContentType.SONIFICATION,
+		flags: {
+			enforceAudibility: true,
+			requestHardwareAudioVideoSynchronization: false,
+		},
+	},
+	enableVibrate: true,
+	vibrationPattern: [0, 1000, 500, 1000, 500, 1000],
+	lightColor: "#F87171",
+	bypassDnd: true,
+	lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+	showBadge: true,
+});
+
+// Channels already created this session, so scheduling 20 reminders does not
+// make 20 identical native calls.
+const ensuredChannels = new Set<string>();
+
+const waitForSoundPrefs = async () => {
+	if (useSoundPrefsStore.persist.hasHydrated()) return;
+	await new Promise<void>((resolve) => {
+		const unsub = useSoundPrefsStore.persist.onFinishHydration(() => {
+			unsub();
+			resolve();
+		});
+	});
+};
 
 export class NotificationService {
 	// Get and register the Expo Push Token for the current user
@@ -156,14 +206,9 @@ export class NotificationService {
 
 		// Set up notification channel for Android
 		if (Platform.OS === "android") {
-			await Notifications.setNotificationChannelAsync("habit-reminders", {
-				name: "Habit Reminders",
-				importance: Notifications.AndroidImportance.MAX,
-				vibrationPattern: [0, 250, 250, 250],
-				lightColor: "#A78BFA",
+			await Notifications.setNotificationChannelAsync(REMINDER_CHANNEL_ID, {
+				...reminderChannelBase(),
 				sound: "default",
-				enableVibrate: true,
-				showBadge: true,
 			});
 
 			// Study Hub was removed; drop its channel from system settings.
@@ -186,24 +231,8 @@ export class NotificationService {
 			);
 
 			await Notifications.setNotificationChannelAsync(ALARM_CHANNEL_ID, {
-				name: "Alarms",
-				importance: Notifications.AndroidImportance.MAX,
+				...alarmChannelBase(),
 				sound: "default",
-				audioAttributes: {
-					usage: Notifications.AndroidAudioUsage.ALARM,
-					contentType: Notifications.AndroidAudioContentType.SONIFICATION,
-					flags: {
-						enforceAudibility: true,
-						requestHardwareAudioVideoSynchronization: false,
-					},
-				},
-				enableVibrate: true,
-				vibrationPattern: [0, 1000, 500, 1000, 500, 1000],
-				lightColor: "#F87171",
-				bypassDnd: true,
-				lockscreenVisibility:
-					Notifications.AndroidNotificationVisibility.PUBLIC,
-				showBadge: true,
 			});
 
 			// Also set up a default channel
@@ -311,6 +340,54 @@ export class NotificationService {
 		return slots.length > 0 ? slots : [startTime];
 	}
 
+	/**
+	 * Where a habit's reminders go and what they play.
+	 *
+	 * Android plays the CHANNEL's sound and freezes it when the channel is
+	 * created, so a tone cannot be set per notification. Each bundled tone
+	 * therefore gets its own channel (one for reminders, one for alarms),
+	 * created on first use. "System" keeps the base channel, whose tone the
+	 * user can change in Android's settings. iOS reads `sound` directly.
+	 */
+	static async resolveHabitSound(habit: {
+		alarmEnabled?: boolean;
+		reminderSound?: string | null;
+		alarmSound?: string | null;
+	}): Promise<{ channelId: string; sound: string }> {
+		await waitForSoundPrefs();
+		const prefs = useSoundPrefsStore.getState();
+		const isAlarm = !!habit.alarmEnabled;
+		const chosen = isAlarm
+			? habit.alarmSound || prefs.defaultAlarmSound
+			: habit.reminderSound || prefs.defaultReminderSound;
+		const tone = chosen === SYSTEM_SOUND_ID ? undefined : getSound(chosen);
+		const baseId = isAlarm ? ALARM_CHANNEL_ID : REMINDER_CHANNEL_ID;
+
+		if (!tone) return { channelId: baseId, sound: "default" };
+		return {
+			channelId: await this.ensureToneChannel(isAlarm, tone),
+			sound: tone.file,
+		};
+	}
+
+	private static async ensureToneChannel(
+		isAlarm: boolean,
+		tone: NotificationSound
+	): Promise<string> {
+		const channelId = `${isAlarm ? ALARM_CHANNEL_ID : REMINDER_CHANNEL_ID}-${tone.id}`;
+		if (Platform.OS !== "android" || ensuredChannels.has(channelId)) {
+			return channelId;
+		}
+		const base = isAlarm ? alarmChannelBase() : reminderChannelBase();
+		await Notifications.setNotificationChannelAsync(channelId, {
+			...base,
+			name: `${base.name} - ${tone.label}`,
+			sound: tone.file,
+		});
+		ensuredChannels.add(channelId);
+		return channelId;
+	}
+
 	// Schedule every reminder a habit needs, honouring its frequency config.
 	// Returns the ids of all notifications created.
 	static async scheduleHabitReminders(habit: {
@@ -323,6 +400,9 @@ export class NotificationService {
 		question?: string;
 		/** Route through the louder "alarms" channel (MAX importance, bypasses DND). */
 		alarmEnabled?: boolean;
+		/** Tone ids from constants/notificationSounds; unset = the user's default. */
+		reminderSound?: string | null;
+		alarmSound?: string | null;
 	}): Promise<string[]> {
 		// Always start from a clean slate so edits never leave orphans behind.
 		await this.cancelHabitNotifications(habit.id);
@@ -331,14 +411,11 @@ export class NotificationService {
 		const baseTime = habit.notificationTime || "09:00";
 		const ids: string[] = [];
 
-		// Android takes importance, vibration and do-not-disturb behaviour from
-		// the CHANNEL, so an alarm habit has to be delivered on a different one.
-		const channelId = habit.alarmEnabled
-			? ALARM_CHANNEL_ID
-			: "habit-reminders";
-		// Always audible. A reminder you asked for should make a sound; there is
-		// no separate "sound" switch to contradict the reminder switch.
-		const sound: string | boolean = "default";
+		// Android takes importance, vibration, do-not-disturb behaviour AND the
+		// tone from the CHANNEL, so an alarm habit, and every tone, has to be
+		// delivered on its own. Always audible: a reminder you asked for should
+		// make a sound.
+		const { channelId, sound } = await this.resolveHabitSound(habit);
 		const title = habit.alarmEnabled ? "⏰ Habit Alarm" : "🎯 Habit Reminder";
 
 		// A habit's own question is the whole point of the field - asking "Did you
@@ -508,7 +585,7 @@ export class NotificationService {
 		if (Platform.OS !== "android") return false;
 
 		const channelId =
-			channel === "alarm" ? ALARM_CHANNEL_ID : "habit-reminders";
+			channel === "alarm" ? ALARM_CHANNEL_ID : REMINDER_CHANNEL_ID;
 		const packageName =
 			Constants.expoConfig?.android?.package ||
 			(Constants as any).expoConfig?.slug;

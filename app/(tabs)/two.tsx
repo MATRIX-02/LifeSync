@@ -6,6 +6,13 @@ import TransactionDetectionSettings from "@/src/components/finance/TransactionDe
 import { useTransactionDetectionStore } from "@/src/context/transactionDetectionStore";
 import { useFinanceStore } from "@/src/context/financeStoreDB";
 import { useHabitStore } from "@/src/context/habitStoreDB";
+import { SoundPickerModal } from "@/src/components/SoundPickerModal";
+import {
+	SoundKind,
+	soundLabel,
+	SYSTEM_SOUND_ID,
+} from "@/src/constants/notificationSounds";
+import { useSoundPrefsStore } from "@/src/context/soundPrefsStore";
 import { ModuleType, useModuleStore } from "@/src/context/moduleContext";
 import { Theme, useColors, useTheme } from "@/src/context/themeContext";
 import { useWorkoutStore } from "@/src/context/workoutStoreDB";
@@ -304,6 +311,27 @@ export default function SettingsScreen() {
 	const [notificationsEnabled, setNotificationsEnabled] = useState(true);
 	const [showCategorySettings, setShowCategorySettings] = useState(false);
 	const [showDetectionSettings, setShowDetectionSettings] = useState(false);
+	const soundPrefs = useSoundPrefsStore();
+	const [soundPickerKind, setSoundPickerKind] = useState<SoundKind | null>(
+		null,
+	);
+
+	// A new default changes what every habit without its own tone plays, and
+	// scheduled notifications carry their channel - so rebuild them.
+	const handleDefaultSoundChange = async (kind: SoundKind, id: string) => {
+		if (kind === "alarm") soundPrefs.setDefaultAlarmSound(id);
+		else soundPrefs.setDefaultReminderSound(id);
+		const habits = habitStore.habits.filter(
+			(h) => !h.isArchived && h.notificationEnabled,
+		);
+		for (const habit of habits) {
+			try {
+				await NotificationService.scheduleHabitReminders(habit);
+			} catch (error) {
+				console.error(`Failed to reschedule ${habit.name}:`, error);
+			}
+		}
+	};
 	const detectionEnabled = useTransactionDetectionStore((s) => s.settings.enabled);
 	const [soundEnabled, setSoundEnabled] = useState(true);
 	const [vibrationEnabled, setVibrationEnabled] = useState(true);
@@ -994,76 +1022,64 @@ export default function SettingsScreen() {
 
 						<View style={styles.divider} />
 
-						{/* Android owns the per-channel sound picker: the app can only
-						    ship sounds bundled at build time, and a channel's settings
-						    are frozen after creation. Sending the user to the system
-						    screen is the supported way to choose any tone or audio
-						    file, and their choice takes precedence over ours. */}
-						{Platform.OS === "android" && (
-							<>
-								<TouchableOpacity
-									style={styles.settingRow}
-									onPress={() =>
-										NotificationService.openChannelSettings("reminder")
-									}
-								>
-									<View
-										style={[
-											styles.settingIcon,
-											{ backgroundColor: theme.primary + "20" },
-										]}
+						{(["reminder", "alarm"] as SoundKind[]).map((kind) => {
+							const current =
+								kind === "alarm"
+									? soundPrefs.defaultAlarmSound
+									: soundPrefs.defaultReminderSound;
+							const tint = kind === "alarm" ? "#F87171" : theme.primary;
+							return (
+								<React.Fragment key={kind}>
+									<TouchableOpacity
+										style={styles.settingRow}
+										onPress={() => setSoundPickerKind(kind)}
 									>
+										<View
+											style={[styles.settingIcon, { backgroundColor: tint + "20" }]}
+										>
+											<Ionicons
+												name={kind === "alarm" ? "alarm" : "musical-notes"}
+												size={20}
+												color={tint}
+											/>
+										</View>
+										<View style={styles.settingContent}>
+											<Text style={styles.settingLabel}>
+												{kind === "alarm" ? "Default Alarm Sound" : "Default Reminder Sound"}
+											</Text>
+											<Text style={styles.settingDescription}>
+												{soundLabel(current)} · habits can override it
+											</Text>
+										</View>
 										<Ionicons
-											name="musical-notes"
-											size={20}
-											color={theme.primary}
+											name="chevron-forward"
+											size={18}
+											color={theme.textMuted}
 										/>
-									</View>
-									<View style={styles.settingContent}>
-										<Text style={styles.settingLabel}>Reminder Sound</Text>
-										<Text style={styles.settingDescription}>
-											Choose any tone or audio file on your device
-										</Text>
-									</View>
-									<Ionicons
-										name="open-outline"
-										size={18}
-										color={theme.textMuted}
-									/>
-								</TouchableOpacity>
+									</TouchableOpacity>
 
-								<View style={styles.divider} />
+									{/* "System default" plays the channel's own tone, which only
+									    Android's channel settings can change - including any
+									    ringtone or audio file on the phone. */}
+									{Platform.OS === "android" && current === SYSTEM_SOUND_ID && (
+										<TouchableOpacity
+											style={[styles.settingRow, { paddingTop: 0 }]}
+											onPress={() => NotificationService.openChannelSettings(kind)}
+										>
+											<View style={styles.settingIcon} />
+											<View style={styles.settingContent}>
+												<Text style={[styles.settingDescription, { color: tint }]}>
+													Pick a phone ringtone in system settings
+												</Text>
+											</View>
+											<Ionicons name="open-outline" size={16} color={theme.textMuted} />
+										</TouchableOpacity>
+									)}
 
-								<TouchableOpacity
-									style={styles.settingRow}
-									onPress={() =>
-										NotificationService.openChannelSettings("alarm")
-									}
-								>
-									<View
-										style={[
-											styles.settingIcon,
-											{ backgroundColor: "#F87171" + "20" },
-										]}
-									>
-										<Ionicons name="alarm" size={20} color="#F87171" />
-									</View>
-									<View style={styles.settingContent}>
-										<Text style={styles.settingLabel}>Alarm Sound</Text>
-										<Text style={styles.settingDescription}>
-											Used by habits with Alarm switched on
-										</Text>
-									</View>
-									<Ionicons
-										name="open-outline"
-										size={18}
-										color={theme.textMuted}
-									/>
-								</TouchableOpacity>
-
-								<View style={styles.divider} />
-							</>
-						)}
+									<View style={styles.divider} />
+								</React.Fragment>
+							);
+						})}
 
 						<SettingRow
 							icon="phone-portrait"
@@ -2041,8 +2057,22 @@ export default function SettingsScreen() {
 						)}
 						<View style={{ height: 40 }} />
 					</ScrollView>
-				</SafeAreaView>
+		</SafeAreaView>
 			</Modal>
+
+			<SoundPickerModal
+				visible={soundPickerKind !== null}
+				kind={soundPickerKind ?? "reminder"}
+				value={
+					soundPickerKind === "alarm"
+						? soundPrefs.defaultAlarmSound
+						: soundPrefs.defaultReminderSound
+				}
+				onSelect={(id) => {
+					if (soundPickerKind) handleDefaultSoundChange(soundPickerKind, id);
+				}}
+				onClose={() => setSoundPickerKind(null)}
+			/>
 		</View>
 	);
 }

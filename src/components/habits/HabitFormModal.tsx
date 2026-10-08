@@ -6,6 +6,12 @@
 // which reminders to schedule.
 import { Alert } from "@/src/components/CustomAlert";
 import { PerDaySection } from "@/src/components/habits/PerDaySection";
+import {
+	SoundPickerModal,
+	USE_DEFAULT_SOUND,
+} from "@/src/components/SoundPickerModal";
+import { soundLabel } from "@/src/constants/notificationSounds";
+import { useSoundPrefsStore } from "@/src/context/soundPrefsStore";
 import { Theme, useColors } from "@/src/context/themeContext";
 import { FrequencyType, Habit, HabitType, TargetType } from "@/src/types";
 import {
@@ -213,6 +219,9 @@ export interface HabitFormValues {
 	reminderTime: string;
 	notificationEnabled: boolean;
 	alarmEnabled: boolean;
+	/** Tone ids; null clears a habit's own tone, undefined leaves it unset. */
+	reminderSound?: string | null;
+	alarmSound?: string | null;
 	notes?: string;
 }
 
@@ -251,6 +260,12 @@ export const HabitFormModal: React.FC<HabitFormModalProps> = ({
 	const [reminderTime, setReminderTime] = useState(DEFAULT_REMINDER_TIME);
 	const [reminderEnabled, setReminderEnabled] = useState(true);
 	const [alarmEnabled, setAlarmEnabled] = useState(false);
+	// USE_DEFAULT_SOUND = follow the default from Settings.
+	const [reminderSound, setReminderSound] = useState(USE_DEFAULT_SOUND);
+	const [alarmSound, setAlarmSound] = useState(USE_DEFAULT_SOUND);
+	const [showSoundPicker, setShowSoundPicker] = useState(false);
+	const defaultReminderSound = useSoundPrefsStore((s) => s.defaultReminderSound);
+	const defaultAlarmSound = useSoundPrefsStore((s) => s.defaultAlarmSound);
 	const [notes, setNotes] = useState("");
 
 	const [showIconPicker, setShowIconPicker] = useState(false);
@@ -332,6 +347,8 @@ export const HabitFormModal: React.FC<HabitFormModalProps> = ({
 			setReminderEnabled(true);
 			setAlarmEnabled(false);
 			setNotes("");
+			setReminderSound(USE_DEFAULT_SOUND);
+			setAlarmSound(USE_DEFAULT_SOUND);
 			return;
 		}
 
@@ -362,6 +379,8 @@ export const HabitFormModal: React.FC<HabitFormModalProps> = ({
 		);
 		setAlarmEnabled(habit.alarmEnabled ?? false);
 		setNotes(habit.notes || "");
+		setReminderSound(habit.reminderSound || USE_DEFAULT_SOUND);
+		setAlarmSound(habit.alarmSound || USE_DEFAULT_SOUND);
 	}, [visible, habit, translateY]);
 
 	const toggleDay = (dayIndex: number) => {
@@ -410,6 +429,11 @@ export const HabitFormModal: React.FC<HabitFormModalProps> = ({
 				reminderTime,
 				notificationEnabled: reminderEnabled,
 				alarmEnabled,
+				// Only send null to clear a tone the habit actually had, so habits
+				// that never touch tones do not depend on the sound columns.
+				reminderSound:
+					reminderSound || (habit?.reminderSound ? null : undefined),
+				alarmSound: alarmSound || (habit?.alarmSound ? null : undefined),
 				notes: notes.trim() || undefined,
 			});
 			onClose();
@@ -829,6 +853,43 @@ export const HabitFormModal: React.FC<HabitFormModalProps> = ({
 							/>
 						</View>
 
+						{/* The tone follows the Alarm switch: an alarm habit plays its
+						    alarm tone, otherwise its reminder tone. */}
+						{reminderEnabled && (
+							<TouchableOpacity
+								style={styles.switchRow}
+								onPress={() => setShowSoundPicker(true)}
+							>
+								<View style={styles.switchInfo}>
+									<View
+										style={[
+											styles.selectedIcon,
+											{ backgroundColor: color + "20" },
+										]}
+									>
+										<Ionicons name="musical-notes" size={24} color={color} />
+									</View>
+									<View style={styles.switchTextContainer}>
+										<Text style={styles.switchTitle}>
+											{alarmEnabled ? "Alarm Sound" : "Reminder Sound"}
+										</Text>
+										<Text style={styles.switchSubtitle}>
+											{(alarmEnabled ? alarmSound : reminderSound)
+												? soundLabel(alarmEnabled ? alarmSound : reminderSound)
+												: `Default (${soundLabel(
+														alarmEnabled ? defaultAlarmSound : defaultReminderSound,
+													)})`}
+										</Text>
+									</View>
+								</View>
+								<Ionicons
+									name="chevron-forward"
+									size={20}
+									color={theme.textSecondary}
+								/>
+							</TouchableOpacity>
+						)}
+
 						{/* With several times a day the reminders come from Times per
 						    day, so a single time would be ignored. */}
 						{reminderEnabled && perDay.target <= 1 && (
@@ -945,6 +1006,18 @@ export const HabitFormModal: React.FC<HabitFormModalProps> = ({
 					</TouchableOpacity>
 				</Animated.View>
 			</View>
+
+			<SoundPickerModal
+				visible={showSoundPicker}
+				kind={alarmEnabled ? "alarm" : "reminder"}
+				value={alarmEnabled ? alarmSound : reminderSound}
+				onSelect={alarmEnabled ? setAlarmSound : setReminderSound}
+				onClose={() => setShowSoundPicker(false)}
+				defaultLabel={`Settings default: ${soundLabel(
+					alarmEnabled ? defaultAlarmSound : defaultReminderSound,
+				)}`}
+				accent={color}
+			/>
 		</Modal>
 	);
 };
