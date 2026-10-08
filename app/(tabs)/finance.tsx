@@ -31,7 +31,7 @@ import DetectedTransactions from "@/src/components/finance/DetectedTransactions"
 import FinanceAIInsights from "@/src/components/finance/FinanceAIInsights";
 import FinanceAnalytics from "@/src/components/finance/FinanceAnalytics";
 import FinanceDashboard from "@/src/components/finance/FinanceDashboard";
-import SplitWise from "@/src/components/finance/SplitWiseNew";
+import SplitWise from "@/src/components/finance/SplitWise";
 import TransactionList from "@/src/components/finance/TransactionList";
 import { useAuthStore } from "@/src/context/authStore";
 

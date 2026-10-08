@@ -17,7 +17,7 @@ const PERSISTABLE_ROUTES = [
 ];
 
 // Routes to ignore (modals, auth screens, etc.)
-const IGNORED_ROUTES = ["/modal", "/auth", "/admin", "/subscription"];
+const IGNORED_ROUTES = ["/auth", "/admin", "/subscription"];
 
 /**
  * Hook to open the first enabled module at startup and persist current routes.
