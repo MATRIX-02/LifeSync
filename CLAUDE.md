@@ -18,7 +18,7 @@ eas build -p android --profile preview   # APK; profiles: development | preview 
 
 ## Entry point and dead code
 
-`package.json` sets `main: expo-router/entry`, so **routing is file-based under `app/`**.
+`package.json` sets `main: index.js` (which loads `expo-router/entry`), so **routing is file-based under `app/`**.
 
 Two route-naming traps in `app/(tabs)/`:
 - **`two.tsx` is the Settings screen** (`export default function SettingsScreen`), not a second tab.
@@ -48,11 +48,11 @@ The legacy AsyncStorage stores (`habitStore.ts`, `workoutStore.ts`, `financeStor
 
 ## Supabase persistence — the sharp edge
 
-Schema lives **remotely only**. `.env.local` holds just `EXPO_PUBLIC_SUPABASE_URL` and `EXPO_PUBLIC_SUPABASE_ANON_KEY`; the anon key goes through PostgREST, which exposes **no DDL**. `supabase/migrations/*.sql` files here are not applied by anything — they must be run by hand in the Supabase dashboard SQL editor.
+Schema lives **remotely only**. `.env.local` holds just `EXPO_PUBLIC_SUPABASE_URL` and `EXPO_PUBLIC_SUPABASE_ANON_KEY`; the anon key goes through PostgREST, which exposes **no DDL**. There are no migration files in the repo: schema changes are written and run by hand in the Supabase dashboard SQL editor. `scripts/schema-audit.sql` / `scripts/check-schema.mjs` report what the live schema actually has.
 
 Two consequences that will bite:
 
-**1. An unknown column hard-fails the whole write.** Stores convert camelCase → snake_case and spread leftover fields straight into an insert/update. Adding any field to the `Habit` type therefore adds a column to the payload, and PostgREST rejects the entire request with a schema-cache error. Adding a field to a persisted type **requires a migration first**, or you break creation and editing.
+**1. An unknown column hard-fails the whole write.** Stores convert camelCase → snake_case and spread leftover fields straight into an insert/update. Adding any field to the `Habit` type therefore adds a column to the payload, and PostgREST rejects the entire request with a schema-cache error. Adding a field to a persisted type **requires adding the column in Supabase first**, or you break creation and editing.
 
 **2. `Habit.frequency` is flattened, not stored as JSON.** It is destructured into `frequency_type` / `frequency_value` / `frequency_second_value` / `frequency_days` / `frequency_start_time` / `frequency_end_time` / `frequency_interval_minutes` and rebuilt on read, at **four separate sites**:
 
@@ -97,4 +97,4 @@ Tag-driven: pushing to `main` releases nothing. `npm run release -- patch|minor|
 
 ## Setup docs
 
-`docs/` covers the external integrations that can't be inferred from code — `SUPABASE_SETUP.md`, `RLS_SETUP_FIX.md`, `GOOGLE_OAUTH_*.md`, `RAZORPAY_PHONEPE_SETUP.md`, `TRANSACTION_DETECTION_SETUP.md`. `README.md` and `ARCHITECTURE.md` predate the multi-module rewrite and describe a habits-only app at an old path; treat them as historical.
+`docs/` covers the external integrations that can't be inferred from code — `SUPABASE_SETUP.md`, `RLS_SETUP_FIX.md`, `GOOGLE_OAUTH_*.md`, `RAZORPAY_PHONEPE_SETUP.md`, `TRANSACTION_DETECTION_SETUP.md`. `README.md` predates the multi-module rewrite and describes a habits-only app; treat it as historical.

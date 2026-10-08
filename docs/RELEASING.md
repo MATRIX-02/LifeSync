@@ -218,4 +218,4 @@ native sections changed since the last APK, do an APK release.
 | Build fails on missing secrets | Add them (section 4), then re-run the workflow. |
 | Bad release already published | Don't reuse the version. Fix, then release the next patch (`1.4.1`). Optionally mark the bad one as a pre-release on GitHub. |
 | "App not installed" on a phone | The APK was signed with a different key, or `versionCode` didn't increase. Check with `apksigner` / `aapt2` above. |
-| Database changes in a release | Run the SQL in `supabase/migrations/` in the Supabase SQL editor **before** publishing - nothing applies migrations automatically (see `CLAUDE.md`). |
+| Database changes in a release | Run the schema change in the Supabase SQL editor **before** publishing - nothing applies migrations automatically (see `CLAUDE.md`). |

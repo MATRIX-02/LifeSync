@@ -317,8 +317,7 @@ export const syncHabitsToCloud = async (
 				// legacy `habit_…` id and upsert under it - which conflicted with
 				// nothing, leaving the original row in place. That is what
 				// duplicated habits. New habits are created as UUIDs at source
-				// (utils/uuid.ts); legacy ids are migrated by
-				// supabase/migrations/20260829_habit_uuid_ids.sql.
+				// (utils/uuid.ts); legacy ids were migrated to UUIDs in the database.
 				// Frequency: the jsonb column is the source of truth; the flat
 				// columns are a mirror kept for older builds. See the frequency
 				// jsonb migration before removing either.
