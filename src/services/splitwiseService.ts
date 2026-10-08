@@ -412,22 +412,24 @@ export const searchUsersByEmail = async (
 	error: string | null;
 }> => {
 	try {
-		const { data, error } = await supabase
-			.from("profiles")
-			.select("id, email, full_name, avatar_url")
-			.or(`email.ilike.%${query}%,full_name.ilike.%${query}%`)
-			.neq("id", excludeUserId)
-			.limit(10);
+		// Exact email match through a database function. profiles is readable
+		// only by its owner, so a partial-match search here would either fail or
+		// - if the table were open - let anyone list every user's email.
+		const { data, error } = await (supabase.rpc as any)("find_user_by_email", {
+			p_email: query.trim(),
+		});
 
 		if (error) throw error;
 
 		return {
-			data: (data || []).map((u: any) => ({
-				id: u.id,
-				email: u.email,
-				fullName: u.full_name,
-				avatarUrl: u.avatar_url,
-			})),
+			data: ((data as any[]) || [])
+				.filter((u: any) => u.id !== excludeUserId)
+				.map((u: any) => ({
+					id: u.id,
+					email: u.email,
+					fullName: u.full_name,
+					avatarUrl: u.avatar_url,
+				})),
 			error: null,
 		};
 	} catch (error: any) {

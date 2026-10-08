@@ -72,7 +72,7 @@ export const InviteUserModal: React.FC<InviteUserModalProps> = ({
 							<Ionicons name="search" size={20} color={theme.textMuted} />
 							<TextInput
 								style={styles.searchInput}
-								placeholder="Search by name or email address"
+								placeholder="Their exact email address"
 								placeholderTextColor={theme.textMuted}
 								value={localQuery}
 								onChangeText={setLocalQuery}
