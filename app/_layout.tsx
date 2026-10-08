@@ -277,6 +277,11 @@ function RootLayoutNav() {
 					return;
 				}
 
+				if (data?.type === "split_reminder") {
+					router.push("/(tabs)/finance");
+					return;
+				}
+
 				// Handle group invitation notification
 				if (data?.type === "group_invitation") {
 					// Navigate to finance module to show the group invitations

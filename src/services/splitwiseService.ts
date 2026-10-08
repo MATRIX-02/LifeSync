@@ -1,19 +1,36 @@
 // SplitWise Service - Cloud-based group expense splitting with real user support
+//
+// A group is one `split_groups` row whose members, expenses, settlements,
+// settings and activity are jsonb columns. Every change goes through
+// mutateGroup(), which re-reads the row and writes only if nobody else wrote
+// in between (compare-and-swap on updated_at), retrying otherwise - so two
+// people adding expenses at once can't overwrite each other.
+//
+// Pure calculations (balances, debts, splits, export) live in splitwiseMath.ts.
 
 import { supabase } from "@/src/config/supabase";
 import {
+	ExpenseComment,
 	GroupInvitation,
 	GroupMember,
 	Settlement,
+	SplitActivity,
 	SplitExpense,
 	SplitGroup,
+	SplitGroupSettings,
 } from "@/src/types/finance";
 import { NotificationService } from "./notificationService";
+import { advanceDate, round2, toISODate } from "./splitwiseMath";
+
+export {
+	calculateDebts,
+	calculateGroupBalances,
+} from "./splitwiseMath";
 
 // ============== HELPER FUNCTIONS ==============
 
 // Generate RFC4122 v4 UUID string
-const generateId = (): string => {
+export const generateId = (): string => {
 	// Lightweight UUIDv4 generator using Math.random().
 	// This produces a UUID string acceptable to Postgres `uuid` columns.
 	return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
@@ -23,37 +40,125 @@ const generateId = (): string => {
 	});
 };
 
-// Convert camelCase to snake_case
-const toSnakeCase = (str: string) =>
-	str.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`);
-
-const objectToSnakeCase = (obj: any): any => {
-	if (obj === null || obj === undefined) return obj;
-	if (Array.isArray(obj)) return obj.map(objectToSnakeCase);
-	if (typeof obj !== "object") return obj;
-
-	return Object.keys(obj).reduce((acc, key) => {
-		const snakeKey = toSnakeCase(key);
-		acc[snakeKey] = objectToSnakeCase(obj[key]);
-		return acc;
-	}, {} as any);
+const parseJson = <T>(value: unknown, fallback: T): T => {
+	if (value === null || value === undefined) return fallback;
+	if (typeof value === "string") {
+		try {
+			return JSON.parse(value) as T;
+		} catch {
+			return fallback;
+		}
+	}
+	return value as T;
 };
 
-// Convert snake_case to camelCase
-const toCamelCase = (str: string) =>
-	str.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase());
+const ACTIVITY_CAP = 300;
 
-const objectToCamelCase = (obj: any): any => {
-	if (obj === null || obj === undefined) return obj;
-	if (Array.isArray(obj)) return obj.map(objectToCamelCase);
-	if (typeof obj !== "object") return obj;
-
-	return Object.keys(obj).reduce((acc, key) => {
-		const camelKey = toCamelCase(key);
-		acc[camelKey] = objectToCamelCase(obj[key]);
-		return acc;
-	}, {} as any);
+/** Who is acting, for activity entries. Set once by the Split Wise screen. */
+let actor: { userId?: string; name: string } = { name: "Someone" };
+export const setSplitActor = (userId: string | undefined, name: string) => {
+	actor = { userId, name };
 };
+
+export const rowToGroup = (g: any, viewerUserId?: string): SplitGroup => {
+	const members = parseJson<GroupMember[]>(g.members, []);
+	return {
+		id: g.id,
+		name: g.name,
+		description: g.description,
+		color: g.color,
+		icon: g.icon,
+		members: members.map((m) => ({
+			...m,
+			isCurrentUser: !!viewerUserId && m.userId === viewerUserId,
+		})),
+		expenses: parseJson<SplitExpense[]>(g.expenses, []),
+		settlements: parseJson<Settlement[]>(g.settlements, []),
+		totalExpenses: g.total_expenses || 0,
+		createdBy: g.user_id,
+		createdAt: g.created_at,
+		updatedAt: g.updated_at,
+		isArchived: !!g.is_archived,
+		settings: parseJson<SplitGroupSettings>(g.settings, {}),
+		activity: parseJson<SplitActivity[]>(g.activity, []),
+	};
+};
+
+const missingColumnHint = (message: string) =>
+	/settings|activity/.test(message) && /column|schema cache/i.test(message)
+		? "Split Wise needs a database update. Run the SQL in docs/SPLIT_WISE_SETUP.md."
+		: message;
+
+type ActivityInput = Omit<SplitActivity, "id" | "at" | "actorUserId" | "actorName">;
+
+/**
+ * Applies `change` to a fresh copy of the group and saves it. `change` edits
+ * the group in place and returns activity entries to log (or throws an Error
+ * whose message is shown to the user). Retries when someone else saved first.
+ */
+export async function mutateGroup(
+	groupId: string,
+	change: (group: SplitGroup) => ActivityInput[] | void,
+): Promise<{ data: SplitGroup | null; error: string | null }> {
+	try {
+		for (let attempt = 0; attempt < 4; attempt++) {
+			const { data: row, error: fetchError } = await (supabase.from("split_groups") as any)
+				.select("*")
+				.eq("id", groupId)
+				.single();
+			if (fetchError) throw fetchError;
+
+			const group = rowToGroup(row);
+			const entries = change(group) || [];
+			const now = new Date().toISOString();
+			const activity = [
+				...entries.map((e) => ({
+					...e,
+					id: generateId(),
+					at: now,
+					actorUserId: actor.userId,
+					actorName: actor.name,
+				})),
+				...(group.activity ?? []),
+			].slice(0, ACTIVITY_CAP);
+
+			// isCurrentUser is per viewer; never persist it.
+			const members = group.members.map(({ isCurrentUser, ...m }) => ({
+				...m,
+				isCurrentUser: false,
+			}));
+
+			const { data: saved, error: saveError } = await (supabase.from("split_groups") as any)
+				.update({
+					name: group.name,
+					description: group.description,
+					color: group.color,
+					icon: group.icon,
+					members,
+					expenses: group.expenses,
+					settlements: group.settlements,
+					total_expenses: round2(group.expenses.reduce((s, e) => s + e.amount, 0)),
+					is_archived: group.isArchived,
+					settings: group.settings ?? {},
+					activity,
+					updated_at: now,
+				})
+				.eq("id", groupId)
+				.eq("updated_at", row.updated_at)
+				.select("*");
+			if (saveError) throw saveError;
+			if (saved && saved.length > 0) return { data: rowToGroup(saved[0]), error: null };
+			// Someone else saved between our read and write: go again.
+		}
+		throw new Error("The group is being changed by someone else. Please try again.");
+	} catch (error: any) {
+		console.error("Split group update failed:", error);
+		return { data: null, error: missingColumnHint(error?.message ?? String(error)) };
+	}
+}
+
+const nameOf = (group: SplitGroup, memberId: string) =>
+	group.members.find((m) => m.id === memberId)?.name ?? "someone";
 
 // ============== GROUP OPERATIONS ==============
 
@@ -65,6 +170,9 @@ export const createSplitGroup = async (
 		description?: string;
 		color: string;
 		icon: string;
+		settings?: SplitGroupSettings;
+		/** Extra members to add straight away (friend groups). */
+		extraMembers?: GroupMember[];
 	},
 ): Promise<{ data: SplitGroup | null; error: string | null }> => {
 	try {
@@ -75,17 +183,17 @@ export const createSplitGroup = async (
 			id: generateId(),
 			name: userName,
 			userId: userId,
-			isCurrentUser: true,
+			isCurrentUser: false,
 			role: "admin",
 			joinedAt: now,
 		};
+		const members = [creatorMember, ...(groupData.extraMembers ?? [])];
 
 		// Save to Supabase and let the DB generate the group `id` (uses default gen_random_uuid())
 		const { data: insertedGroup, error: insertError } = await (
 			supabase.from("split_groups") as any
 		)
 			.insert({
-				// omit `id` so Postgres uses the column default (gen_random_uuid())
 				user_id: userId,
 				name: groupData.name,
 				description: groupData.description,
@@ -93,9 +201,11 @@ export const createSplitGroup = async (
 				icon: groupData.icon,
 				// jsonb columns: stringifying stores a JSON string inside the jsonb
 				// instead of an array.
-				members: [creatorMember],
+				members,
 				expenses: [],
 				settlements: [],
+				settings: groupData.settings ?? {},
+				activity: [],
 				total_expenses: 0,
 				created_at: now,
 				updated_at: now,
@@ -107,14 +217,12 @@ export const createSplitGroup = async (
 		if (insertError || !insertedGroup)
 			throw insertError || new Error("Failed to insert group");
 
-		const dbGroupId: string = insertedGroup.id;
-
-		// Also add to group_members table for multi-user access; let DB generate its PK id
+		// Also add to group_members table for multi-user access
 		const { error: memberInsertError } = await (
 			supabase.from("split_group_members") as any
 		).insert({
 			id: generateId(),
-			group_id: dbGroupId,
+			group_id: insertedGroup.id,
 			user_id: userId,
 			member_id: creatorMember.id,
 			role: "admin",
@@ -123,64 +231,37 @@ export const createSplitGroup = async (
 
 		if (memberInsertError) throw memberInsertError;
 
-		const newGroup: SplitGroup = {
-			id: dbGroupId,
-			name: groupData.name,
-			description: groupData.description,
-			color: groupData.color,
-			icon: groupData.icon,
-			members: [creatorMember],
-			expenses: [],
-			settlements: [],
-			totalExpenses: 0,
-			createdBy: userId,
-			createdAt: now,
-			updatedAt: now,
-			isArchived: false,
-		};
-
-		return { data: newGroup, error: null };
+		return { data: rowToGroup(insertedGroup, userId), error: null };
 	} catch (error: any) {
 		console.error("Error creating split group:", error);
-		return { data: null, error: error.message };
+		return { data: null, error: missingColumnHint(error.message) };
 	}
 };
 
-export const updateSplitGroup = async (
+export const updateGroupDetails = (
 	groupId: string,
-	updates: Partial<SplitGroup>,
-): Promise<{ error: string | null }> => {
-	try {
-		const updateData: any = {
-			updated_at: new Date().toISOString(),
-		};
+	details: Partial<Pick<SplitGroup, "name" | "description" | "color" | "icon">>,
+) =>
+	mutateGroup(groupId, (g) => {
+		Object.assign(g, details);
+		return [{ kind: "group_updated", text: `updated the group details` }];
+	});
 
-		if (updates.name) updateData.name = updates.name;
-		if (updates.description !== undefined)
-			updateData.description = updates.description;
-		if (updates.color) updateData.color = updates.color;
-		if (updates.icon) updateData.icon = updates.icon;
-		if (updates.members) updateData.members = JSON.stringify(updates.members);
-		if (updates.expenses)
-			updateData.expenses = JSON.stringify(updates.expenses);
-		if (updates.settlements)
-			updateData.settlements = JSON.stringify(updates.settlements);
-		if (updates.totalExpenses !== undefined)
-			updateData.total_expenses = updates.totalExpenses;
-		if (updates.isArchived !== undefined)
-			updateData.is_archived = updates.isArchived;
+export const updateGroupSettings = (
+	groupId: string,
+	patch: Partial<SplitGroupSettings>,
+	description?: string,
+) =>
+	mutateGroup(groupId, (g) => {
+		g.settings = { ...(g.settings ?? {}), ...patch };
+		return description ? [{ kind: "group_updated", text: description }] : [];
+	});
 
-		const { error } = await (supabase.from("split_groups") as any)
-			.update(updateData)
-			.eq("id", groupId);
-
-		if (error) throw error;
-		return { error: null };
-	} catch (error: any) {
-		console.error("Error updating split group:", error);
-		return { error: error.message };
-	}
-};
+export const setGroupArchived = (groupId: string, archived: boolean) =>
+	mutateGroup(groupId, (g) => {
+		g.isArchived = archived;
+		return [{ kind: "group_updated", text: archived ? "archived the group" : "restored the group" }];
+	});
 
 export const deleteSplitGroup = async (
 	groupId: string,
@@ -215,11 +296,11 @@ export const deleteSplitGroup = async (
 	}
 };
 
+/** Every group the user belongs to, archived ones included (the UI separates them). */
 export const fetchUserGroups = async (
 	userId: string,
 ): Promise<{ data: SplitGroup[]; error: string | null }> => {
 	try {
-		// Fetch groups where user is a member
 		const { data: membershipData, error: membershipError } = await (
 			supabase.from("split_group_members") as any
 		)
@@ -228,70 +309,29 @@ export const fetchUserGroups = async (
 
 		if (membershipError) throw membershipError;
 
-		const groupIds = (membershipData || []).map((m: any) => m.group_id);
-
-		// Ensure we only pass valid UUIDs to Postgres. Older records may have
-		// non-UUID IDs (timestamp_based) from earlier versions of the app.
+		// Older records may have non-UUID ids from earlier app versions; Postgres
+		// rejects the whole `in` filter if one is passed.
 		const uuidRegex =
 			/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-		const validGroupIds = groupIds.filter((id: string) => uuidRegex.test(id));
-		const invalidGroupIds = groupIds.filter(
-			(id: string) => !uuidRegex.test(id),
-		);
+		const groupIds = (membershipData || [])
+			.map((m: any) => m.group_id)
+			.filter((id: string) => uuidRegex.test(id));
 
-		if (invalidGroupIds.length > 0) {
-			console.warn("Ignoring invalid group IDs (non-UUID):", invalidGroupIds);
-		}
+		if (groupIds.length === 0) return { data: [], error: null };
 
-		if (validGroupIds.length === 0) {
-			return { data: [], error: null };
-		}
-
-		// Fetch group details
 		const { data: groupsData, error: groupsError } = await (
 			supabase.from("split_groups") as any
 		)
 			.select("*")
-			.in("id", validGroupIds)
-			.eq("is_archived", false)
+			.in("id", groupIds)
 			.order("updated_at", { ascending: false });
 
 		if (groupsError) throw groupsError;
 
-		const groups: SplitGroup[] = (groupsData || []).map((g: any) => {
-			const members: GroupMember[] =
-				typeof g.members === "string" ? JSON.parse(g.members) : g.members || [];
-
-			// Update isCurrentUser flag based on the current user viewing
-			const updatedMembers = members.map((m: GroupMember) => ({
-				...m,
-				isCurrentUser: m.userId === userId,
-			}));
-
-			return {
-				id: g.id,
-				name: g.name,
-				description: g.description,
-				color: g.color,
-				icon: g.icon,
-				members: updatedMembers,
-				expenses:
-					typeof g.expenses === "string"
-						? JSON.parse(g.expenses)
-						: g.expenses || [],
-				settlements:
-					typeof g.settlements === "string"
-						? JSON.parse(g.settlements)
-						: g.settlements || [],
-				totalExpenses: g.total_expenses || 0,
-				createdBy: g.user_id,
-				createdAt: g.created_at,
-				updatedAt: g.updated_at,
-				isArchived: g.is_archived,
-			};
-		});
-
-		return { data: groups, error: null };
+		return {
+			data: (groupsData || []).map((g: any) => rowToGroup(g, userId)),
+			error: null,
+		};
 	} catch (error: any) {
 		console.error("Error fetching user groups:", error);
 		return { data: [], error: error.message };
@@ -306,96 +346,86 @@ export const addNonUserMember = async (
 	email?: string,
 	phone?: string,
 ): Promise<{ data: GroupMember | null; error: string | null }> => {
-	try {
-		// First fetch current group data
-		const { data: groupData, error: fetchError } = await (
-			supabase.from("split_groups") as any
-		)
-			.select("members")
-			.eq("id", groupId)
-			.single();
+	const newMember: GroupMember = {
+		id: generateId(),
+		name: memberName,
+		email,
+		phone,
+		isCurrentUser: false,
+		role: "member",
+		joinedAt: new Date().toISOString(),
+	};
+	const { error } = await mutateGroup(groupId, (g) => {
+		g.members.push(newMember);
+		return [{ kind: "member_added", text: `added ${memberName}` }];
+	});
+	return { data: error ? null : newMember, error };
+};
 
-		if (fetchError) throw fetchError;
-
-		const members: GroupMember[] =
-			typeof groupData.members === "string"
-				? JSON.parse(groupData.members)
-				: groupData.members || [];
-
-		const newMember: GroupMember = {
+/**
+ * Adds an invited LifeSync user as a placeholder member right away, so they
+ * can be included in splits before accepting. Accepting links this member.
+ */
+export const addPendingUserMember = (
+	groupId: string,
+	user: { id: string; name: string; email?: string },
+) =>
+	mutateGroup(groupId, (g) => {
+		if (g.members.some((m) => m.userId === user.id || m.pendingUserId === user.id)) return [];
+		g.members.push({
 			id: generateId(),
-			name: memberName,
-			email,
-			phone,
+			name: user.name,
+			email: user.email,
+			pendingUserId: user.id,
 			isCurrentUser: false,
 			role: "member",
 			joinedAt: new Date().toISOString(),
-		};
-
-		members.push(newMember);
-
-		// Update group
-		const { error: updateError } = await (supabase.from("split_groups") as any)
-			.update({
-				members,
-				updated_at: new Date().toISOString(),
-			})
-			.eq("id", groupId);
-
-		if (updateError) throw updateError;
-
-		return { data: newMember, error: null };
-	} catch (error: any) {
-		console.error("Error adding member:", error);
-		return { data: null, error: error.message };
-	}
-};
+		});
+		return [{ kind: "member_added", text: `invited ${user.name}` }];
+	});
 
 export const removeMember = async (
 	groupId: string,
 	memberId: string,
 ): Promise<{ error: string | null }> => {
-	try {
-		// Fetch current group data
-		const { data: groupData, error: fetchError } = await (
-			supabase.from("split_groups") as any
-		)
-			.select("members")
-			.eq("id", groupId)
-			.single();
+	const { error } = await mutateGroup(groupId, (g) => {
+		const name = nameOf(g, memberId);
+		g.members = g.members.filter((m) => m.id !== memberId);
+		return [{ kind: "member_removed", text: `removed ${name}` }];
+	});
+	if (error) return { error };
 
-		if (fetchError) throw fetchError;
-
-		let members: GroupMember[] =
-			typeof groupData.members === "string"
-				? JSON.parse(groupData.members)
-				: groupData.members || [];
-
-		// Remove member
-		members = members.filter((m) => m.id !== memberId);
-
-		// Update group
-		const { error: updateError } = await (supabase.from("split_groups") as any)
-			.update({
-				members,
-				updated_at: new Date().toISOString(),
-			})
-			.eq("id", groupId);
-
-		if (updateError) throw updateError;
-
-		// Also remove from split_group_members if they were a linked user
-		await (supabase.from("split_group_members") as any)
-			.delete()
-			.eq("group_id", groupId)
-			.eq("member_id", memberId);
-
-		return { error: null };
-	} catch (error: any) {
-		console.error("Error removing member:", error);
-		return { error: error.message };
-	}
+	// Also remove from split_group_members if they were a linked user
+	await (supabase.from("split_group_members") as any)
+		.delete()
+		.eq("group_id", groupId)
+		.eq("member_id", memberId);
+	return { error: null };
 };
+
+/** Saves a UPI ID on one member record. */
+export const setMemberUpi = (groupId: string, memberId: string, upiId: string) =>
+	mutateGroup(groupId, (g) => {
+		const m = g.members.find((x) => x.id === memberId);
+		if (!m) throw new Error("Member not found");
+		m.upiId = upiId.trim() || undefined;
+		return [];
+	});
+
+/** Your own UPI ID, written onto your member record in every group. */
+export async function setMyUpiEverywhere(
+	groups: SplitGroup[],
+	userId: string,
+	upiId: string,
+): Promise<string | null> {
+	for (const g of groups) {
+		const me = g.members.find((m) => m.userId === userId);
+		if (!me || (me.upiId ?? "") === upiId.trim()) continue;
+		const { error } = await setMemberUpi(g.id, me.id, upiId);
+		if (error) return error;
+	}
+	return null;
+}
 
 // ============== INVITATION OPERATIONS ==============
 
@@ -643,18 +673,26 @@ const addUserToGroup = async (
 			? JSON.parse(groupData.members)
 			: groupData.members || [];
 
-	// Create new member
-	const newMember: GroupMember = {
-		id: generateId(),
-		name: userName,
-		email: userEmail,
-		userId: userId,
-		isCurrentUser: false,
-		role: "member",
-		joinedAt: now,
-	};
-
-	members.push(newMember);
+	// Inviting adds a placeholder member straight away (so expenses can be
+	// split with them before they accept). Link that one instead of adding a
+	// duplicate, so everything already recorded for them stays theirs.
+	let newMember = members.find((m) => !m.userId && m.pendingUserId === userId);
+	if (newMember) {
+		newMember.userId = userId;
+		newMember.pendingUserId = undefined;
+		newMember.email = newMember.email || userEmail;
+	} else {
+		newMember = {
+			id: generateId(),
+			name: userName,
+			email: userEmail,
+			userId: userId,
+			isCurrentUser: false,
+			role: "member",
+			joinedAt: now,
+		};
+		members.push(newMember);
+	}
 
 	// Update group members
 	await (supabase.from("split_groups") as any)
@@ -677,236 +715,291 @@ const addUserToGroup = async (
 
 // ============== EXPENSE OPERATIONS ==============
 
-// ============== EXPENSE OPERATIONS ==============
+export type ExpenseInput = Omit<SplitExpense, "id" | "groupId" | "createdAt" | "updatedAt">;
 
-export const addExpense = async (
-	groupId: string,
-	expense: Omit<SplitExpense, "id" | "groupId" | "createdAt" | "updatedAt">,
-): Promise<{ data: SplitExpense | null; error: string | null }> => {
-	try {
-		const now = new Date().toISOString();
-
-		// Fetch current group data
-		const { data: groupData, error: fetchError } = await (
-			supabase.from("split_groups") as any
-		)
-			.select("expenses, total_expenses")
-			.eq("id", groupId)
-			.single();
-
-		if (fetchError) throw fetchError;
-
-		const expenses: SplitExpense[] =
-			typeof groupData.expenses === "string"
-				? JSON.parse(groupData.expenses)
-				: groupData.expenses || [];
-
-		const newExpense: SplitExpense = {
-			...expense,
-			id: generateId(),
-			groupId,
-			createdAt: now,
-			updatedAt: now,
-		};
-
-		expenses.push(newExpense);
-
-		// Update group
-		const { error: updateError } = await (supabase.from("split_groups") as any)
-			.update({
-				expenses,
-				total_expenses: (groupData.total_expenses || 0) + expense.amount,
-				updated_at: now,
-			})
-			.eq("id", groupId);
-
-		if (updateError) throw updateError;
-
-		return { data: newExpense, error: null };
-	} catch (error: any) {
-		console.error("Error adding expense:", error);
-		return { data: null, error: error.message };
-	}
+export const addExpense = (groupId: string, expense: ExpenseInput) => {
+	const now = new Date().toISOString();
+	const newExpense: SplitExpense = {
+		...expense,
+		id: generateId(),
+		groupId,
+		createdByUserId: actor.userId,
+		createdAt: now,
+		updatedAt: now,
+	};
+	return mutateGroup(groupId, (g) => {
+		g.expenses.push(newExpense);
+		return [
+			{
+				kind: "expense_added",
+				text: `added "${newExpense.description}"`,
+				expenseId: newExpense.id,
+				amount: newExpense.amount,
+			},
+		];
+	});
 };
+
+export const updateExpense = (groupId: string, expenseId: string, changes: Partial<ExpenseInput>) =>
+	mutateGroup(groupId, (g) => {
+		const index = g.expenses.findIndex((e) => e.id === expenseId);
+		if (index < 0) throw new Error("This expense was deleted by someone else.");
+		const before = g.expenses[index];
+		g.expenses[index] = {
+			...before,
+			...changes,
+			// Comments are edited separately; never lose ones added meanwhile.
+			comments: before.comments,
+			updatedAt: new Date().toISOString(),
+		};
+		const after = g.expenses[index];
+		return [
+			{
+				kind: "expense_edited",
+				text:
+					before.amount !== after.amount
+						? `edited "${after.description}" (${before.amount} → ${after.amount})`
+						: `edited "${after.description}"`,
+				expenseId,
+				amount: after.amount,
+			},
+		];
+	});
 
 export const deleteExpense = async (
 	groupId: string,
 	expenseId: string,
 ): Promise<{ error: string | null }> => {
-	try {
-		// Fetch current group data
-		const { data: groupData, error: fetchError } = await (
-			supabase.from("split_groups") as any
-		)
-			.select("expenses, total_expenses")
-			.eq("id", groupId)
-			.single();
-
-		if (fetchError) throw fetchError;
-
-		let expenses: SplitExpense[] =
-			typeof groupData.expenses === "string"
-				? JSON.parse(groupData.expenses)
-				: groupData.expenses || [];
-
-		const expenseToDelete = expenses.find((e) => e.id === expenseId);
-		if (!expenseToDelete) {
-			return { error: "Expense not found" };
-		}
-
-		expenses = expenses.filter((e) => e.id !== expenseId);
-
-		// Update group
-		const { error: updateError } = await (supabase.from("split_groups") as any)
-			.update({
-				expenses,
-				total_expenses: Math.max(
-					0,
-					(groupData.total_expenses || 0) - expenseToDelete.amount,
-				),
-				updated_at: new Date().toISOString(),
-			})
-			.eq("id", groupId);
-
-		if (updateError) throw updateError;
-
-		return { error: null };
-	} catch (error: any) {
-		console.error("Error deleting expense:", error);
-		return { error: error.message };
-	}
+	const { error } = await mutateGroup(groupId, (g) => {
+		const expense = g.expenses.find((e) => e.id === expenseId);
+		if (!expense) return [];
+		g.expenses = g.expenses.filter((e) => e.id !== expenseId);
+		return [
+			{
+				kind: "expense_deleted",
+				text: `deleted "${expense.description}"`,
+				amount: expense.amount,
+			},
+		];
+	});
+	return { error };
 };
+
+export const addComment = (groupId: string, expenseId: string, text: string) =>
+	mutateGroup(groupId, (g) => {
+		const expense = g.expenses.find((e) => e.id === expenseId);
+		if (!expense) throw new Error("This expense was deleted.");
+		const comment: ExpenseComment = {
+			id: generateId(),
+			userId: actor.userId,
+			authorName: actor.name,
+			text: text.trim(),
+			createdAt: new Date().toISOString(),
+		};
+		expense.comments = [...(expense.comments ?? []), comment];
+		return [
+			{
+				kind: "comment_added",
+				text: `commented on "${expense.description}": ${text.trim().slice(0, 80)}`,
+				expenseId,
+			},
+		];
+	});
+
+export const deleteComment = (groupId: string, expenseId: string, commentId: string) =>
+	mutateGroup(groupId, (g) => {
+		const expense = g.expenses.find((e) => e.id === expenseId);
+		if (expense) expense.comments = (expense.comments ?? []).filter((c) => c.id !== commentId);
+		return [];
+	});
 
 // ============== SETTLEMENT OPERATIONS ==============
 
-export const addSettlement = async (
-	groupId: string,
-	settlement: Omit<Settlement, "id" | "groupId" | "createdAt">,
-): Promise<{ data: Settlement | null; error: string | null }> => {
-	try {
+export type SettlementInput = Omit<Settlement, "id" | "groupId" | "createdAt" | "updatedAt">;
+
+export const addSettlement = (groupId: string, settlement: SettlementInput) =>
+	mutateGroup(groupId, (g) => {
 		const now = new Date().toISOString();
-
-		// Fetch current group data
-		const { data: groupData, error: fetchError } = await (
-			supabase.from("split_groups") as any
-		)
-			.select("settlements")
-			.eq("id", groupId)
-			.single();
-
-		if (fetchError) throw fetchError;
-
-		const settlements: Settlement[] =
-			typeof groupData.settlements === "string"
-				? JSON.parse(groupData.settlements)
-				: groupData.settlements || [];
-
-		const newSettlement: Settlement = {
-			...settlement,
-			id: generateId(),
-			groupId,
-			createdAt: now,
-		};
-
-		settlements.push(newSettlement);
-
-		// Update group
-		const { error: updateError } = await (supabase.from("split_groups") as any)
-			.update({
-				settlements,
-				updated_at: now,
-			})
-			.eq("id", groupId);
-
-		if (updateError) throw updateError;
-
-		return { data: newSettlement, error: null };
-	} catch (error: any) {
-		console.error("Error adding settlement:", error);
-		return { data: null, error: error.message };
-	}
-};
-
-// ============== BALANCE CALCULATIONS ==============
-
-export const calculateGroupBalances = (
-	group: SplitGroup,
-): Array<{ memberId: string; memberName: string; balance: number }> => {
-	const balanceMap: Record<string, number> = {};
-
-	// Initialize all members with 0 balance
-	group.members.forEach((m) => {
-		balanceMap[m.id] = 0;
+		g.settlements.push({ ...settlement, id: generateId(), groupId, createdAt: now });
+		return [
+			{
+				kind: "settlement_added",
+				text: `recorded ${nameOf(g, settlement.fromMemberId)} paid ${nameOf(g, settlement.toMemberId)}${settlement.method === "upi" ? " via UPI" : ""}`,
+				amount: settlement.amount,
+			},
+		];
 	});
 
-	// Process expenses
-	group.expenses.forEach((expense) => {
-		// Add amount to payer's balance (they are owed this money)
-		if (balanceMap[expense.paidBy] !== undefined) {
-			balanceMap[expense.paidBy] += expense.amount;
-		}
+export const updateSettlement = (groupId: string, settlementId: string, changes: Partial<SettlementInput>) =>
+	mutateGroup(groupId, (g) => {
+		const s = g.settlements.find((x) => x.id === settlementId);
+		if (!s) throw new Error("This payment was deleted by someone else.");
+		Object.assign(s, changes, { updatedAt: new Date().toISOString() });
+		return [
+			{
+				kind: "settlement_edited",
+				text: `edited the payment from ${nameOf(g, s.fromMemberId)} to ${nameOf(g, s.toMemberId)}`,
+				amount: s.amount,
+			},
+		];
+	});
 
-		// Subtract split amounts from each member's balance
-		expense.splits.forEach((split) => {
-			if (balanceMap[split.memberId] !== undefined) {
-				balanceMap[split.memberId] -= split.amount;
+export const deleteSettlement = (groupId: string, settlementId: string) =>
+	mutateGroup(groupId, (g) => {
+		const s = g.settlements.find((x) => x.id === settlementId);
+		if (!s) return [];
+		g.settlements = g.settlements.filter((x) => x.id !== settlementId);
+		return [
+			{
+				kind: "settlement_deleted",
+				text: `deleted the payment from ${nameOf(g, s.fromMemberId)} to ${nameOf(g, s.toMemberId)}`,
+				amount: s.amount,
+			},
+		];
+	});
+
+// ============== REMINDERS ==============
+
+/**
+ * Nudges a member who owes money: a push notification when they use
+ * LifeSync, and an activity entry either way. Returns false when there's no
+ * account to push to, so the caller can offer a share message instead.
+ */
+export async function sendPaymentReminder(
+	group: SplitGroup,
+	debtor: GroupMember,
+	amountText: string,
+): Promise<boolean> {
+	await mutateGroup(group.id, () => [
+		{ kind: "reminder_sent", text: `reminded ${debtor.name} about ${amountText}` },
+	]);
+	if (!debtor.userId) return false;
+	try {
+		await NotificationService.sendPushNotificationToUser(
+			debtor.userId,
+			"Payment reminder",
+			`${actor.name} reminded you: you owe ${amountText} in "${group.name}".`,
+			{ type: "split_reminder", groupId: group.id },
+		);
+		return true;
+	} catch (error) {
+		console.warn("Reminder push failed:", error);
+		return false;
+	}
+}
+
+// ============== RECURRING ==============
+
+const MAX_CATCH_UP = 12;
+
+/**
+ * Creates any recurring copies that are due, for templates this user owns.
+ * Returns true when anything was added (caller refetches).
+ */
+export async function processRecurring(groups: SplitGroup[], userId: string): Promise<boolean> {
+	const today = toISODate(new Date());
+	let added = false;
+	for (const group of groups) {
+		if (group.isArchived) continue;
+		const due = (group.settings?.recurring ?? []).filter(
+			(r) => r.ownerUserId === userId && r.nextDate <= today,
+		);
+		if (due.length === 0) continue;
+
+		const { error } = await mutateGroup(group.id, (g) => {
+			const entries: ActivityInput[] = [];
+			for (const rule of g.settings?.recurring ?? []) {
+				if (rule.ownerUserId !== userId) continue;
+				for (let n = 0; rule.nextDate <= today && n < MAX_CATCH_UP; n++) {
+					const now = new Date().toISOString();
+					const [y, m, d] = rule.nextDate.split("-").map(Number);
+					const expense: SplitExpense = {
+						...rule.template,
+						id: generateId(),
+						groupId: g.id,
+						date: new Date(y, m - 1, d, 12).toISOString(),
+						recurringId: rule.id,
+						createdByUserId: userId,
+						isSettled: false,
+						createdAt: now,
+						updatedAt: now,
+					};
+					g.expenses.push(expense);
+					entries.push({
+						kind: "expense_added",
+						text: `added "${expense.description}" (repeats)`,
+						expenseId: expense.id,
+						amount: expense.amount,
+					});
+					rule.nextDate = advanceDate(rule.nextDate, rule.frequency, rule.anchorDay);
+				}
 			}
+			return entries;
 		});
+		if (!error) added = true;
+	}
+	return added;
+}
+
+export const removeRecurring = (groupId: string, recurringId: string) =>
+	mutateGroup(groupId, (g) => {
+		const rule = g.settings?.recurring?.find((r) => r.id === recurringId);
+		g.settings = {
+			...(g.settings ?? {}),
+			recurring: (g.settings?.recurring ?? []).filter((r) => r.id !== recurringId),
+		};
+		return rule ? [{ kind: "group_updated", text: `stopped repeating "${rule.template.description}"` }] : [];
 	});
 
-	// Process settlements
-	group.settlements.forEach((settlement) => {
-		// Payer's balance increases (they paid money)
-		if (balanceMap[settlement.fromMemberId] !== undefined) {
-			balanceMap[settlement.fromMemberId] += settlement.amount;
-		}
-		// Receiver's balance decreases (they received money)
-		if (balanceMap[settlement.toMemberId] !== undefined) {
-			balanceMap[settlement.toMemberId] -= settlement.amount;
-		}
+// ============== FRIENDS ==============
+
+/**
+ * A one-to-one "friend" group for expenses outside any group. For a LifeSync
+ * user this also sends an invitation, which links them when accepted.
+ */
+export async function createFriendGroup(
+	me: { userId: string; name: string },
+	friend: { name: string; userId?: string; email?: string },
+): Promise<{ data: SplitGroup | null; error: string | null }> {
+	const friendMember: GroupMember = {
+		id: generateId(),
+		name: friend.name,
+		email: friend.email,
+		pendingUserId: friend.userId,
+		isCurrentUser: false,
+		role: "member",
+		joinedAt: new Date().toISOString(),
+	};
+	const result = await createSplitGroup(me.userId, me.name, {
+		name: friend.name,
+		color: "#60A5FA",
+		icon: "person",
+		settings: { kind: "friend", simplifyDebts: true },
+		extraMembers: [friendMember],
 	});
-
-	return group.members.map((m) => ({
-		memberId: m.id,
-		memberName: m.name,
-		balance: balanceMap[m.id] || 0,
-	}));
-};
-
-export const calculateSimplifiedDebts = (
-	group: SplitGroup,
-): Array<{ from: GroupMember; to: GroupMember; amount: number }> => {
-	const balances = calculateGroupBalances(group);
-
-	const positiveBalances = balances
-		.filter((b) => b.balance > 0.01)
-		.map((b) => ({ ...b }));
-	const negativeBalances = balances
-		.filter((b) => b.balance < -0.01)
-		.map((b) => ({ ...b, balance: Math.abs(b.balance) }));
-
-	const debts: Array<{ from: GroupMember; to: GroupMember; amount: number }> =
-		[];
-
-	for (const debtor of negativeBalances) {
-		for (const creditor of positiveBalances) {
-			if (debtor.balance <= 0.01 || creditor.balance <= 0.01) continue;
-
-			const amount = Math.min(debtor.balance, creditor.balance);
-			const fromMember = group.members.find((m) => m.id === debtor.memberId);
-			const toMember = group.members.find((m) => m.id === creditor.memberId);
-
-			if (fromMember && toMember) {
-				debts.push({ from: fromMember, to: toMember, amount });
-			}
-
-			debtor.balance -= amount;
-			creditor.balance -= amount;
+	if (result.data && friend.userId) {
+		await sendGroupInvitation(
+			result.data.id,
+			`${me.name} (friend)`,
+			me.userId,
+			me.name,
+			friend.userId,
+			friend.email,
+			"Added you as a friend to split expenses",
+		);
+		try {
+			await NotificationService.sendPushNotificationToUser(
+				friend.userId,
+				"New friend on Split Wise",
+				`${me.name} added you to split expenses`,
+				{ type: "group_invitation", groupId: result.data.id },
+			);
+		} catch {
+			// Invitation still shows in the app.
 		}
 	}
-
-	return debts;
-};
+	return result;
+}
 
 // ============== REAL-TIME SUBSCRIPTIONS ==============
 
@@ -924,34 +1017,7 @@ export const subscribeToGroupUpdates = (
 				table: "split_groups",
 				filter: `id=eq.${groupId}`,
 			},
-			(payload: any) => {
-				const data = payload.new as any;
-				const group: SplitGroup = {
-					id: data.id,
-					name: data.name,
-					description: data.description,
-					color: data.color,
-					icon: data.icon,
-					members:
-						typeof data.members === "string"
-							? JSON.parse(data.members)
-							: data.members || [],
-					expenses:
-						typeof data.expenses === "string"
-							? JSON.parse(data.expenses)
-							: data.expenses || [],
-					settlements:
-						typeof data.settlements === "string"
-							? JSON.parse(data.settlements)
-							: data.settlements || [],
-					totalExpenses: data.total_expenses || 0,
-					createdBy: data.user_id,
-					createdAt: data.created_at,
-					updatedAt: data.updated_at,
-					isArchived: data.is_archived,
-				};
-				onUpdate(group);
-			},
+			(payload: any) => onUpdate(rowToGroup(payload.new)),
 		)
 		.subscribe();
 

@@ -1,6 +1,6 @@
 import { Theme } from "@/src/context/themeContext";
 
-export type DetailTab = "overview" | "expenses" | "members" | "activity";
+export type DetailTab = "expenses" | "balances" | "activity" | "members";
 
 export interface SplitWiseProps {
 	theme: Theme;

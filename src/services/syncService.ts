@@ -953,27 +953,36 @@ export const syncFinanceToCloud = async (
 			if (debtsError) throw debtsError;
 		}
 
-		// Sync split groups - fix invalid UUIDs
+		// Split groups: only upload ones the cloud doesn't have yet (the legacy
+		// local migration). Split Wise writes the cloud row directly and other
+		// members edit it too, so this snapshot is usually stale - overwriting
+		// would drop their newer expenses. The jsonb contents are passed as-is:
+		// snake-casing them (paidBy -> paid_by) breaks every balance.
 		if (financeData.splitGroups && financeData.splitGroups.length > 0) {
-			const groupsWithUser = financeData.splitGroups
-				.map((g) =>
-					objectToSnakeCase({
-						...g,
+			const groupsWithUser = financeData.splitGroups.map((g: any) =>
+				sanitizeUUIDRefs(
+					{
 						id: assignIdIfMissing(g, "id"),
 						user_id: userId,
-						// members/expenses/settlements are jsonb columns — pass the
-						// arrays through. Stringifying them double-encodes, storing a
-						// JSON string inside jsonb instead of an array.
+						name: g.name,
+						description: g.description,
+						color: g.color,
+						icon: g.icon,
 						members: g.members || [],
 						expenses: g.expenses || [],
 						settlements: g.settlements || [],
-					}),
-				)
-				.map((g: any) => sanitizeUUIDRefs(g, ["created_by"]));
+						total_expenses: g.totalExpenses ?? 0,
+						is_archived: !!g.isArchived,
+						created_at: g.createdAt,
+						updated_at: g.updatedAt,
+					},
+					["created_by"],
+				),
+			);
 
 			const { error: groupsError } = await (
 				supabase.from("split_groups") as any
-			).upsert(groupsWithUser, { onConflict: "id" });
+			).upsert(groupsWithUser, { onConflict: "id", ignoreDuplicates: true });
 
 			if (groupsError) throw groupsError;
 		}

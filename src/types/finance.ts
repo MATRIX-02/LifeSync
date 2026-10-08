@@ -226,6 +226,77 @@ export interface SplitGroup {
 	createdAt: string;
 	updatedAt: string;
 	isArchived: boolean;
+	/** jsonb column `settings`. */
+	settings?: SplitGroupSettings;
+	/** jsonb column `activity`, newest first, capped. */
+	activity?: SplitActivity[];
+}
+
+export type SplitType = "equal" | "exact" | "percentage" | "shares" | "itemized";
+
+export interface SplitGroupSettings {
+	/** Default true: show the fewest payments instead of who-owes-whom per expense. */
+	simplifyDebts?: boolean;
+	/** Pre-fills new expenses. `values` are per member: amounts, % or shares. */
+	defaultSplit?: { type: SplitType; values: Record<string, string> };
+	recurring?: RecurringSplitExpense[];
+	/** "friend" groups are one-to-one splits shown under Friends, not Groups. */
+	kind?: "group" | "friend";
+}
+
+export type RecurringFrequency = "weekly" | "monthly" | "yearly";
+
+export interface RecurringSplitExpense {
+	id: string;
+	frequency: RecurringFrequency;
+	/** YYYY-MM-DD of the next copy to create. */
+	nextDate: string;
+	/** Day of month it started on, so monthly ones return to it after short months. */
+	anchorDay?: number;
+	/** Only this user's app creates the copies, so two phones can't both add one. */
+	ownerUserId: string;
+	template: Pick<
+		SplitExpense,
+		"description" | "amount" | "category" | "paidBy" | "payers" | "splitType" | "splits" | "note"
+	>;
+}
+
+export interface SplitActivity {
+	id: string;
+	at: string;
+	actorUserId?: string;
+	actorName: string;
+	kind:
+		| "expense_added"
+		| "expense_edited"
+		| "expense_deleted"
+		| "settlement_added"
+		| "settlement_edited"
+		| "settlement_deleted"
+		| "comment_added"
+		| "member_added"
+		| "member_removed"
+		| "group_updated"
+		| "reminder_sent";
+	text: string;
+	expenseId?: string;
+	amount?: number;
+}
+
+export interface ExpenseComment {
+	id: string;
+	userId?: string;
+	authorName: string;
+	text: string;
+	createdAt: string;
+}
+
+/** A line from a scanned or typed receipt, split among `memberIds`. */
+export interface ReceiptItem {
+	id: string;
+	name: string;
+	price: number;
+	memberIds: string[];
 }
 
 // Group Member - Enhanced with user linking
@@ -241,6 +312,10 @@ export interface GroupMember {
 	role: GroupMemberRole;
 	joinedAt: string;
 	invitedBy?: string; // Member ID who invited this person
+	/** UPI VPA, e.g. name@okaxis - enables "Pay via UPI" to this member. */
+	upiId?: string;
+	/** Invited LifeSync user who hasn't accepted yet; linked on accept. */
+	pendingUserId?: string;
 }
 
 // Group Invitation - For inviting real users
@@ -266,12 +341,21 @@ export interface SplitExpense {
 	description: string;
 	amount: number;
 	category: string; // built-in key or "custom_xxxx"
-	paidBy: string; // Member ID who paid
+	paidBy: string; // Member ID who paid (the first payer when there are several)
+	/** Set when more than one person paid; amounts sum to `amount`. */
+	payers?: { memberId: string; amount: number }[];
 	date: string;
-	splitType: "equal" | "exact" | "percentage" | "shares";
+	splitType: SplitType;
 	splits: ExpenseSplit[];
 	note?: string;
 	attachments?: string[];
+	/** Itemized receipts keep their lines so the split can be re-edited. */
+	items?: ReceiptItem[];
+	/** Tax / service charge on an itemized receipt, spread in proportion. */
+	extraCharges?: number;
+	comments?: ExpenseComment[];
+	recurringId?: string;
+	createdByUserId?: string;
 	isSettled: boolean;
 	createdAt: string;
 	updatedAt: string;
@@ -307,7 +391,9 @@ export interface Settlement {
 	amount: number;
 	date: string;
 	note?: string;
+	method?: "cash" | "upi";
 	createdAt: string;
+	updatedAt?: string;
 }
 
 // ============== ANALYTICS ==============

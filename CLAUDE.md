@@ -28,7 +28,7 @@ Screens are large and self-contained; feature UI is often inline rather than ext
 
 - **Habit create and edit share one form:** `src/components/habits/HabitFormModal.tsx`, rendered by `app/(tabs)/index.tsx` (create) and `app/(tabs)/statistics.tsx` (edit). The modal only collects values; each screen does its own persistence and reminder scheduling.
 - **Styles:** big files import `createStyles` from a sibling `*.styles.ts`. Screen styles live in `src/styles/`, because any file under `app/` becomes a route.
-- **Split Wise** lives in `src/components/finance/splitwise/` (one file per view/modal).
+- **Split Wise** lives in `src/components/finance/splitwise/` (one file per view/modal). All writes go through `mutateGroup()` in `src/services/splitwiseService.ts` (re-read, edit, compare-and-swap on `updated_at`); pure maths (balances, debts, splits, CSV, charts) is in `splitwiseMath.ts`. "Friends" are hidden one-to-one groups (`settings.kind = "friend"`). Setup SQL: `docs/SPLIT_WISE_SETUP.md`.
 
 ## State: `*StoreDB` vs legacy stores
 
@@ -61,7 +61,7 @@ Two consequences that will bite:
 
 Miss one and the field is silently dropped on save or lost on cloud restore. Anything not listed in these mappers does not persist, regardless of what the TypeScript type says.
 
-**3. `jsonb` columns take arrays, not strings.** `savings_goals.contributions`, `finance_debts.payments` and `split_groups.members` / `expenses` / `settlements` are all `jsonb`. `JSON.stringify`-ing them double-encodes — a JSON *string* lands inside the jsonb column instead of an array. Pass the array through. The read paths tolerate both (`typeof x === "string" ? JSON.parse(x) : x`), which is what let this go unnoticed.
+**3. `jsonb` columns take arrays, not strings.** `savings_goals.contributions`, `finance_debts.payments` and `split_groups.members` / `expenses` / `settlements` / `settings` / `activity` are all `jsonb`. `JSON.stringify`-ing them double-encodes — a JSON *string* lands inside the jsonb column instead of an array. Pass the array through. The read paths tolerate both (`typeof x === "string" ? JSON.parse(x) : x`), which is what let this go unnoticed.
 
 ## Notifications
 
