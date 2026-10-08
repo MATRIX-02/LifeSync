@@ -1,3 +1,4 @@
+import { handleWaterNotificationAction } from "@/src/services/waterReminders";
 import FontAwesome from "@expo/vector-icons/FontAwesome";
 import {
 	DarkTheme,
@@ -260,6 +261,12 @@ function RootLayoutNav() {
 				const data = response.notification.request.content.data;
 
 				if (handleAppUpdate(data)) return;
+
+				if (String(data?.type ?? "").startsWith("water_reminder") && response.actionIdentifier) {
+					// Resolves false for a plain tap, which just opens the app.
+					void handleWaterNotificationAction(response);
+					return;
+				}
 
 				if (data?.type === "detected_transaction" && typeof data.id === "string") {
 					if (response.actionIdentifier === NotificationService.DETECTED_ACTION_IGNORE) {

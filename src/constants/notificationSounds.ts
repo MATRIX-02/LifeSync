@@ -67,6 +67,13 @@ export const NOTIFICATION_SOUNDS: NotificationSound[] = [
 		asset: require("@/assets/sounds/notifications/ls_ding.wav"),
 	},
 	{
+		id: "water_pour",
+		label: "Water Pour",
+		kind: "reminder",
+		file: "ls_water_pour.wav",
+		asset: require("@/assets/sounds/notifications/ls_water_pour.wav"),
+	},
+	{
 		id: "alarm_classic",
 		label: "Classic Beep",
 		kind: "alarm",

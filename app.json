@@ -78,7 +78,8 @@
 						"./assets/sounds/notifications/ls_ding.wav",
 						"./assets/sounds/notifications/ls_harp.wav",
 						"./assets/sounds/notifications/ls_marimba.wav",
-						"./assets/sounds/notifications/ls_pop.wav"
+						"./assets/sounds/notifications/ls_pop.wav",
+						"./assets/sounds/notifications/ls_water_pour.wav"
 					]
 				}
 			],

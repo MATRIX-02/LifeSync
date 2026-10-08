@@ -24,6 +24,8 @@ import { useSoundPrefsStore } from "../context/soundPrefsStore";
  */
 const ALARM_CHANNEL_ID = "alarms-v2";
 const REMINDER_CHANNEL_ID = "habit-reminders";
+const WATER_CHANNEL_ID = "hydration-reminders";
+const WATER_CATEGORY = "water_reminder";
 
 // Settings shared by the base channel and every per-tone copy of it.
 const reminderChannelBase = (): Notifications.NotificationChannelInput => ({
@@ -253,7 +255,8 @@ export class NotificationService {
 		trigger: Notifications.NotificationTriggerInput,
 		data?: Record<string, any>,
 		channelId: string = "habit-reminders",
-		sound: string | boolean = "default"
+		sound: string | boolean = "default",
+		categoryIdentifier?: string
 	): Promise<string> {
 		try {
 			const notificationId = await Notifications.scheduleNotificationAsync({
@@ -263,6 +266,7 @@ export class NotificationService {
 					data: data || {},
 					sound,
 					badge: 1,
+					...(categoryIdentifier ? { categoryIdentifier } : {}),
 					// Android routes sound/vibration/DND through the channel
 					...(Platform.OS === "android" && {
 						channelId,
@@ -774,27 +778,22 @@ export class NotificationService {
 
 	// ============ HYDRATION NOTIFICATIONS ============
 
-	// Schedule water reminder notifications throughout the day
+	/**
+	 * Rebuilds the daily water reminders: one trigger per time slot, WEEKLY per
+	 * active day when `days` is set, DAILY otherwise. Each slot states how much
+	 * of the goal should be drunk by then, which stays true whatever was logged.
+	 * `sound` is a tone id; "" follows the Settings default reminder tone.
+	 */
 	static async scheduleWaterReminders(
-		waterGoalMl: number,
-		wakeUpHour: number = 7,
-		sleepHour: number = 22
+		times: string[],
+		days: number[] | null,
+		goalMl: number,
+		sound: string
 	): Promise<string[]> {
-		// Cancel existing water reminders first
 		await this.cancelWaterReminders();
 
-		const notificationIds: string[] = [];
-		const activeHours = sleepHour - wakeUpHour;
-
-		// Calculate reminder intervals based on goal
-		// More water = more frequent reminders
-		const glassesPerDay = Math.ceil(waterGoalMl / 250); // 250ml per glass
-		const intervalsNeeded = Math.min(glassesPerDay, activeHours); // Max one per hour
-		const intervalHours = activeHours / intervalsNeeded;
-
-		// Create Android notification channel for hydration
 		if (Platform.OS === "android") {
-			await Notifications.setNotificationChannelAsync("hydration-reminders", {
+			await Notifications.setNotificationChannelAsync(WATER_CHANNEL_ID, {
 				name: "Hydration Reminders",
 				importance: Notifications.AndroidImportance.HIGH,
 				vibrationPattern: [0, 250, 250, 250],
@@ -805,59 +804,62 @@ export class NotificationService {
 			});
 		}
 
-		const waterMessages = [
-			"💧 Time to hydrate! Drink a glass of water",
-			"🥤 Stay refreshed! Have some water now",
-			"💦 Water break time! Your body needs hydration",
-			"🌊 Drink up! Keep your hydration on track",
-			"💧 Reminder: A glass of water keeps you healthy",
-			"🚰 Hydration alert! Time for your water break",
-			"💧 Don't forget to drink water for better focus",
-			"🥛 Water time! Stay energized throughout the day",
-		];
+		// Same tone channels as habits; the "system" tone keeps its own channel
+		// so hydration stays separately configurable in Android settings.
+		const resolved = await this.resolveHabitSound({ reminderSound: sound });
+		const channelId =
+			resolved.channelId === REMINDER_CHANNEL_ID
+				? WATER_CHANNEL_ID
+				: resolved.channelId;
 
-		for (let i = 0; i < intervalsNeeded; i++) {
-			const reminderHour = Math.round(wakeUpHour + i * intervalHours);
-			const reminderMinute = Math.round((intervalHours % 1) * 60 * i) % 60;
+		await this.ensureWaterCategory();
+		const weekdays = days && days.length > 0 && days.length < 7 ? days : null;
+		const ids: string[] = [];
 
-			if (reminderHour >= sleepHour) continue;
+		outer: for (let i = 0; i < times.length; i++) {
+			const [hour, minute] = times[i].split(":").map(Number);
+			const byNow = Math.round((goalMl * (i + 1)) / times.length / 50) * 50;
+			const body =
+				i === times.length - 1
+					? `Last one today - finish your ${goalMl}ml goal.`
+					: `Have a glass of water. Aim for ${byNow}ml of ${goalMl}ml by now.`;
+			const data = { type: "water_reminder", reminderNumber: i + 1 };
 
-			const trigger: Notifications.DailyTriggerInput = {
-				type: Notifications.SchedulableTriggerInputTypes.DAILY,
-				hour: reminderHour,
-				minute: reminderMinute,
-			};
-
-			const message = waterMessages[i % waterMessages.length];
-			const remainingGlasses = glassesPerDay - i;
-
-			try {
-				const notificationId = await Notifications.scheduleNotificationAsync({
-					content: {
-						title: "💧 Hydration Reminder",
-						body: `${message}. ${remainingGlasses} glasses left for today!`,
-						data: { type: "water_reminder", reminderNumber: i + 1 },
-						sound: "default",
-						badge: 1,
-						...(Platform.OS === "android" && {
-							channelId: "hydration-reminders",
-						}),
-					},
-					trigger,
-				});
-				notificationIds.push(notificationId);
-				console.log(
-					`📅 Scheduled water reminder ${
-						i + 1
-					} at ${reminderHour}:${reminderMinute.toString().padStart(2, "0")}`
-				);
-			} catch (error) {
-				console.error(`Error scheduling water reminder ${i + 1}:`, error);
+			for (const day of weekdays ?? [null]) {
+				if (ids.length >= MAX_REMINDERS_PER_HABIT) break outer;
+				const trigger: Notifications.NotificationTriggerInput =
+					day === null
+						? {
+								type: Notifications.SchedulableTriggerInputTypes.DAILY,
+								hour,
+								minute,
+							}
+						: {
+								type: Notifications.SchedulableTriggerInputTypes.WEEKLY,
+								// expo-notifications weekday is 1-7 with 1 = Sunday
+								weekday: day + 1,
+								hour,
+								minute,
+							};
+				try {
+					ids.push(
+						await this.scheduleNotification(
+							"💧 Hydration Reminder",
+							body,
+							trigger,
+							data,
+							channelId,
+							resolved.sound,
+							WATER_CATEGORY
+						)
+					);
+				} catch (error) {
+					console.error(`Error scheduling water reminder at ${times[i]}:`, error);
+				}
 			}
 		}
 
-		console.log(`✅ Scheduled ${notificationIds.length} water reminders`);
-		return notificationIds;
+		return ids;
 	}
 
 	// Cancel all water reminder notifications
@@ -871,21 +873,53 @@ export class NotificationService {
 		console.log("🗑️ Cancelled all water reminders");
 	}
 
-	// Schedule a single water reminder after X minutes
+	static readonly WATER_ACTION_250 = "water_250";
+	static readonly WATER_ACTION_500 = "water_500";
+	static readonly WATER_ACTION_SNOOZE = "water_snooze";
+
+	// Buttons on every water reminder. None open the app: they're handled by
+	// the listener in app/_layout.tsx when it's running, otherwise by the
+	// background task in index.js (see services/waterReminders.ts).
+	static async ensureWaterCategory(): Promise<void> {
+		await Notifications.setNotificationCategoryAsync(WATER_CATEGORY, [
+			{
+				identifier: NotificationService.WATER_ACTION_250,
+				buttonTitle: "+250 ml",
+				options: { opensAppToForeground: false },
+			},
+			{
+				identifier: NotificationService.WATER_ACTION_500,
+				buttonTitle: "+500 ml",
+				options: { opensAppToForeground: false },
+			},
+			{
+				identifier: NotificationService.WATER_ACTION_SNOOZE,
+				buttonTitle: "Snooze 15m",
+				options: { opensAppToForeground: false },
+			},
+		]);
+	}
+
+	// A one-off water reminder after X minutes (also used by Snooze), with the
+	// same buttons as the daily ones.
 	static async scheduleNextWaterReminder(
 		minutesFromNow: number,
 		customMessage?: string
 	): Promise<string> {
+		await this.ensureWaterCategory();
 		const trigger: Notifications.TimeIntervalTriggerInput = {
 			type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
-			seconds: minutesFromNow * 60,
+			seconds: Math.max(1, Math.round(minutesFromNow * 60)),
 		};
 
 		return this.scheduleNotification(
 			"💧 Water Reminder",
 			customMessage || "Time to drink some water! Stay hydrated!",
 			trigger,
-			{ type: "water_reminder_single" }
+			{ type: "water_reminder_single" },
+			WATER_CHANNEL_ID,
+			"default",
+			WATER_CATEGORY
 		);
 	}
 
