@@ -62,6 +62,13 @@ const syncHabitReminder = async (habit: Habit): Promise<void> => {
 	}
 };
 
+// Reschedule after a log change so a completed day stops reminding (and an
+// undone one starts again). Reminders are only scheduled a few days ahead.
+const refreshReminderFor = (habitId: string): void => {
+	const habit = useHabitStore.getState().getHabit(habitId);
+	if (habit) void syncHabitReminder(habit);
+};
+
 const getLogIndex = (logs: HabitLog[]): Map<string, HabitLog[]> => {
 	if (logIndexCache && logIndexCache.source === logs)
 		return logIndexCache.index;
@@ -541,6 +548,7 @@ export const useHabitStore = create<HabitStoreDB>()((set, get) => ({
 
 			// Recalculate stats
 			get().calculateStats(habitId);
+			refreshReminderFor(habitId);
 
 			console.log("✅ Habit log added to database");
 		} catch (error: any) {
@@ -582,6 +590,7 @@ export const useHabitStore = create<HabitStoreDB>()((set, get) => ({
 			}));
 
 			get().calculateStats(habitId);
+			refreshReminderFor(habitId);
 			console.log("✅ Habit log for date added to database");
 		} catch (error: any) {
 			console.error("❌ Failed to log habit for date:", error);
@@ -614,6 +623,7 @@ export const useHabitStore = create<HabitStoreDB>()((set, get) => ({
 
 			set((state) => ({ logs: state.logs.filter((l) => l.id !== log.id) }));
 			get().calculateStats(habitId);
+			refreshReminderFor(habitId);
 		} catch (error: any) {
 			console.error("❌ Failed to remove habit log:", error);
 			set({ error: error.message });
@@ -662,6 +672,7 @@ export const useHabitStore = create<HabitStoreDB>()((set, get) => ({
 			}));
 
 			get().calculateStats(habitId);
+			refreshReminderFor(habitId);
 			console.log("✅ Habit log removed from database");
 		} catch (error: any) {
 			console.error("❌ Failed to remove log:", error);
@@ -952,3 +963,6 @@ export const useHabitStore = create<HabitStoreDB>()((set, get) => ({
 	},
 
 }));
+
+NotificationService.isHabitDoneOn = (habitId, date) =>
+	useHabitStore.getState().isHabitCompletedOnDate(habitId, date);

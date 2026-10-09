@@ -110,6 +110,11 @@ export async function markDoneToday(habitId: string, target: number): Promise<vo
 		completed_at: at.toISOString(),
 	});
 	if (error) throw error;
+
+	// The store isn't loaded to reschedule, so just drop the rest of today's.
+	if ((count ?? 0) + 1 >= target) {
+		await NotificationService.cancelHabitRemindersOnDate(habitId, today);
+	}
 }
 
 const generateUUID = () =>

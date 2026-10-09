@@ -10,6 +10,14 @@ import * as Notifications from "expo-notifications";
 import { AppState, Linking, Platform } from "react-native";
 import { supabase } from "../config/supabase";
 import { FrequencyConfig, Frequency } from "../types";
+
+// How many days ahead habit reminders are scheduled (see scheduleHabitReminders).
+const HABIT_REMINDER_HORIZON_DAYS = 7;
+
+const toDayKey = (date: Date): string =>
+	`${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(
+		date.getDate()
+	).padStart(2, "0")}`;
 import {
 	getSound,
 	NOTIFICATION_SOUNDS,
@@ -519,44 +527,38 @@ export class NotificationService {
 			sound,
 		};
 
-		outer: for (let i = 0; i < times.length; i++) {
-			const [hour, minute] = times[i].split(":").map(Number);
-			const suffix = label(i);
-			const text = suffix ? `${body} ${suffix}` : body;
+		// One-shot DATE reminders for the next few days, not repeating
+		// DAILY/WEEKLY triggers: a repeating trigger can't skip a single day, so
+		// it kept nagging after the habit was done. Days already complete are
+		// left out, and the habit store reschedules after every log change. The
+		// window is refilled on each launch; it shrinks for many-times-a-day
+		// habits so the per-habit cap still holds.
+		const horizon = Math.max(
+			1,
+			Math.min(HABIT_REMINDER_HORIZON_DAYS, Math.floor(MAX_REMINDERS_PER_HABIT / times.length))
+		);
+		const now = Date.now();
 
-			if (weekdays) {
-				// Day-restricted: one WEEKLY trigger per (day, time) pair.
-				for (const day of weekdays) {
-					if (ids.length >= MAX_REMINDERS_PER_HABIT) break outer;
-					const id = await this.scheduleNotification(
-						title,
-						text,
-						{
-							type: Notifications.SchedulableTriggerInputTypes.WEEKLY,
-							// expo-notifications weekday is 1-7 with 1 = Sunday
-							weekday: day + 1,
-							hour,
-							minute,
-						},
-						reminderData,
-						channelId,
-						sound,
-						HABIT_CATEGORY
-					);
-					ids.push(id);
-				}
-			} else {
-				// Every day (or a flexible schedule, which has no fixed days).
+		outer: for (let d = 0; d < horizon; d++) {
+			const day = new Date();
+			day.setDate(day.getDate() + d);
+			// weekdays uses 0 = Sunday, same as getDay().
+			if (weekdays && !weekdays.includes(day.getDay())) continue;
+			if (this.isHabitDoneOn?.(habit.id, day)) continue;
+
+			for (let i = 0; i < times.length; i++) {
 				if (ids.length >= MAX_REMINDERS_PER_HABIT) break outer;
+				const [hour, minute] = times[i].split(":").map(Number);
+				const at = new Date(day);
+				at.setHours(hour, minute, 0, 0);
+				if (at.getTime() <= now) continue;
+
+				const suffix = label(i);
 				const id = await this.scheduleNotification(
 					title,
-					text,
-					{
-						type: Notifications.SchedulableTriggerInputTypes.DAILY,
-						hour,
-						minute,
-					},
-					reminderData,
+					suffix ? `${body} ${suffix}` : body,
+					{ type: Notifications.SchedulableTriggerInputTypes.DATE, date: at },
+					{ ...reminderData, day: toDayKey(day) },
 					channelId,
 					sound,
 					HABIT_CATEGORY
@@ -566,6 +568,24 @@ export class NotificationService {
 		}
 
 		return ids;
+	}
+
+	/**
+	 * Set by the habit store: is this habit already complete on this date?
+	 * Lives here as a hook because habitStoreDB imports this module.
+	 */
+	static isHabitDoneOn?: (habitId: string, date: Date) => boolean;
+
+	/** Drop a habit's remaining reminders for one day, e.g. once it's done. */
+	static async cancelHabitRemindersOnDate(habitId: string, date: Date): Promise<void> {
+		const key = toDayKey(date);
+		const scheduled = await this.getAllScheduledNotifications();
+		for (const notif of scheduled) {
+			const data = notif.content.data;
+			if (data?.type === "habit_reminder" && data?.habitId === habitId && data?.day === key) {
+				await this.cancelNotification(notif.identifier);
+			}
+		}
 	}
 
 	static readonly HABIT_ACTION_DONE = "habit_done";
