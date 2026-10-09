@@ -26,9 +26,22 @@ export function ThemePicker() {
 	const { themeMode, setThemeMode } = useTheme();
 	const s = useMemo(() => createStyles(theme), [theme]);
 
-	const options: { mode: ThemeMode; name: string; colors: Theme }[] = [
-		{ mode: "system", name: "Auto", colors: THEMES[0].colors },
-		...THEMES.map((t) => ({ mode: t.id as ThemeMode, name: t.name, colors: t.colors })),
+	type Option = { mode: ThemeMode; name: string; colors: Theme };
+	const toOption = (t: (typeof THEMES)[number]): Option => ({
+		mode: t.id,
+		name: t.name,
+		colors: t.colors,
+	});
+	// One row per brightness, so each family's light and dark sit in the same column.
+	const rows: { title: string; options: Option[] }[] = [
+		{
+			title: "Dark",
+			options: [
+				{ mode: "system", name: "Auto", colors: THEMES[0].colors },
+				...THEMES.filter((t) => t.colors.mode === "dark").map(toOption),
+			],
+		},
+		{ title: "Light", options: THEMES.filter((t) => t.colors.mode === "light").map(toOption) },
 	];
 
 	return (
@@ -46,8 +59,11 @@ export function ThemePicker() {
 					</Text>
 				</View>
 			</View>
+			{rows.map((row) => (
+			<View key={row.title}>
+			<Text style={s.rowTitle}>{row.title}</Text>
 			<ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.row}>
-				{options.map((o) => {
+				{row.options.map((o) => {
 					const selected = o.mode === themeMode;
 					return (
 						<TouchableOpacity
@@ -82,6 +98,8 @@ export function ThemePicker() {
 					);
 				})}
 			</ScrollView>
+			</View>
+			))}
 		</View>
 	);
 }
@@ -96,7 +114,15 @@ const createStyles = (theme: Theme) =>
 		iconBox: { width: 36, height: 36, borderRadius: 10, alignItems: "center", justifyContent: "center" },
 		label: { fontSize: 15, fontWeight: "600", color: theme.text },
 		description: { fontSize: 12, color: theme.textSecondary, marginTop: 2 },
-		row: { gap: 12, paddingHorizontal: 16, paddingTop: 14 },
+		row: { gap: 12, paddingHorizontal: 16, paddingTop: 8 },
+		rowTitle: {
+			fontSize: 12,
+			fontWeight: "600",
+			color: theme.textMuted,
+			textTransform: "uppercase",
+			paddingHorizontal: 16,
+			paddingTop: 14,
+		},
 		option: { alignItems: "center", gap: 6 },
 		ring: { padding: 3, borderRadius: 16, borderWidth: 2, borderColor: "transparent" },
 		split: { flexDirection: "row", width: SW, height: SH, borderRadius: 12, overflow: "hidden" },

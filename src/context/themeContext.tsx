@@ -248,6 +248,333 @@ const rose: Theme = {
 	cardGradientEnd: "#FFF5F7",
 };
 
+/** Light / dark counterparts of the original single-mode themes. */
+const oceanLight: Theme = {
+	mode: "light",
+	...lightStatus,
+	background: "#F0F8FD",
+	surface: "#FFFFFF",
+	surfaceLight: "#E1F1FA",
+	surfaceElevated: "#FFFFFF",
+	primary: "#0284C7",
+	primaryLight: "#38BDF8",
+	primaryDark: "#0369A1",
+	accent: "#0891B2",
+	text: "#0C2234",
+	textSecondary: "#4F6B80",
+	textMuted: "#8AA2B5",
+	border: "#D3E6F2",
+	borderLight: "#E8F3FA",
+	cardGradientStart: "#FFFFFF",
+	cardGradientEnd: "#F0F8FD",
+};
+
+const forestLight: Theme = {
+	mode: "light",
+	...lightStatus,
+	background: "#F2F8F3",
+	surface: "#FFFFFF",
+	surfaceLight: "#E3F0E7",
+	surfaceElevated: "#FFFFFF",
+	primary: "#16A34A",
+	primaryLight: "#4ADE80",
+	primaryDark: "#15803D",
+	accent: "#65A30D",
+	text: "#0F2418",
+	textSecondary: "#52695B",
+	textMuted: "#8BA294",
+	border: "#D5E6DA",
+	borderLight: "#E9F3EC",
+	cardGradientStart: "#FFFFFF",
+	cardGradientEnd: "#F2F8F3",
+};
+
+const sunsetLight: Theme = {
+	mode: "light",
+	...lightStatus,
+	background: "#FFF7F0",
+	surface: "#FFFFFF",
+	surfaceLight: "#FDEBDC",
+	surfaceElevated: "#FFFFFF",
+	primary: "#EA580C",
+	primaryLight: "#FB923C",
+	primaryDark: "#C2410C",
+	accent: "#DB2777",
+	text: "#2B160C",
+	textSecondary: "#7A5A48",
+	textMuted: "#A88C7C",
+	border: "#F5DFCF",
+	borderLight: "#FBEFE5",
+	cardGradientStart: "#FFFFFF",
+	cardGradientEnd: "#FFF7F0",
+};
+
+const roseDark: Theme = {
+	mode: "dark",
+	...darkStatus,
+	background: "#1A0B13",
+	surface: "#26121D",
+	surfaceLight: "#321A27",
+	surfaceElevated: "#3B1F2F",
+	primary: "#F0458F",
+	primaryLight: "#F9A8D4",
+	primaryDark: "#E11D74",
+	accent: "#FB923C",
+	text: "#FFF1F6",
+	textSecondary: "#C9A7B7",
+	textMuted: "#8E6E7E",
+	border: "#3D2232",
+	borderLight: "#4C2B3E",
+	cardGradientStart: "#2A1521",
+	cardGradientEnd: "#1E0E17",
+};
+
+/** Nord: cool arctic blue-grey. */
+const nordDark: Theme = {
+	mode: "dark",
+	...darkStatus,
+	background: "#242933",
+	surface: "#2E3440",
+	surfaceLight: "#3B4252",
+	surfaceElevated: "#434C5E",
+	primary: "#88C0D0",
+	primaryLight: "#A3D8E6",
+	primaryDark: "#5E81AC",
+	accent: "#81A1C1",
+	text: "#ECEFF4",
+	textSecondary: "#C0C8D6",
+	textMuted: "#7C879B",
+	border: "#3B4252",
+	borderLight: "#4C566A",
+	cardGradientStart: "#323946",
+	cardGradientEnd: "#2A2F3A",
+};
+
+const nordLight: Theme = {
+	mode: "light",
+	...lightStatus,
+	background: "#ECEFF4",
+	surface: "#FFFFFF",
+	surfaceLight: "#E5E9F0",
+	surfaceElevated: "#FFFFFF",
+	primary: "#5E81AC",
+	primaryLight: "#81A1C1",
+	primaryDark: "#4C6A92",
+	accent: "#88C0D0",
+	text: "#2E3440",
+	textSecondary: "#4C566A",
+	textMuted: "#7C879B",
+	border: "#D8DEE9",
+	borderLight: "#E5E9F0",
+	cardGradientStart: "#FFFFFF",
+	cardGradientEnd: "#ECEFF4",
+};
+
+/** Mocha: warm coffee browns. */
+const mochaDark: Theme = {
+	mode: "dark",
+	...darkStatus,
+	background: "#17120F",
+	surface: "#221A16",
+	surfaceLight: "#2D231D",
+	surfaceElevated: "#352A23",
+	primary: "#D4A373",
+	primaryLight: "#E9C9A4",
+	primaryDark: "#B8875A",
+	accent: "#E07A5F",
+	text: "#FBF3EA",
+	textSecondary: "#C2B1A2",
+	textMuted: "#8A7868",
+	border: "#3A2E26",
+	borderLight: "#4A3B31",
+	cardGradientStart: "#271E19",
+	cardGradientEnd: "#1C1612",
+};
+
+const mochaLight: Theme = {
+	mode: "light",
+	...lightStatus,
+	background: "#FAF5EF",
+	surface: "#FFFFFF",
+	surfaceLight: "#F1E8DD",
+	surfaceElevated: "#FFFFFF",
+	primary: "#9C6B3C",
+	primaryLight: "#C8956A",
+	primaryDark: "#7D532C",
+	accent: "#C2583F",
+	text: "#2A1D14",
+	textSecondary: "#6E5A4A",
+	textMuted: "#A08D7D",
+	border: "#E8DCCD",
+	borderLight: "#F3ECE3",
+	cardGradientStart: "#FFFFFF",
+	cardGradientEnd: "#FAF5EF",
+};
+
+/** Lavender: soft purples, gentler than Classic. */
+const lavenderDark: Theme = {
+	mode: "dark",
+	...darkStatus,
+	background: "#141221",
+	surface: "#1D1A2E",
+	surfaceLight: "#26223B",
+	surfaceElevated: "#2D2846",
+	primary: "#B69CFF",
+	primaryLight: "#D8CBFF",
+	primaryDark: "#9277F0",
+	accent: "#F0A6CA",
+	text: "#F5F2FF",
+	textSecondary: "#B4ACCB",
+	textMuted: "#7A7292",
+	border: "#2E2945",
+	borderLight: "#3A3456",
+	cardGradientStart: "#211D33",
+	cardGradientEnd: "#181527",
+};
+
+const lavenderLight: Theme = {
+	mode: "light",
+	...lightStatus,
+	background: "#F7F5FF",
+	surface: "#FFFFFF",
+	surfaceLight: "#EEEAFD",
+	surfaceElevated: "#FFFFFF",
+	primary: "#7C5CE0",
+	primaryLight: "#A58BF5",
+	primaryDark: "#6343C4",
+	accent: "#D9468F",
+	text: "#1E1838",
+	textSecondary: "#625A7D",
+	textMuted: "#9890B0",
+	border: "#E3DEF6",
+	borderLight: "#F0EDFB",
+	cardGradientStart: "#FFFFFF",
+	cardGradientEnd: "#F7F5FF",
+};
+
+/** Crimson: bold reds. */
+const crimsonDark: Theme = {
+	mode: "dark",
+	...darkStatus,
+	background: "#140A0B",
+	surface: "#1F1012",
+	surfaceLight: "#2A1619",
+	surfaceElevated: "#331B1F",
+	primary: "#EF4444",
+	primaryLight: "#FCA5A5",
+	primaryDark: "#DC2626",
+	accent: "#F59E0B",
+	text: "#FFF1F1",
+	textSecondary: "#C4A6A8",
+	textMuted: "#8C6F72",
+	border: "#3A1E22",
+	borderLight: "#4A272C",
+	cardGradientStart: "#251315",
+	cardGradientEnd: "#1A0C0E",
+};
+
+const crimsonLight: Theme = {
+	mode: "light",
+	...lightStatus,
+	background: "#FFF6F6",
+	surface: "#FFFFFF",
+	surfaceLight: "#FDE8E8",
+	surfaceElevated: "#FFFFFF",
+	primary: "#DC2626",
+	primaryLight: "#F87171",
+	primaryDark: "#B91C1C",
+	accent: "#D97706",
+	text: "#2A1214",
+	textSecondary: "#7A5458",
+	textMuted: "#AA8A8D",
+	border: "#F5D9DA",
+	borderLight: "#FBEBEC",
+	cardGradientStart: "#FFFFFF",
+	cardGradientEnd: "#FFF6F6",
+};
+
+/** Slate: neutral greys with a teal accent, low distraction. */
+const slateDark: Theme = {
+	mode: "dark",
+	...darkStatus,
+	background: "#0F1419",
+	surface: "#181F26",
+	surfaceLight: "#212A33",
+	surfaceElevated: "#28323D",
+	primary: "#2DD4BF",
+	primaryLight: "#99F6E4",
+	primaryDark: "#14B8A6",
+	accent: "#94A3B8",
+	text: "#F1F5F9",
+	textSecondary: "#A7B3C2",
+	textMuted: "#6B7889",
+	border: "#26303B",
+	borderLight: "#323E4B",
+	cardGradientStart: "#1B232B",
+	cardGradientEnd: "#131A20",
+};
+
+const slateLight: Theme = {
+	mode: "light",
+	...lightStatus,
+	background: "#F4F6F8",
+	surface: "#FFFFFF",
+	surfaceLight: "#E8ECF0",
+	surfaceElevated: "#FFFFFF",
+	primary: "#0D9488",
+	primaryLight: "#2DD4BF",
+	primaryDark: "#0F766E",
+	accent: "#475569",
+	text: "#0F172A",
+	textSecondary: "#526072",
+	textMuted: "#8B97A8",
+	border: "#DDE3EA",
+	borderLight: "#EDF1F4",
+	cardGradientStart: "#FFFFFF",
+	cardGradientEnd: "#F4F6F8",
+};
+
+/** Mint: fresh green-cyan. */
+const mintDark: Theme = {
+	mode: "dark",
+	...darkStatus,
+	background: "#081614",
+	surface: "#0F211E",
+	surfaceLight: "#162C28",
+	surfaceElevated: "#1B3430",
+	primary: "#3EE0B5",
+	primaryLight: "#A7F3DF",
+	primaryDark: "#10C49A",
+	accent: "#7DD3FC",
+	text: "#ECFEF8",
+	textSecondary: "#9FBFB6",
+	textMuted: "#66867D",
+	border: "#1C3833",
+	borderLight: "#274640",
+	cardGradientStart: "#122622",
+	cardGradientEnd: "#0B1B18",
+};
+
+const mintLight: Theme = {
+	mode: "light",
+	...lightStatus,
+	background: "#F0FBF7",
+	surface: "#FFFFFF",
+	surfaceLight: "#DFF5EC",
+	surfaceElevated: "#FFFFFF",
+	primary: "#0E9F7E",
+	primaryLight: "#34D3A9",
+	primaryDark: "#0A7F64",
+	accent: "#0284C7",
+	text: "#0B2420",
+	textSecondary: "#4E6B64",
+	textMuted: "#8AA39C",
+	border: "#D0EAE1",
+	borderLight: "#E6F5EF",
+	cardGradientStart: "#FFFFFF",
+	cardGradientEnd: "#F0FBF7",
+};
+
 export type ThemeId =
 	| "lotus"
 	| "lotus-light"
@@ -255,9 +582,25 @@ export type ThemeId =
 	| "classic-light"
 	| "amoled"
 	| "ocean"
+	| "ocean-light"
 	| "forest"
+	| "forest-light"
 	| "sunset"
-	| "rose";
+	| "sunset-light"
+	| "rose"
+	| "rose-dark"
+	| "nord"
+	| "nord-light"
+	| "mocha"
+	| "mocha-light"
+	| "lavender"
+	| "lavender-light"
+	| "crimson"
+	| "crimson-light"
+	| "slate"
+	| "slate-light"
+	| "mint"
+	| "mint-light";
 
 /** "system" follows the phone: Lotus or Lotus Light. */
 export type ThemeMode = ThemeId | "system";
@@ -276,10 +619,26 @@ export const THEMES: ThemeOption[] = [
 	{ id: "classic", name: "Classic", colors: darkTheme, pair: "classic-light" },
 	{ id: "classic-light", name: "Classic Light", colors: lightTheme, pair: "classic" },
 	{ id: "amoled", name: "AMOLED", colors: amoled, pair: "lotus-light" },
-	{ id: "ocean", name: "Ocean", colors: ocean, pair: "lotus-light" },
-	{ id: "forest", name: "Forest", colors: forest, pair: "lotus-light" },
-	{ id: "sunset", name: "Sunset", colors: sunset, pair: "rose" },
-	{ id: "rose", name: "Rose", colors: rose, pair: "sunset" },
+	{ id: "ocean", name: "Ocean", colors: ocean, pair: "ocean-light" },
+	{ id: "ocean-light", name: "Ocean Light", colors: oceanLight, pair: "ocean" },
+	{ id: "forest", name: "Forest", colors: forest, pair: "forest-light" },
+	{ id: "forest-light", name: "Forest Light", colors: forestLight, pair: "forest" },
+	{ id: "sunset", name: "Sunset", colors: sunset, pair: "sunset-light" },
+	{ id: "sunset-light", name: "Sunset Light", colors: sunsetLight, pair: "sunset" },
+	{ id: "rose-dark", name: "Rose Dark", colors: roseDark, pair: "rose" },
+	{ id: "rose", name: "Rose", colors: rose, pair: "rose-dark" },
+	{ id: "nord", name: "Nord", colors: nordDark, pair: "nord-light" },
+	{ id: "nord-light", name: "Nord Light", colors: nordLight, pair: "nord" },
+	{ id: "mocha", name: "Mocha", colors: mochaDark, pair: "mocha-light" },
+	{ id: "mocha-light", name: "Mocha Light", colors: mochaLight, pair: "mocha" },
+	{ id: "lavender", name: "Lavender", colors: lavenderDark, pair: "lavender-light" },
+	{ id: "lavender-light", name: "Lavender Light", colors: lavenderLight, pair: "lavender" },
+	{ id: "crimson", name: "Crimson", colors: crimsonDark, pair: "crimson-light" },
+	{ id: "crimson-light", name: "Crimson Light", colors: crimsonLight, pair: "crimson" },
+	{ id: "slate", name: "Slate", colors: slateDark, pair: "slate-light" },
+	{ id: "slate-light", name: "Slate Light", colors: slateLight, pair: "slate" },
+	{ id: "mint", name: "Mint", colors: mintDark, pair: "mint-light" },
+	{ id: "mint-light", name: "Mint Light", colors: mintLight, pair: "mint" },
 ];
 
 const DEFAULT_MODE: ThemeMode = "lotus";
