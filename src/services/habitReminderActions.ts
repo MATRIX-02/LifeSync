@@ -69,7 +69,7 @@ export async function handleHabitNotificationAction(payload: unknown): Promise<b
  * One completion for today, like tapping the habit in the list, but never
  * past the day's target - and never removing one, as a second tap would.
  */
-async function markDoneToday(habitId: string, target: number): Promise<void> {
+export async function markDoneToday(habitId: string, target: number): Promise<void> {
 	const today = new Date();
 	const store = useHabitStore.getState();
 	if (store.userId && store.getHabit(habitId)) {

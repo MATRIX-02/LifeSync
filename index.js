@@ -42,4 +42,10 @@ if (Platform.OS === "android") {
 		await handleDetectedNotificationAction(data);
 	});
 	Notifications.registerTaskAsync(NOTIFICATION_ACTION_TASK).catch(() => undefined);
+
+	// Home screen widgets ("Today's habits", "Money"): placed, refreshed or tapped,
+	// including while LifeSync is closed.
+	const { registerWidgetTaskHandler } = require("react-native-android-widget");
+	const { widgetTaskHandler } = require("./src/widgets/widgetTaskHandler");
+	registerWidgetTaskHandler(widgetTaskHandler);
 }

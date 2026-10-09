@@ -38,6 +38,7 @@ import {
 } from "@/src/context/transactionDetectionStore";
 import { useNavigationPersistence } from "@/src/hooks/useNavigationPersistence";
 import { useSyncManager } from "@/src/hooks/useSyncManager";
+import { useWidgetSync } from "@/src/widgets/widgetSync";
 import { AudioService } from "@/src/services/audioService";
 import { NotificationService } from "@/src/services/notificationService";
 import { ensureUpdateChannel, installUpdate } from "@/src/services/appUpdateService";
@@ -224,6 +225,7 @@ function RootLayoutNav() {
 
 	// Initialize sync manager - handles fetching/syncing data with Supabase
 	const { syncState, isFetching } = useSyncManager();
+	useWidgetSync(theme);
 
 	// Initialize auth on mount
 	useEffect(() => {

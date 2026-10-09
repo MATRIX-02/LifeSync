@@ -10,7 +10,8 @@
 		"newArchEnabled": true,
 		"splash": {
 			"image": "./assets/images/splash-icon.png",
-			"resizeMode": "contain"
+			"resizeMode": "contain",
+			"backgroundColor": "#060F2B"
 		},
 		"ios": {
 			"supportsTablet": true,
@@ -33,8 +34,8 @@
 			],
 			"adaptiveIcon": {
 				"foregroundImage": "./assets/images/adaptive-icon.png",
-				"monochromeImage": "./assets/images/adaptive-icon.png",
-				"backgroundColor": "#000000"
+				"monochromeImage": "./assets/images/monochrome-icon.png",
+				"backgroundColor": "#060F2B"
 			},
 			"edgeToEdgeEnabled": true,
 			"predictiveBackGestureEnabled": false,
@@ -60,10 +61,47 @@
 		"plugins": [
 			"expo-router",
 			[
+				"react-native-android-widget",
+				{
+					"widgets": [
+						{
+							"name": "TodayHabits",
+							"label": "Today's habits",
+							"description": "Your habits for today - tick them off from the home screen",
+							"minWidth": "250dp",
+							"minHeight": "180dp",
+							"targetCellWidth": 4,
+							"targetCellHeight": 3,
+							"resizeMode": "horizontal|vertical",
+							"updatePeriodMillis": 1800000
+						},
+						{
+							"name": "Finance",
+							"label": "Money",
+							"description": "This month's spending and income, and your recent transactions",
+							"minWidth": "250dp",
+							"minHeight": "180dp",
+							"targetCellWidth": 4,
+							"targetCellHeight": 3,
+							"resizeMode": "horizontal|vertical",
+							"updatePeriodMillis": 1800000
+						}
+					]
+				}
+			],
+			[
+				"expo-alternate-app-icons",
+				[
+					{ "name": "Light", "ios": "./assets/images/app-icons/light.png", "android": { "foregroundImage": "./assets/images/app-icons/light-foreground.png", "backgroundColor": "#F4F7FB" } },
+					{ "name": "Black", "ios": "./assets/images/app-icons/black.png", "android": { "foregroundImage": "./assets/images/app-icons/black-foreground.png", "backgroundColor": "#000000" } },
+					{ "name": "Ocean", "ios": "./assets/images/app-icons/ocean.png", "android": { "foregroundImage": "./assets/images/app-icons/ocean-foreground.png", "backgroundColor": "#0A84FF" } }
+				]
+			],
+			[
 				"expo-notifications",
 				{
-					"icon": "./assets/images/icon.png",
-					"color": "#000000",
+					"icon": "./assets/images/notification-icon.png",
+					"color": "#1FD1A0",
 					"defaultChannel": "default",
 					"modes": "productionMode",
 					"sounds": [
