@@ -15,6 +15,7 @@ import {
 	NOTIFICATION_SOUNDS,
 	NotificationSound,
 	SYSTEM_SOUND_ID,
+	previewDurationMs,
 } from "../constants/notificationSounds";
 import { useSoundPrefsStore } from "../context/soundPrefsStore";
 
@@ -398,7 +399,7 @@ export class NotificationService {
 	 * Plays a tone the way a real reminder would: as a notification on that
 	 * tone's channel, so it uses the notification volume. (In-app playback uses
 	 * the media volume, which is often muted while notifications are not.)
-	 * Dismissed after a few seconds.
+	 * Dismissed once the tone has finished.
 	 */
 	static async previewTone(toneId: string, kind: "reminder" | "alarm"): Promise<boolean> {
 		// Creates the base channels too, which "System default" relies on.
@@ -419,9 +420,10 @@ export class NotificationService {
 				},
 				trigger: withChannel(null, channelId),
 			});
+			// Dismissing stops the sound, so wait for the whole tone.
 			setTimeout(() => {
 				void Notifications.dismissNotificationAsync(TONE_PREVIEW_ID).catch(() => {});
-			}, 5000);
+			}, previewDurationMs(toneId));
 			return true;
 		} catch (error) {
 			console.warn("Tone preview failed:", error);

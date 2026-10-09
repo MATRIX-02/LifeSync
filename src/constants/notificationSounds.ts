@@ -18,6 +18,8 @@ export interface NotificationSound {
 	file: string;
 	/** For in-app preview. */
 	asset: number;
+	/** Length of the file, so a preview isn't cut short. */
+	durationMs: number;
 }
 
 /** Use the phone's own tone. Changed from Android's channel settings. */
@@ -30,6 +32,7 @@ export const NOTIFICATION_SOUNDS: NotificationSound[] = [
 		kind: "reminder",
 		file: "ls_chime.wav",
 		asset: require("@/assets/sounds/notifications/ls_chime.wav"),
+		durationMs: 1780,
 	},
 	{
 		id: "bell",
@@ -37,6 +40,7 @@ export const NOTIFICATION_SOUNDS: NotificationSound[] = [
 		kind: "reminder",
 		file: "ls_bell.wav",
 		asset: require("@/assets/sounds/notifications/ls_bell.wav"),
+		durationMs: 2400,
 	},
 	{
 		id: "marimba",
@@ -44,6 +48,7 @@ export const NOTIFICATION_SOUNDS: NotificationSound[] = [
 		kind: "reminder",
 		file: "ls_marimba.wav",
 		asset: require("@/assets/sounds/notifications/ls_marimba.wav"),
+		durationMs: 1240,
 	},
 	{
 		id: "harp",
@@ -51,6 +56,7 @@ export const NOTIFICATION_SOUNDS: NotificationSound[] = [
 		kind: "reminder",
 		file: "ls_harp.wav",
 		asset: require("@/assets/sounds/notifications/ls_harp.wav"),
+		durationMs: 1960,
 	},
 	{
 		id: "pop",
@@ -58,6 +64,7 @@ export const NOTIFICATION_SOUNDS: NotificationSound[] = [
 		kind: "reminder",
 		file: "ls_pop.wav",
 		asset: require("@/assets/sounds/notifications/ls_pop.wav"),
+		durationMs: 460,
 	},
 	{
 		id: "ding",
@@ -65,6 +72,7 @@ export const NOTIFICATION_SOUNDS: NotificationSound[] = [
 		kind: "reminder",
 		file: "ls_ding.wav",
 		asset: require("@/assets/sounds/notifications/ls_ding.wav"),
+		durationMs: 1400,
 	},
 	{
 		id: "water_pour",
@@ -72,6 +80,7 @@ export const NOTIFICATION_SOUNDS: NotificationSound[] = [
 		kind: "reminder",
 		file: "ls_water_pour.wav",
 		asset: require("@/assets/sounds/notifications/ls_water_pour.wav"),
+		durationMs: 2520,
 	},
 	{
 		id: "alarm_classic",
@@ -79,6 +88,7 @@ export const NOTIFICATION_SOUNDS: NotificationSound[] = [
 		kind: "alarm",
 		file: "ls_alarm_classic.wav",
 		asset: require("@/assets/sounds/notifications/ls_alarm_classic.wav"),
+		durationMs: 13320,
 	},
 	{
 		id: "alarm_digital",
@@ -86,6 +96,7 @@ export const NOTIFICATION_SOUNDS: NotificationSound[] = [
 		kind: "alarm",
 		file: "ls_alarm_digital.wav",
 		asset: require("@/assets/sounds/notifications/ls_alarm_digital.wav"),
+		durationMs: 13960,
 	},
 	{
 		id: "alarm_rising",
@@ -93,6 +104,7 @@ export const NOTIFICATION_SOUNDS: NotificationSound[] = [
 		kind: "alarm",
 		file: "ls_alarm_rising.wav",
 		asset: require("@/assets/sounds/notifications/ls_alarm_rising.wav"),
+		durationMs: 15150,
 	},
 	{
 		id: "alarm_morning",
@@ -100,6 +112,7 @@ export const NOTIFICATION_SOUNDS: NotificationSound[] = [
 		kind: "alarm",
 		file: "ls_alarm_morning.wav",
 		asset: require("@/assets/sounds/notifications/ls_alarm_morning.wav"),
+		durationMs: 14020,
 	},
 	{
 		id: "alarm_siren",
@@ -107,6 +120,7 @@ export const NOTIFICATION_SOUNDS: NotificationSound[] = [
 		kind: "alarm",
 		file: "ls_alarm_siren.wav",
 		asset: require("@/assets/sounds/notifications/ls_alarm_siren.wav"),
+		durationMs: 14000,
 	},
 	{
 		id: "alarm_pulse",
@@ -114,6 +128,7 @@ export const NOTIFICATION_SOUNDS: NotificationSound[] = [
 		kind: "alarm",
 		file: "ls_alarm_pulse.wav",
 		asset: require("@/assets/sounds/notifications/ls_alarm_pulse.wav"),
+		durationMs: 14100,
 	},
 ];
 
@@ -128,6 +143,10 @@ export const soundsFor = (kind: SoundKind): NotificationSound[] => [
 	...NOTIFICATION_SOUNDS.filter((s) => s.kind === kind),
 	...NOTIFICATION_SOUNDS.filter((s) => s.kind !== kind),
 ];
+
+/** How long a preview should keep playing; the system tone's length is unknown. */
+export const previewDurationMs = (id: string): number =>
+	(getSound(id)?.durationMs ?? 4000) + 750;
 
 export const soundLabel = (id?: string | null): string =>
 	!id || id === SYSTEM_SOUND_ID ? "System default" : getSound(id)?.label ?? "System default";

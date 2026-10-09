@@ -3,6 +3,7 @@ import {
 	soundsFor,
 	SoundKind,
 	SYSTEM_SOUND_ID,
+	previewDurationMs,
 } from "@/src/constants/notificationSounds";
 import { Theme, useColors } from "@/src/context/themeContext";
 import { NotificationService } from "@/src/services/notificationService";
@@ -99,7 +100,7 @@ export const SoundPickerModal: React.FC<SoundPickerModalProps> = ({
 			void stop();
 			setPlaying(id);
 			void NotificationService.previewTone(id, kind).finally(() =>
-				setTimeout(() => setPlaying((p) => (p === id ? null : p)), 2500),
+				setTimeout(() => setPlaying((p) => (p === id ? null : p)), previewDurationMs(id)),
 			);
 			return;
 		}
