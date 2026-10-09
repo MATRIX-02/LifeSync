@@ -145,15 +145,22 @@ export async function cancelUpdateDownload(): Promise<void> {
 export interface LatestRelease {
 	version: string;
 	apkUrl: string | null;
+	/** APK size in bytes, 0 if unknown. */
+	apkSize: number;
 	notes: string;
 	publishedAt: string;
 	pageUrl: string;
 }
 
 /** The newest GitHub release, or an error message. */
-export async function fetchLatestRelease(): Promise<{ data: LatestRelease | null; error: string | null }> {
+export const fetchLatestRelease = () => fetchRelease("latest");
+
+/** The release for one version ("2.0.2"), e.g. to show what's new in the installed app. */
+export const fetchReleaseForVersion = (version: string) => fetchRelease(`tags/v${version}`);
+
+async function fetchRelease(path: string): Promise<{ data: LatestRelease | null; error: string | null }> {
 	try {
-		const response = await fetch("https://api.github.com/repos/MATRIX-02/LifeSync/releases/latest", {
+		const response = await fetch(`https://api.github.com/repos/MATRIX-02/LifeSync/releases/${path}`, {
 			headers: { Accept: "application/vnd.github+json" },
 		});
 		if (!response.ok) return { data: null, error: `GitHub returned ${response.status}. Try again later.` };
@@ -165,6 +172,7 @@ export async function fetchLatestRelease(): Promise<{ data: LatestRelease | null
 			data: {
 				version,
 				apkUrl: apkUrl && ALLOWED_APK_URL.test(apkUrl) ? apkUrl : null,
+				apkSize: Number(apk?.size) || 0,
 				notes: String(json.body ?? ""),
 				publishedAt: json.published_at ?? "",
 				pageUrl: json.html_url ?? "https://github.com/MATRIX-02/LifeSync/releases",

@@ -3,6 +3,7 @@ import { Theme, useColors } from "@/src/context/themeContext";
 import {
 	currentVersion,
 	fetchLatestRelease,
+	fetchReleaseForVersion,
 	installUpdate,
 	isNewerVersion,
 	LatestRelease,
@@ -24,13 +25,27 @@ import {
 
 type Ota = "unsupported" | "checking" | "none" | "available" | "downloading" | "ready";
 
-/** Settings > About > Check for updates: new APK releases, then over-the-air updates. */
+const RELEASES_URL = "https://github.com/MATRIX-02/LifeSync/releases";
+
+const formatDate = (iso: string) =>
+	new Date(iso).toLocaleDateString([], { day: "numeric", month: "long", year: "numeric" });
+
+const formatSize = (bytes: number) => `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+
+/**
+ * Settings > About > Check for updates, laid out like Android's System update
+ * screen: a status header, version details, the release notes, and one action
+ * at the bottom. With a newer APK it shows that release's notes; when up to
+ * date, the notes for the installed version ("What's new in x.y.z").
+ */
 export function AppUpdatesSheet({ visible, onClose }: { visible: boolean; onClose: () => void }) {
 	const theme = useColors();
 	const s = useMemo(() => createStyles(theme), [theme]);
 	const [loading, setLoading] = useState(false);
 	const [release, setRelease] = useState<LatestRelease | null>(null);
+	const [installed, setInstalled] = useState<LatestRelease | null>(null);
 	const [error, setError] = useState<string | null>(null);
+	const [checkedAt, setCheckedAt] = useState<Date | null>(null);
 	const [ota, setOta] = useState<Ota>("unsupported");
 
 	const check = async () => {
@@ -39,9 +54,15 @@ export function AppUpdatesSheet({ visible, onClose }: { visible: boolean; onClos
 		const { data, error } = await fetchLatestRelease();
 		setRelease(data);
 		setError(error);
+		if (!error) setCheckedAt(new Date());
+		if (data && !isNewerVersion(data.version, currentVersion())) {
+			// Up to date: show what's new in the version they have.
+			const mine =
+				data.version === currentVersion() ? { data } : await fetchReleaseForVersion(currentVersion());
+			setInstalled(mine.data);
+			void checkOta();
+		}
 		setLoading(false);
-		// Over-the-air updates only matter when there's no new APK to install.
-		if (data && !isNewerVersion(data.version, currentVersion())) void checkOta();
 	};
 
 	const checkOta = async () => {
@@ -71,6 +92,15 @@ export function AppUpdatesSheet({ visible, onClose }: { visible: boolean; onClos
 	}, [visible]);
 
 	const hasNewApk = !!release && isNewerVersion(release.version, currentVersion());
+	const notes = hasNewApk ? release : installed;
+
+	const status = loading
+		? { icon: "sync" as const, color: theme.primary, title: "Checking for updates…" }
+		: error
+			? { icon: "cloud-offline-outline" as const, color: theme.textMuted, title: "Couldn't check for updates" }
+			: hasNewApk
+				? { icon: "arrow-down-circle" as const, color: theme.primary, title: "Update available" }
+				: { icon: "checkmark-circle" as const, color: theme.success, title: "Your app is up to date" };
 
 	return (
 		<Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
@@ -79,88 +109,130 @@ export function AppUpdatesSheet({ visible, onClose }: { visible: boolean; onClos
 				<View style={s.sheet}>
 					<View style={s.handle} />
 					<View style={s.header}>
-						<Text style={s.title}>App updates</Text>
+						<Text style={s.title}>App update</Text>
 						<TouchableOpacity onPress={onClose} hitSlop={12}>
 							<Ionicons name="close" size={22} color={theme.textSecondary} />
 						</TouchableOpacity>
 					</View>
-					<Text style={s.current}>You have LifeSync {currentVersion()}</Text>
 
-					{loading ? (
-						<View style={s.center}>
-							<ActivityIndicator color={theme.primary} />
-							<Text style={s.muted}>Checking…</Text>
+					<ScrollView style={s.scroll} showsVerticalScrollIndicator={false}>
+						<View style={s.hero}>
+							<View style={[s.heroIcon, { backgroundColor: status.color + "22" }]}>
+								{loading ? (
+									<ActivityIndicator color={status.color} size="large" />
+								) : (
+									<Ionicons name={status.icon} size={44} color={status.color} />
+								)}
+							</View>
+							<Text style={s.heroTitle}>{status.title}</Text>
+							<Text style={s.heroVersion}>
+								LifeSync {hasNewApk && release && !loading ? release.version : currentVersion()}
+							</Text>
+							{hasNewApk && release && !loading && (
+								<Text style={s.heroMeta}>
+									{[
+										release.apkSize ? formatSize(release.apkSize) : null,
+										release.publishedAt ? `Released ${formatDate(release.publishedAt)}` : null,
+									]
+										.filter(Boolean)
+										.join("  ·  ")}
+								</Text>
+							)}
+							{!!error && !loading && <Text style={s.muted}>{error}</Text>}
 						</View>
-					) : error ? (
-						<View style={s.center}>
-							<Ionicons name="cloud-offline-outline" size={36} color={theme.textMuted} />
-							<Text style={s.muted}>{error}</Text>
-							<TouchableOpacity style={s.secondary} onPress={check}>
-								<Text style={s.secondaryText}>Try again</Text>
-							</TouchableOpacity>
+
+						<View style={s.infoCard}>
+							<InfoRow s={s} label="Current version" value={currentVersion()} />
+							{hasNewApk && release && <InfoRow s={s} label="New version" value={release.version} />}
+							<InfoRow
+								s={s}
+								label="Last checked"
+								value={
+									checkedAt
+										? checkedAt.toLocaleString([], {
+												day: "numeric",
+												month: "short",
+												hour: "numeric",
+												minute: "2-digit",
+											})
+										: "—"
+								}
+								last
+							/>
 						</View>
-					) : release && hasNewApk ? (
-						<>
-							<ScrollView style={s.scroll} showsVerticalScrollIndicator={false}>
-								<View style={s.banner}>
-									<Ionicons name="sparkles" size={22} color="#FFFFFF" />
-									<View style={{ flex: 1 }}>
-										<Text style={s.bannerTitle}>Version {release.version} is here</Text>
-										{!!release.publishedAt && (
-											<Text style={s.bannerSub}>
-												Released{" "}
-												{new Date(release.publishedAt).toLocaleDateString([], {
-													day: "numeric",
-													month: "long",
-													year: "numeric",
-												})}
-											</Text>
-										)}
-									</View>
-								</View>
-								<ReleaseNotes text={release.notes} s={s} />
-							</ScrollView>
-							<TouchableOpacity
-								style={[s.primary, !release.apkUrl && { opacity: 0.5 }]}
-								disabled={!release.apkUrl}
-								onPress={() => {
-									onClose();
-									void installUpdate(release.version, release.apkUrl!);
-								}}
-							>
-								<Ionicons name="download-outline" size={18} color="#FFFFFF" />
-								<Text style={s.primaryText}>Download & install</Text>
-							</TouchableOpacity>
-						</>
+
+						{!loading && ota === "checking" && <Text style={s.otaNote}>Looking for smaller updates…</Text>}
+
+						{!loading && !!notes?.notes && (
+							<>
+								<Text style={s.notesHeading}>
+									{hasNewApk ? "What's new" : `What's new in ${currentVersion()}`}
+								</Text>
+								<ReleaseNotes text={notes.notes} s={s} />
+							</>
+						)}
+
+						<TouchableOpacity style={s.link} onPress={() => Linking.openURL(notes?.pageUrl ?? RELEASES_URL)}>
+							<Text style={s.linkText}>See all releases</Text>
+							<Ionicons name="open-outline" size={14} color={theme.primary} />
+						</TouchableOpacity>
+					</ScrollView>
+
+					{loading ? null : hasNewApk && release ? (
+						<TouchableOpacity
+							style={[s.primary, !release.apkUrl && { opacity: 0.5 }]}
+							disabled={!release.apkUrl}
+							onPress={() => {
+								onClose();
+								void installUpdate(release.version, release.apkUrl!);
+							}}
+						>
+							<Ionicons name="download-outline" size={18} color="#FFFFFF" />
+							<Text style={s.primaryText}>
+								Download & install{release.apkSize ? ` (${formatSize(release.apkSize)})` : ""}
+							</Text>
+						</TouchableOpacity>
+					) : ota === "available" ? (
+						<TouchableOpacity style={s.primary} onPress={applyOta}>
+							<Text style={s.primaryText}>Get the latest fixes</Text>
+						</TouchableOpacity>
+					) : ota === "downloading" ? (
+						<View style={s.primary}>
+							<ActivityIndicator color="#FFFFFF" />
+							<Text style={s.primaryText}>Downloading fixes…</Text>
+						</View>
+					) : ota === "ready" ? (
+						<TouchableOpacity style={s.primary} onPress={() => Updates.reloadAsync()}>
+							<Text style={s.primaryText}>Restart to finish updating</Text>
+						</TouchableOpacity>
 					) : (
-						<View style={s.center}>
-							<Ionicons name="checkmark-circle" size={44} color={theme.success} />
-							<Text style={s.upToDate}>You're on the latest version</Text>
-							{ota === "checking" && <Text style={s.muted}>Looking for smaller updates…</Text>}
-							{ota === "available" && (
-								<TouchableOpacity style={s.primary} onPress={applyOta}>
-									<Text style={s.primaryText}>Get the latest fixes</Text>
-								</TouchableOpacity>
-							)}
-							{ota === "downloading" && <ActivityIndicator color={theme.primary} style={{ marginTop: 12 }} />}
-							{ota === "ready" && (
-								<TouchableOpacity style={s.primary} onPress={() => Updates.reloadAsync()}>
-									<Text style={s.primaryText}>Restart to finish updating</Text>
-								</TouchableOpacity>
-							)}
-						</View>
+						<TouchableOpacity style={s.secondaryWide} onPress={check}>
+							<Ionicons name="refresh" size={18} color={theme.text} />
+							<Text style={s.secondaryText}>{error ? "Try again" : "Check for updates"}</Text>
+						</TouchableOpacity>
 					)}
-
-					<TouchableOpacity
-						style={s.link}
-						onPress={() => Linking.openURL(release?.pageUrl ?? "https://github.com/MATRIX-02/LifeSync/releases")}
-					>
-						<Text style={s.linkText}>See all releases</Text>
-						<Ionicons name="open-outline" size={14} color={theme.primary} />
-					</TouchableOpacity>
 				</View>
 			</View>
 		</Modal>
+	);
+}
+
+function InfoRow({
+	s,
+	label,
+	value,
+	last,
+}: {
+	s: ReturnType<typeof createStyles>;
+	label: string;
+	value: string;
+	last?: boolean;
+}) {
+	return (
+		<View style={[s.infoRow, !last && s.infoDivider]}>
+			<Text style={s.infoLabel}>{label}</Text>
+			<Text style={s.infoValue}>{value}</Text>
+		</View>
 	);
 }
 
@@ -179,7 +251,7 @@ function ReleaseNotes({ text, s }: { text: string; s: ReturnType<typeof createSt
 	for (const raw of text.split(/\r?\n/)) {
 		const line = raw.trim();
 		if (!line || line.startsWith("<!--")) continue;
-		if (/^##\s/.test(line)) continue; // "## LifeSync x.y.z" - shown in the banner
+		if (/^##\s/.test(line)) continue; // "## LifeSync x.y.z" - shown in the header
 		const heading = line.match(/^#{3,}\s*(.*)$/);
 		if (heading) {
 			sections.push({ title: heading[1], blocks: [] });
@@ -251,22 +323,21 @@ const createStyles = (theme: Theme) =>
 		handle: { alignSelf: "center", width: 40, height: 4, borderRadius: 2, backgroundColor: theme.border, marginTop: 10 },
 		header: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingTop: 14 },
 		title: { fontSize: 20, fontWeight: "700", color: theme.text },
-		current: { fontSize: 13, color: theme.textSecondary, marginTop: 2, marginBottom: 14 },
-		center: { alignItems: "center", paddingVertical: 24, gap: 8 },
-		muted: { fontSize: 13, color: theme.textSecondary, textAlign: "center" },
-		upToDate: { fontSize: 16, fontWeight: "700", color: theme.text },
-		scroll: { flex: 1 },
-		banner: {
-			flexDirection: "row",
-			alignItems: "center",
-			gap: 12,
-			padding: 16,
-			borderRadius: 18,
-			backgroundColor: theme.primary,
-		},
-		bannerTitle: { fontSize: 18, fontWeight: "800", color: "#FFFFFF" },
-		bannerSub: { fontSize: 13, color: "#FFFFFFD0", marginTop: 2 },
-		intro: { fontSize: 15, color: theme.text, lineHeight: 22, marginTop: 16 },
+		muted: { fontSize: 13, color: theme.textSecondary, textAlign: "center", marginTop: 6 },
+		scroll: { flex: 1, marginTop: 8 },
+		hero: { alignItems: "center", paddingVertical: 20 },
+		heroIcon: { width: 88, height: 88, borderRadius: 44, alignItems: "center", justifyContent: "center" },
+		heroTitle: { fontSize: 22, fontWeight: "800", color: theme.text, marginTop: 16, textAlign: "center" },
+		heroVersion: { fontSize: 15, fontWeight: "600", color: theme.textSecondary, marginTop: 4 },
+		heroMeta: { fontSize: 13, color: theme.textMuted, marginTop: 4 },
+		infoCard: { borderRadius: 18, backgroundColor: theme.surface, paddingHorizontal: 16 },
+		infoRow: { flexDirection: "row", justifyContent: "space-between", paddingVertical: 13 },
+		infoDivider: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: theme.border },
+		infoLabel: { fontSize: 14, color: theme.textSecondary },
+		infoValue: { fontSize: 14, fontWeight: "600", color: theme.text },
+		otaNote: { fontSize: 13, color: theme.textSecondary, textAlign: "center", marginTop: 12 },
+		notesHeading: { fontSize: 18, fontWeight: "800", color: theme.text, marginTop: 22 },
+		intro: { fontSize: 15, color: theme.text, lineHeight: 22, marginTop: 12 },
 		section: { marginTop: 14, padding: 16, borderRadius: 18, backgroundColor: theme.surface },
 		sectionTitle: { fontSize: 17, fontWeight: "800", color: theme.text, marginBottom: 4 },
 		subheading: { fontSize: 15, fontWeight: "700", color: theme.primary, marginTop: 14, marginBottom: 2 },
@@ -287,8 +358,17 @@ const createStyles = (theme: Theme) =>
 			alignSelf: "stretch",
 		},
 		primaryText: { color: "#FFFFFF", fontSize: 15, fontWeight: "700" },
-		secondary: { marginTop: 8, paddingVertical: 10, paddingHorizontal: 18, borderRadius: 14, backgroundColor: theme.surface },
-		secondaryText: { fontSize: 14, fontWeight: "700", color: theme.text },
-		link: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, marginTop: 16 },
+		secondaryWide: {
+			flexDirection: "row",
+			alignItems: "center",
+			justifyContent: "center",
+			gap: 8,
+			marginTop: 16,
+			paddingVertical: 14,
+			borderRadius: 16,
+			backgroundColor: theme.surface,
+		},
+		secondaryText: { fontSize: 15, fontWeight: "700", color: theme.text },
+		link: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, marginVertical: 18 },
 		linkText: { fontSize: 13, fontWeight: "600", color: theme.primary },
 	});
