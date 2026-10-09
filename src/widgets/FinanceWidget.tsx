@@ -43,7 +43,7 @@ function Stat({
 	return (
 		<FlexWidget style={{ flex: 1, padding: 10, borderRadius: 14, backgroundColor: C.row }}>
 			<TextWidget text={label} style={{ fontSize: 11, color: C.muted }} />
-			<TextWidget text={value} maxLines={1} style={{ fontSize: 17, fontWeight: "700", color, marginTop: 2 }} />
+			<TextWidget text={value} maxLines={1} truncate="END" style={{ fontSize: 17, fontWeight: "700", color, marginTop: 2 }} />
 		</FlexWidget>
 	);
 }
@@ -60,7 +60,7 @@ export function FinanceWidget({ data, colors }: { data: FinanceSnapshot; colors?
 				width: "match_parent",
 				backgroundColor: C.bg,
 				borderRadius: 22,
-				paddingTop: 16,
+				paddingVertical: 16,
 				paddingHorizontal: 16,
 			}}
 		>
@@ -75,7 +75,7 @@ export function FinanceWidget({ data, colors }: { data: FinanceSnapshot; colors?
 			{!data.signedIn ? (
 				<TextWidget text="Open LifeSync to sign in" style={{ fontSize: 13, color: C.muted, marginTop: 14 }} />
 			) : (
-				<FlexWidget style={{ height: "match_parent", width: "match_parent" }}>
+				<FlexWidget style={{ flex: 1, width: "match_parent" }}>
 					<FlexWidget style={{ flexDirection: "row", width: "match_parent", marginTop: 10, flexGap: 8 }}>
 						<Stat label={`Spent in ${data.month}`} value={money(data.currency, data.monthSpent)} color={C.error} C={C} />
 						<Stat label="Income" value={money(data.currency, data.monthIncome)} color={C.success} C={C} />
@@ -84,7 +84,10 @@ export function FinanceWidget({ data, colors }: { data: FinanceSnapshot; colors?
 					{data.recent.length === 0 ? (
 						<TextWidget text="No transactions yet" style={{ fontSize: 13, color: C.muted, marginTop: 4 }} />
 					) : (
-						// Scrolls when there are more transactions than fit.
+						// Scrolls when there are more transactions than fit. flex: 1
+						// so it takes what's left under the stats instead of the
+						// widget's full height (which hid the bottom rows).
+						<FlexWidget style={{ flex: 1, width: "match_parent" }}>
 						<ListWidget style={{ height: "match_parent", width: "match_parent" }}>
 							{data.recent.map((t) => (
 								<FlexWidget
@@ -125,6 +128,7 @@ export function FinanceWidget({ data, colors }: { data: FinanceSnapshot; colors?
 								</FlexWidget>
 							))}
 						</ListWidget>
+						</FlexWidget>
 					)}
 				</FlexWidget>
 			)}

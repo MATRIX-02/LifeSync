@@ -29,8 +29,6 @@ export function TodayHabitsWidget({
 }) {
 	const C = resolveColors(colors);
 	const complete = habits.filter((h) => h.done >= h.target).length;
-	const barWidth = Math.max(40, width - 32);
-	const filled = habits.length ? Math.round((barWidth * complete) / habits.length) : 0;
 
 	return (
 		<FlexWidget
@@ -40,7 +38,7 @@ export function TodayHabitsWidget({
 				width: "match_parent",
 				backgroundColor: C.bg,
 				borderRadius: 22,
-				paddingTop: 16,
+				paddingVertical: 16,
 				paddingHorizontal: 16,
 			}}
 		>
@@ -51,8 +49,15 @@ export function TodayHabitsWidget({
 					style={{ fontSize: 13, color: C.primary, fontWeight: "600" }}
 				/>
 			</FlexWidget>
-			<FlexWidget style={{ marginTop: 8, height: 5, width: barWidth, borderRadius: 3, backgroundColor: C.track }}>
-				<FlexWidget style={{ height: 5, width: filled, borderRadius: 3, backgroundColor: C.primary }} />
+			{/* Flex weights rather than dp widths: the width the launcher reports
+			    is often stale or wrong after a resize, which overflowed the bar. */}
+			<FlexWidget
+				style={{ flexDirection: "row", marginTop: 8, height: 5, width: "match_parent", borderRadius: 3, backgroundColor: C.track }}
+			>
+				{complete > 0 && (
+					<FlexWidget style={{ flex: complete, height: 5, borderRadius: 3, backgroundColor: C.primary }} />
+				)}
+				{habits.length - complete > 0 && <FlexWidget style={{ flex: habits.length - complete, height: 5 }} />}
 			</FlexWidget>
 
 			{!signedIn ? (
@@ -60,8 +65,11 @@ export function TodayHabitsWidget({
 			) : habits.length === 0 ? (
 				<TextWidget text="No habits due today 🎉" style={{ fontSize: 13, color: C.muted, marginTop: 14 }} />
 			) : (
-				// Scrolls when there are more habits than fit.
-				<ListWidget style={{ height: "match_parent", width: "match_parent", marginTop: 10 }}>
+				// Scrolls when there are more habits than fit. flex: 1 wrapper, not
+				// match_parent: match_parent alone made the list as tall as the whole
+				// widget, pushing its last rows off the bottom.
+				<FlexWidget style={{ flex: 1, width: "match_parent", marginTop: 10 }}>
+				<ListWidget style={{ height: "match_parent", width: "match_parent" }}>
 					{habits.map((h) => {
 						const isDone = h.done >= h.target;
 						const dot = isHex(h.color) ? h.color : C.primary;
@@ -121,6 +129,7 @@ export function TodayHabitsWidget({
 						);
 					})}
 				</ListWidget>
+				</FlexWidget>
 			)}
 		</FlexWidget>
 	);
