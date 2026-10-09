@@ -1,3 +1,4 @@
+import SendNotificationModal from "@/src/components/admin/SendNotificationModal";
 import { Alert } from "@/src/components/CustomAlert";
 import { useAdminStore } from "@/src/context/adminStore";
 import { useAuthStore } from "@/src/context/authStore";
@@ -8,6 +9,7 @@ import { useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
 	ActivityIndicator,
+	Image,
 	Modal,
 	ScrollView,
 	StyleSheet,
@@ -29,6 +31,7 @@ export default function AdminUsersScreen() {
 		updateUserRole,
 		toggleUserActive,
 		updateUserSubscription,
+		deleteUser,
 		searchQuery,
 		setSearchQuery,
 		currentPage,
@@ -39,6 +42,12 @@ export default function AdminUsersScreen() {
 	const [selectedUser, setSelectedUser] =
 		useState<ProfileWithSubscription | null>(null);
 	const [showModal, setShowModal] = useState(false);
+	// undefined = closed, null = broadcast, a user = send to that user.
+	const [notifyTarget, setNotifyTarget] = useState<
+		ProfileWithSubscription | null | undefined
+	>(undefined);
+	const [failedAvatars, setFailedAvatars] = useState<Set<string>>(new Set());
+	const currentUserId = useAuthStore((s) => s.user?.id);
 
 	useEffect(() => {
 		if (!isAdmin()) {
@@ -78,6 +87,49 @@ export default function AdminUsersScreen() {
 		);
 	};
 
+	const handleDeleteUser = (user: ProfileWithSubscription) => {
+		Alert.alert(
+			"Delete account",
+			`Permanently delete ${user.email} and all of their data (habits, workouts, finance, payments)? They will be signed out and cannot recover it.`,
+			[
+				{ text: "Cancel", style: "cancel" },
+				{
+					text: "Delete",
+					style: "destructive",
+					onPress: async () => {
+						const { error } = await deleteUser(user.id);
+						if (error) {
+							Alert.error("Not deleted", `Could not delete the account: ${error.message}`);
+							return;
+						}
+						setShowModal(false);
+						Alert.success("Deleted", `${user.email} has been deleted.`);
+					},
+				},
+			]
+		);
+	};
+
+	const renderAvatar = (user: ProfileWithSubscription, large = false) => {
+		const style = large ? styles.userAvatarLarge : styles.userAvatar;
+		if (user.avatar_url && !failedAvatars.has(user.id)) {
+			return (
+				<Image
+					source={{ uri: user.avatar_url }}
+					style={style}
+					onError={() => setFailedAvatars((s) => new Set(s).add(user.id))}
+				/>
+			);
+		}
+		return (
+			<View style={style}>
+				<Text style={[styles.userAvatarText, large && { fontSize: 28 }]}>
+					{(user.full_name?.charAt(0) || user.email.charAt(0)).toUpperCase()}
+				</Text>
+			</View>
+		);
+	};
+
 	const handleUpdateRole = async (userId: string, role: UserRole) => {
 		await updateUserRole(userId, role);
 		setShowModal(false);
@@ -98,7 +150,9 @@ export default function AdminUsersScreen() {
 					<Ionicons name="arrow-back" size={24} color={theme.text} />
 				</TouchableOpacity>
 				<Text style={styles.headerTitle}>Manage Users</Text>
-				<View style={{ width: 24 }} />
+				<TouchableOpacity onPress={() => setNotifyTarget(null)}>
+					<Ionicons name="megaphone-outline" size={24} color={theme.text} />
+				</TouchableOpacity>
 			</View>
 
 			{/* Search */}
@@ -147,12 +201,7 @@ export default function AdminUsersScreen() {
 								setShowModal(true);
 							}}
 						>
-							<View style={styles.userAvatar}>
-								<Text style={styles.userAvatarText}>
-									{user.full_name?.charAt(0) ||
-										user.email.charAt(0).toUpperCase()}
-								</Text>
-							</View>
+							{renderAvatar(user)}
 							<View style={styles.userInfo}>
 								<Text style={styles.userName}>
 									{user.full_name || "No Name"}
@@ -239,6 +288,20 @@ export default function AdminUsersScreen() {
 						{selectedUser && (
 							<ScrollView>
 								{/* User Info */}
+								<View style={[styles.modalSection, styles.modalProfileHeader]}>
+									{renderAvatar(selectedUser, true)}
+									<TouchableOpacity
+										style={styles.notifyButton}
+										onPress={() => setNotifyTarget(selectedUser)}
+									>
+										<Ionicons name="notifications-outline" size={18} color="#fff" />
+										<Text style={styles.notifyButtonText}>Send notification</Text>
+									</TouchableOpacity>
+									{!selectedUser.expo_push_token && (
+										<Text style={styles.noDeviceText}>No registered device</Text>
+									)}
+								</View>
+
 								<View style={styles.modalSection}>
 									<Text style={styles.modalSectionTitle}>Profile</Text>
 									<View style={styles.modalRow}>
@@ -288,6 +351,16 @@ export default function AdminUsersScreen() {
 												: "Activate Account"}
 										</Text>
 									</TouchableOpacity>
+									{selectedUser.id !== currentUserId && (
+										<TouchableOpacity
+											style={[styles.statusButton, styles.deleteButton]}
+											onPress={() => handleDeleteUser(selectedUser)}
+										>
+											<Text style={[styles.statusButtonText, { color: "#fff" }]}>
+												Delete Account & Data
+											</Text>
+										</TouchableOpacity>
+									)}
 								</View>
 
 								{/* Role Selection */}
@@ -365,6 +438,12 @@ export default function AdminUsersScreen() {
 					</View>
 				</View>
 			</Modal>
+
+			<SendNotificationModal
+				visible={notifyTarget !== undefined}
+				user={notifyTarget}
+				onClose={() => setNotifyTarget(undefined)}
+			/>
 		</View>
 	);
 }
@@ -426,6 +505,40 @@ const createStyles = (theme: any) =>
 			justifyContent: "center",
 			alignItems: "center",
 			marginRight: 12,
+		},
+		userAvatarLarge: {
+			width: 80,
+			height: 80,
+			borderRadius: 40,
+			backgroundColor: theme.primary,
+			justifyContent: "center",
+			alignItems: "center",
+		},
+		modalProfileHeader: {
+			alignItems: "center",
+			gap: 12,
+		},
+		notifyButton: {
+			flexDirection: "row",
+			alignItems: "center",
+			gap: 8,
+			backgroundColor: theme.primary,
+			paddingHorizontal: 16,
+			paddingVertical: 10,
+			borderRadius: 20,
+		},
+		notifyButtonText: {
+			color: "#fff",
+			fontSize: 14,
+			fontWeight: "600",
+		},
+		noDeviceText: {
+			color: theme.textMuted,
+			fontSize: 12,
+		},
+		deleteButton: {
+			backgroundColor: theme.error,
+			marginTop: 12,
 		},
 		userAvatarText: {
 			color: "#fff",

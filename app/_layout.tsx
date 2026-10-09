@@ -24,6 +24,7 @@ import { ActivityIndicator, StatusBar, StyleSheet, View } from "react-native";
 import "react-native-reanimated";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
+import AnnouncementModal from "@/src/components/AnnouncementModal";
 import { AlertProvider } from "@/src/components/CustomAlert";
 import { SafeAreaFrame } from "@/src/components/SafeAreaFrame";
 import { SyncStatusBanner } from "@/src/components/SyncStatusBanner";
@@ -170,6 +171,7 @@ export default function RootLayout() {
 						<SyncStatusBanner />
 						<RootLayoutNav />
 						<UpdateProgressSheet />
+						<AnnouncementModal />
 					</SafeAreaFrame>
 				</AlertProvider>
 			</ThemeProvider>
@@ -300,6 +302,12 @@ function RootLayoutNav() {
 						return;
 					}
 					openDetectedTransaction(data.id);
+					return;
+				}
+
+				// Admin push (supabase/functions/admin-actions): optional screen to open.
+				if (data?.type === "admin_message") {
+					if (typeof data.route === "string") router.push(data.route as any);
 					return;
 				}
 

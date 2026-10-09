@@ -13,6 +13,7 @@ export default function AdminLayout() {
 			<Stack.Screen name="coupons" />
 			<Stack.Screen name="plans" />
 			<Stack.Screen name="payments" />
+			<Stack.Screen name="announcements" />
 		</Stack>
 	);
 }

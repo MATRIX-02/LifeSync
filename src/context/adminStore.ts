@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { supabase } from "../config/supabase";
+import { supabase, supabaseDirect } from "../config/supabase";
 import {
 	Coupon,
 	Payment,
@@ -7,6 +7,36 @@ import {
 	SubscriptionPlanRow,
 	UserRole,
 } from "../types/database";
+
+export type PushAudience = "users" | "all" | "free" | "premium";
+
+export interface PushResult {
+	targeted: number;
+	noDevice: number;
+	sent: number;
+}
+
+export type AnnouncementAudience = "all" | "free" | "premium";
+
+export interface Announcement {
+	id: string;
+	title: string;
+	body: string;
+	audience: AnnouncementAudience;
+	is_active: boolean;
+	created_at: string;
+}
+
+// The function's JSON error code, so callers can say something specific.
+const functionError = async (error: any): Promise<Error> => {
+	try {
+		const body = await error?.context?.json?.();
+		if (body?.error) return new Error(body.error);
+	} catch {
+		// Not a JSON response.
+	}
+	return new Error(error?.message ?? "Request failed");
+};
 
 interface AdminStats {
 	totalUsers: number;
@@ -49,6 +79,34 @@ interface AdminActions {
 		status: string
 	) => Promise<{ error: Error | null }>;
 	setSelectedUser: (user: ProfileWithSubscription | null) => void;
+	sendPush: (params: {
+		audience: PushAudience;
+		userIds?: string[];
+		title: string;
+		body: string;
+		route?: string;
+	}) => Promise<{ result: PushResult | null; error: Error | null }>;
+	/** "Update available" push; title/body default on the server. */
+	sendUpdatePush: (params: {
+		audience: PushAudience;
+		userIds?: string[];
+		version: string;
+		title?: string;
+		body?: string;
+	}) => Promise<{ result: PushResult | null; error: Error | null }>;
+	deleteUser: (userId: string) => Promise<{ error: Error | null }>;
+
+	// Announcements
+	announcements: Announcement[];
+	fetchAnnouncements: () => Promise<void>;
+	createAnnouncement: (
+		a: Pick<Announcement, "title" | "body" | "audience">
+	) => Promise<{ error: Error | null }>;
+	setAnnouncementActive: (
+		id: string,
+		isActive: boolean
+	) => Promise<{ error: Error | null }>;
+	deleteAnnouncement: (id: string) => Promise<{ error: Error | null }>;
 
 	// Coupons
 	fetchCoupons: () => Promise<void>;
@@ -102,7 +160,81 @@ export const useAdminStore = create<AdminStore>((set, get) => ({
 	totalPages: 1,
 	pageSize: PAGE_SIZE,
 
+	announcements: [],
+
 	// User Actions
+	sendPush: async (params) => {
+		const { data, error } = await supabaseDirect.functions.invoke<PushResult>(
+			"admin-actions",
+			{ body: { action: "send_push", ...params } }
+		);
+		if (error) return { result: null, error: await functionError(error) };
+		return { result: data, error: null };
+	},
+
+	sendUpdatePush: async (params) => {
+		const { data, error } = await supabaseDirect.functions.invoke<PushResult>(
+			"admin-actions",
+			{ body: { action: "send_update", ...params } }
+		);
+		if (error) return { result: null, error: await functionError(error) };
+		return { result: data, error: null };
+	},
+
+	deleteUser: async (userId) => {
+		const { error } = await supabaseDirect.functions.invoke("admin-actions", {
+			body: { action: "delete_user", userId },
+		});
+		if (error) return { error: await functionError(error) };
+		set((state) => ({ users: state.users.filter((u) => u.id !== userId) }));
+		return { error: null };
+	},
+
+	fetchAnnouncements: async () => {
+		const { data, error } = await (supabase.from("announcements" as any) as any)
+			.select("*")
+			.order("created_at", { ascending: false });
+		if (error) {
+			set({ error: error.message });
+			return;
+		}
+		set({ announcements: (data ?? []) as Announcement[] });
+	},
+
+	createAnnouncement: async (a) => {
+		const { error } = await (supabase.from("announcements" as any) as any).insert({
+			...a,
+			is_active: true,
+		});
+		if (error) return { error: new Error(error.message) };
+		await get().fetchAnnouncements();
+		return { error: null };
+	},
+
+	setAnnouncementActive: async (id, isActive) => {
+		const { error } = await (supabase.from("announcements" as any) as any)
+			.update({ is_active: isActive })
+			.eq("id", id);
+		if (error) return { error: new Error(error.message) };
+		set((state) => ({
+			announcements: state.announcements.map((a) =>
+				a.id === id ? { ...a, is_active: isActive } : a
+			),
+		}));
+		return { error: null };
+	},
+
+	deleteAnnouncement: async (id) => {
+		const { error } = await (supabase.from("announcements" as any) as any)
+			.delete()
+			.eq("id", id);
+		if (error) return { error: new Error(error.message) };
+		set((state) => ({
+			announcements: state.announcements.filter((a) => a.id !== id),
+		}));
+		return { error: null };
+	},
+
 	fetchUsers: async (page = 1, search = "") => {
 		set({ isLoading: true, error: null });
 		try {

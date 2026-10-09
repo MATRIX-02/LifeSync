@@ -286,6 +286,37 @@ export default function AdminDashboard() {
 								style={styles.actionArrow}
 							/>
 						</TouchableOpacity>
+
+						<TouchableOpacity
+							style={styles.actionCard}
+							onPress={() => router.push("/admin/announcements")}
+						>
+							<View
+								style={[
+									styles.actionIcon,
+									{ backgroundColor: theme.warning + "20" },
+								]}
+							>
+								<Ionicons name="megaphone" size={24} color={theme.warning} />
+							</View>
+							<View
+								style={{
+									display: "flex",
+									flexDirection: "column",
+								}}
+							>
+								<Text style={styles.actionTitle}>Announcements</Text>
+								<Text style={styles.actionDescription}>
+									Show a message to users in the app
+								</Text>
+							</View>
+							<Ionicons
+								name="chevron-forward"
+								size={20}
+								color={theme.textMuted}
+								style={styles.actionArrow}
+							/>
+						</TouchableOpacity>
 					</View>
 
 					<View style={{ height: 40 }} />
