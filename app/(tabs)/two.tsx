@@ -18,6 +18,9 @@ import {
 } from "@/src/constants/notificationSounds";
 import { useSoundPrefsStore } from "@/src/context/soundPrefsStore";
 import { ModuleType, useModuleStore } from "@/src/context/moduleContext";
+import { AppIconPicker } from "@/src/components/settings/AppIconPicker";
+import { AccentColorPicker, TextSizePicker } from "@/src/components/settings/AppearanceOptions";
+import { ThemePicker } from "@/src/components/settings/ThemePicker";
 import { Theme, useColors, useTheme } from "@/src/context/themeContext";
 import { useWorkoutStore } from "@/src/context/workoutStoreDB";
 import {
@@ -304,7 +307,7 @@ const ModuleSettingRow: React.FC<ModuleSettingRowProps> = ({
 export default function SettingsScreen() {
 	const router = useRouter();
 	const { from } = useLocalSearchParams<{ from?: string }>();
-	const { isDark, toggleTheme, themeMode, setThemeMode } = useTheme();
+	const { isDark } = useTheme();
 	const theme = useColors();
 	const habitStore = useHabitStore();
 	const workoutStore = useWorkoutStore();
@@ -852,22 +855,10 @@ export default function SettingsScreen() {
 				{/* Appearance Section */}
 				<SettingsSection title="APPEARANCE" styles={styles}>
 					<View style={styles.settingCard}>
-						<SettingRow
-							icon="moon"
-							iconColor={theme.primary}
-							iconBg={theme.primary + "20"}
-							label="Dark Mode"
-							description="Switch between light and dark themes"
-							theme={theme}
-							rightElement={
-								<Switch
-									value={isDark}
-									onValueChange={toggleTheme}
-									trackColor={{ false: theme.border, true: theme.primary }}
-									thumbColor="#FFFFFF"
-								/>
-							}
-						/>
+						<ThemePicker />
+						<AccentColorPicker />
+						<TextSizePicker />
+						<AppIconPicker />
 					</View>
 				</SettingsSection>
 
