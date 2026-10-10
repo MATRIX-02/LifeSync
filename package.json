@@ -9,7 +9,7 @@
     "web": "expo start --web",
     "release": "node scripts/release.mjs",
     "notify-update": "node scripts/notify-update.mjs",
-    "ota": "eas update --channel production --platform android"
+    "ota": "eas update --channel production --platform all"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",
