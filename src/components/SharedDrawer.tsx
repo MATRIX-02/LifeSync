@@ -4,7 +4,9 @@ import { Theme } from "@/src/context/themeContext";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useRouter } from "expo-router";
 import { project, rubberband, springDrawer } from "@/src/utils/motion";
-import React, { useMemo } from "react";
+import React, { useMemo, useRef } from "react";
+
+const SWIPE_SLOP = 24;
 import {
 	Animated,
 	Dimensions,
@@ -82,11 +84,17 @@ export const SharedDrawer: React.FC<SharedDrawerProps> = ({
 	// further open, and decides on release from the *projected* resting point
 	// so a short flick is enough. Release velocity is handed to the spring.
 	const closedOffset = winWidth * 0.8;
+	// Ref, not a dependency: screens pass a new arrow every render, and
+	// rebuilding the responder mid-touch loses the gesture's state.
+	const onCloseRef = useRef(onCloseDrawer);
+	onCloseRef.current = onCloseDrawer;
 	const panResponder = useMemo(
 		() =>
 			PanResponder.create({
+				// Only a deliberate leftward swipe may take the touch away from a
+				// drawer item. A tap that drifts a few px must stay a tap.
 				onMoveShouldSetPanResponder: (_, g) =>
-					Math.abs(g.dx) > 10 && Math.abs(g.dx) > Math.abs(g.dy) * 1.5,
+					g.dx < -SWIPE_SLOP && Math.abs(g.dx) > Math.abs(g.dy) * 2,
 				onPanResponderMove: (_, g) => {
 					drawerAnim.setValue(
 						g.dx > 0 ? rubberband(g.dx, closedOffset) : Math.max(g.dx, -closedOffset),
@@ -94,13 +102,15 @@ export const SharedDrawer: React.FC<SharedDrawerProps> = ({
 				},
 				onPanResponderRelease: (_, g) => {
 					const close = g.dx + project(g.vx) < -closedOffset / 2;
-					springDrawer(drawerAnim, !close, closedOffset, g.vx);
-					if (close) onCloseDrawer();
+					// `force`: the drawer was dragged, so even at zero velocity it
+					// must spring back rather than stay where the finger left it.
+					springDrawer(drawerAnim, !close, closedOffset, g.vx, true);
+					if (close) onCloseRef.current();
 				},
 				onPanResponderTerminate: () =>
-					springDrawer(drawerAnim, true, closedOffset, 0.0001),
+					springDrawer(drawerAnim, true, closedOffset, 0, true),
 			}),
-		[drawerAnim, closedOffset, onCloseDrawer],
+		[drawerAnim, closedOffset],
 	);
 
 	const userName =
