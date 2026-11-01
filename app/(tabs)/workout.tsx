@@ -5,6 +5,8 @@ import {
 	useSubscriptionCheck,
 } from "@/src/components/PremiumFeatureGate";
 import { SharedDrawer } from "@/src/components/SharedDrawer";
+import { DrawerScrim } from "@/src/components/DrawerScrim";
+import { springDrawer, springs } from "@/src/utils/motion";
 import {
 	ActiveWorkoutScreen,
 	NutriPlan,
@@ -116,11 +118,7 @@ export default function WorkoutTrackerScreen() {
 
 	// Animate drawer
 	useEffect(() => {
-		Animated.timing(drawerAnim, {
-			toValue: drawerOpen ? 0 : -width * 0.8,
-			duration: 300,
-			useNativeDriver: true,
-		}).start();
+		springDrawer(drawerAnim, drawerOpen, width * 0.8);
 	}, [drawerOpen]);
 
 	// Initialize tab indicator position only once when tab is loaded
@@ -144,9 +142,10 @@ export default function WorkoutTrackerScreen() {
 
 	const handleTabChange = (tab: TabType) => {
 		const tabIndex = tabs.findIndex((t) => t.key === tab);
-		Animated.timing(tabIndicatorAnim, {
+		// Spring re-targets from the indicator's live position on rapid taps.
+		Animated.spring(tabIndicatorAnim, {
 			toValue: tabIndex,
-			duration: 200,
+			...springs.smooth,
 			useNativeDriver: true,
 		}).start();
 		setActiveTab(tab);
@@ -232,13 +231,13 @@ export default function WorkoutTrackerScreen() {
 			/>
 
 			{/* Drawer Overlay */}
-			{drawerOpen && (
-				<TouchableOpacity
-					style={[styles.drawerOverlay, { zIndex: 15 }]}
-					activeOpacity={1}
-					onPress={() => setDrawerOpen(false)}
-				/>
-			)}
+			<DrawerScrim
+				drawerAnim={drawerAnim}
+				drawerWidth={width * 0.8}
+				open={drawerOpen}
+				onClose={() => setDrawerOpen(false)}
+				style={styles.drawerOverlay}
+			/>
 
 			{/* Shared Drawer Component */}
 			<SharedDrawer

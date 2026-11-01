@@ -3,10 +3,12 @@ import { ModuleType, useModuleStore } from "@/src/context/moduleContext";
 import { Theme } from "@/src/context/themeContext";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useRouter } from "expo-router";
-import React from "react";
+import { project, rubberband, springDrawer } from "@/src/utils/motion";
+import React, { useMemo } from "react";
 import {
 	Animated,
 	Dimensions,
+	PanResponder,
 	Image,
 	ScrollView,
 	StyleSheet,
@@ -75,6 +77,31 @@ export const SharedDrawer: React.FC<SharedDrawerProps> = ({
 	// header would push the module list off-screen.
 	const { width: winWidth, height: winHeight } = useWindowDimensions();
 	const isLandscape = winWidth > winHeight;
+
+	// Swipe the drawer closed: tracks the finger 1:1, rubber-bands if pulled
+	// further open, and decides on release from the *projected* resting point
+	// so a short flick is enough. Release velocity is handed to the spring.
+	const closedOffset = winWidth * 0.8;
+	const panResponder = useMemo(
+		() =>
+			PanResponder.create({
+				onMoveShouldSetPanResponder: (_, g) =>
+					Math.abs(g.dx) > 10 && Math.abs(g.dx) > Math.abs(g.dy) * 1.5,
+				onPanResponderMove: (_, g) => {
+					drawerAnim.setValue(
+						g.dx > 0 ? rubberband(g.dx, closedOffset) : Math.max(g.dx, -closedOffset),
+					);
+				},
+				onPanResponderRelease: (_, g) => {
+					const close = g.dx + project(g.vx) < -closedOffset / 2;
+					springDrawer(drawerAnim, !close, closedOffset, g.vx);
+					if (close) onCloseDrawer();
+				},
+				onPanResponderTerminate: () =>
+					springDrawer(drawerAnim, true, closedOffset, 0.0001),
+			}),
+		[drawerAnim, closedOffset, onCloseDrawer],
+	);
 
 	const userName =
 		authProfile?.full_name || user?.email?.split("@")[0] || "User";
@@ -159,6 +186,7 @@ export const SharedDrawer: React.FC<SharedDrawerProps> = ({
 				isLandscape && styles.drawerLandscape,
 				{ transform: [{ translateX: drawerAnim }] },
 			]}
+			{...panResponder.panHandlers}
 		>
 			<TouchableOpacity
 				style={[styles.drawerHeader, isLandscape && styles.drawerHeaderCompact]}

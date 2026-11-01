@@ -81,6 +81,7 @@ Android channels (`habit-reminders`, `hydration-reminders`, `pomodoro-timer`, `f
 
 - **Use the custom Alert**: `import { Alert } from "@/src/components/CustomAlert"` — never React Native's `Alert`. Same `.alert(title, message, buttons)` shape plus `.success/.error/.warning`. Requires `AlertProvider`, mounted in the root layout. Several recent commits exist purely to migrate stragglers.
 - **Theming**: `const theme = useColors()` returns the full palette; screens build styles via a module-level `const createStyles = (theme: Theme) => StyleSheet.create({...})`. Don't hardcode colors.
+- **Motion**: springs and easing come from `src/utils/motion.ts` (`springs.smooth` critically damped default, `springs.momentum` only after a flick, `easeOut`, `project`, `rubberband`). Side drawers use `springDrawer()` + `DrawerScrim`; press feedback uses `PressableScale`. Don't add fixed-duration `Animated.timing` for anything the user can grab.
 - **Path alias**: `@/*` maps to the repo root (`@/src/...`).
 - **Formatting**: tabs, not spaces. There is no prettier config or dependency — running prettier with defaults will reformat entire files and bury your diff. If you must format, restrict it to `--use-tabs` on the exact files you touched.
 - **Feature gating**: `useSubscriptionCheck()` (`src/components/PremiumFeatureGate.tsx`) supplies `canAddHabit(count)`, `canAddAccount`, etc. against plan limits from the DB, where `-1` means unlimited. `moduleContext.ts` separately lets users disable whole modules (`habits | workout | finance`).

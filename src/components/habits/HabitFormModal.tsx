@@ -1,3 +1,4 @@
+import { project, rubberband, springs } from "@/src/utils/motion";
 // Create / Edit Habit sheet.
 //
 // One form for both flows, so a field added to habits only has to be wired up
@@ -292,27 +293,47 @@ export const HabitFormModal: React.FC<HabitFormModalProps> = ({
 		[perDay, reminderTime],
 	);
 
-	// Slide to dismiss
-	const translateY = useRef(new Animated.Value(0)).current;
+	// Sheet motion. The backdrop fades on its own value while the sheet
+	// slides, so the dim no longer travels up the screen with the sheet.
+	const screenH = Dimensions.get("window").height;
+	const translateY = useRef(new Animated.Value(screenH)).current;
+	const backdrop = translateY.interpolate({
+		inputRange: [0, screenH * 0.6],
+		outputRange: [1, 0],
+		extrapolate: "clamp",
+	});
 	const onCloseRef = useRef(onClose);
 	onCloseRef.current = onClose;
+	const dismiss = useRef((velocity = 0) => {
+		Animated.spring(translateY, {
+			toValue: Dimensions.get("window").height,
+			velocity,
+			...springs.smooth,
+			restDisplacementThreshold: 40,
+			restSpeedThreshold: 40,
+			useNativeDriver: true,
+		}).start(({ finished }) => finished && onCloseRef.current());
+	}).current;
 	const panResponder = useRef(
 		PanResponder.create({
 			onStartShouldSetPanResponder: () => false,
-			onMoveShouldSetPanResponder: (_, gesture) => gesture.dy > 10,
+			onMoveShouldSetPanResponder: (_, gesture) => Math.abs(gesture.dy) > 10,
+			onPanResponderGrant: () => translateY.stopAnimation(),
 			onPanResponderMove: (_, gesture) => {
-				if (gesture.dy > 0) translateY.setValue(gesture.dy);
+				// 1:1 downward; resist (rather than block) dragging upward.
+				translateY.setValue(
+					gesture.dy > 0 ? gesture.dy : rubberband(gesture.dy, 300),
+				);
 			},
 			onPanResponderRelease: (_, gesture) => {
-				if (gesture.dy > 100) {
-					Animated.timing(translateY, {
-						toValue: Dimensions.get("window").height,
-						duration: 200,
-						useNativeDriver: true,
-					}).start(() => onCloseRef.current());
+				// Decide from where the flick is heading, not where it stopped.
+				if (gesture.dy + project(gesture.vy) > 160) {
+					dismiss(gesture.vy);
 				} else {
 					Animated.spring(translateY, {
 						toValue: 0,
+						velocity: gesture.vy,
+						...springs.momentum,
 						useNativeDriver: true,
 					}).start();
 				}
@@ -324,7 +345,12 @@ export const HabitFormModal: React.FC<HabitFormModalProps> = ({
 	// otherwise back to defaults.
 	useEffect(() => {
 		if (!visible) return;
-		translateY.setValue(0);
+		translateY.setValue(Dimensions.get("window").height);
+		Animated.spring(translateY, {
+			toValue: 0,
+			...springs.smooth,
+			useNativeDriver: true,
+		}).start();
 		setShowIconPicker(false);
 		setShowFrequencyPicker(false);
 		setShowTimePicker(false);
@@ -448,15 +474,23 @@ export const HabitFormModal: React.FC<HabitFormModalProps> = ({
 	return (
 		<Modal
 			visible={visible}
-			animationType="slide"
+			animationType="none"
 			transparent
-			onRequestClose={onClose}
+			statusBarTranslucent
+			onRequestClose={() => dismiss()}
 		>
 			{/* Backdrop is a sibling of the sheet: wrapping the sheet in a
 			    TouchableWithoutFeedback makes it claim the touch responder and
 			    swallows scroll gestures started on the sheet's background. */}
-			<View style={styles.modalOverlay}>
-				<TouchableWithoutFeedback onPress={onClose}>
+			<View style={[styles.modalOverlay, { backgroundColor: "transparent" }]}>
+				<Animated.View
+					pointerEvents="none"
+					style={[
+						StyleSheet.absoluteFill,
+						{ backgroundColor: styles.modalOverlay.backgroundColor, opacity: backdrop },
+					]}
+				/>
+				<TouchableWithoutFeedback onPress={() => dismiss()}>
 					<View style={StyleSheet.absoluteFill} />
 				</TouchableWithoutFeedback>
 				<Animated.View

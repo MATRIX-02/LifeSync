@@ -5,6 +5,8 @@ import {
 	useSubscriptionCheck,
 } from "@/src/components/PremiumFeatureGate";
 import { SharedDrawer } from "@/src/components/SharedDrawer";
+import { DrawerScrim } from "@/src/components/DrawerScrim";
+import { springDrawer } from "@/src/utils/motion";
 import { useFinanceStore } from "@/src/context/financeStoreDB";
 import { useModuleStore } from "@/src/context/moduleContext";
 import { Theme, useColors, useTheme } from "@/src/context/themeContext";
@@ -97,11 +99,7 @@ export default function FinanceScreen() {
 
 	// Animate drawer
 	useEffect(() => {
-		Animated.timing(drawerAnim, {
-			toValue: drawerOpen ? 0 : -width * 0.8,
-			duration: 300,
-			useNativeDriver: true,
-		}).start();
+		springDrawer(drawerAnim, drawerOpen, width * 0.8);
 	}, [drawerOpen]);
 
 	// Show nothing while store is hydrating or tab state is loading
@@ -237,13 +235,13 @@ export default function FinanceScreen() {
 			{/* Main Content */}
 
 			{/* Drawer Overlay */}
-			{drawerOpen && (
-				<TouchableOpacity
-					style={[styles.drawerOverlay, { zIndex: 15 }]}
-					activeOpacity={1}
-					onPress={() => setDrawerOpen(false)}
-				/>
-			)}
+			<DrawerScrim
+				drawerAnim={drawerAnim}
+				drawerWidth={width * 0.8}
+				open={drawerOpen}
+				onClose={() => setDrawerOpen(false)}
+				style={styles.drawerOverlay}
+			/>
 
 			{/* Shared Drawer Component */}
 			<SharedDrawer

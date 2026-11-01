@@ -22,11 +22,22 @@ import {
 	View,
 } from "react-native";
 import Svg, { Circle } from "react-native-svg";
+import Reanimated, {
+	Easing,
+	FadeIn,
+	FadeOut,
+	ReduceMotion,
+	withTiming,
+} from "react-native-reanimated";
+
+import { PressableScale } from "@/src/components/PressableScale";
 
 import { HabitFormModal } from "@/src/components/habits/HabitFormModal";
 import { LoadingState } from "@/src/components/LoadingState";
 import { useSubscriptionCheck } from "@/src/components/PremiumFeatureGate";
 import { SharedDrawer } from "@/src/components/SharedDrawer";
+import { DrawerScrim } from "@/src/components/DrawerScrim";
+import { springDrawer } from "@/src/utils/motion";
 import { useAuthStore } from "@/src/context/authStore";
 import { useHabitStore } from "@/src/context/habitStoreDB";
 import { useModuleStore } from "@/src/context/moduleContext";
@@ -98,6 +109,28 @@ const ProgressRing = ({
 		</View>
 	);
 };
+
+// Popover grows from its trigger (top-right filter icon): 0.95 → 1 with a strong
+// ease-out, never from scale(0). Reduced motion falls back to a plain fade.
+const sortMenuEnter = () => {
+	"worklet";
+	const cfg = {
+		duration: 180,
+		easing: Easing.bezier(0.23, 1, 0.32, 1),
+		reduceMotion: ReduceMotion.System,
+	};
+	return {
+		initialValues: { opacity: 0, transform: [{ scale: 0.95 }] },
+		animations: {
+			opacity: withTiming(1, cfg),
+			transform: [{ scale: withTiming(1, cfg) }],
+		},
+	};
+};
+
+// Header icons are ~22dp; pad each to the 44dp minimum touch target
+// without changing the layout.
+const HEADER_HIT_SLOP = { top: 11, bottom: 11, left: 6, right: 6 };
 
 export default function DashboardScreen() {
 	const router = useRouter();
@@ -305,11 +338,7 @@ export default function DashboardScreen() {
 
 	// Animate drawer
 	useEffect(() => {
-		Animated.timing(drawerAnim, {
-			toValue: drawerOpen ? 0 : -width * 0.8,
-			duration: 300,
-			useNativeDriver: true,
-		}).start();
+		springDrawer(drawerAnim, drawerOpen, width * 0.8);
 	}, [drawerOpen]);
 
 	// Redirect if module is disabled - MUST be a hook, cannot be conditional
@@ -425,13 +454,13 @@ export default function DashboardScreen() {
 			/>
 
 			{/* Drawer Overlay */}
-			{drawerOpen && (
-				<TouchableOpacity
-					style={[styles.drawerOverlay, { zIndex: 15 }]}
-					activeOpacity={1}
-					onPress={() => setDrawerOpen(false)}
-				/>
-			)}
+			<DrawerScrim
+				drawerAnim={drawerAnim}
+				drawerWidth={width * 0.8}
+				open={drawerOpen}
+				onClose={() => setDrawerOpen(false)}
+				style={styles.drawerOverlay}
+			/>
 
 			{/* Shared Drawer Component */}
 			<SharedDrawer
@@ -462,23 +491,27 @@ export default function DashboardScreen() {
 						<Text style={styles.habitsTitle}>Daily Rituals</Text>
 						{/* Header Actions */}
 						<View style={styles.headerActions}>
-							<TouchableOpacity onPress={toggleViewMode}>
+							<TouchableOpacity
+								hitSlop={HEADER_HIT_SLOP} onPress={toggleViewMode}>
 								<Ionicons
 									name={viewMode === "week" ? "grid-outline" : "list-outline"}
 									size={22}
 									color={theme.text}
 								/>
 							</TouchableOpacity>
-							<TouchableOpacity onPress={() => setModalVisible(true)}>
+							<TouchableOpacity
+								hitSlop={HEADER_HIT_SLOP} onPress={() => setModalVisible(true)}>
 								<Ionicons name="add" size={24} color={theme.text} />
 							</TouchableOpacity>
 							<TouchableOpacity
+								hitSlop={HEADER_HIT_SLOP}
 								onPress={() => router.push("/(tabs)/habit-insights")}
 							>
 								<Ionicons name="sparkles" size={21} color={theme.text} />
 							</TouchableOpacity>
 							<View>
 								<TouchableOpacity
+								hitSlop={HEADER_HIT_SLOP}
 									onPress={() => setShowSortMenu(!showSortMenu)}
 								>
 									<Ionicons
@@ -489,6 +522,7 @@ export default function DashboardScreen() {
 								</TouchableOpacity>
 							</View>
 							<TouchableOpacity
+								hitSlop={HEADER_HIT_SLOP}
 								onPress={() =>
 									router.push({
 										pathname: "/(tabs)/profile",
@@ -509,7 +543,8 @@ export default function DashboardScreen() {
 									/>
 								)}
 							</TouchableOpacity>
-							<TouchableOpacity onPress={() => setDrawerOpen(true)}>
+							<TouchableOpacity
+								hitSlop={HEADER_HIT_SLOP} onPress={() => setDrawerOpen(true)}>
 								<Ionicons
 									name="ellipsis-vertical"
 									size={22}
@@ -747,12 +782,22 @@ export default function DashboardScreen() {
 			{/* Sort Menu Popover */}
 			{showSortMenu && (
 				<>
-					<TouchableOpacity
+					<Reanimated.View
 						style={styles.sortMenuOverlay}
-						activeOpacity={1}
-						onPress={() => setShowSortMenu(false)}
-					/>
-					<View style={styles.sortMenuPopover}>
+						entering={FadeIn.duration(150)}
+						exiting={FadeOut.duration(120)}
+					>
+						<TouchableOpacity
+							style={{ flex: 1 }}
+							activeOpacity={1}
+							onPress={() => setShowSortMenu(false)}
+						/>
+					</Reanimated.View>
+					<Reanimated.View
+						style={[styles.sortMenuPopover, { transformOrigin: "top right" }]}
+						entering={sortMenuEnter}
+						exiting={FadeOut.duration(120)}
+					>
 						<Text style={styles.sortMenuTitle}>Sort By</Text>
 						{[
 							{
@@ -809,7 +854,7 @@ export default function DashboardScreen() {
 								)}
 							</TouchableOpacity>
 						))}
-					</View>
+					</Reanimated.View>
 				</>
 			)}
 
@@ -1049,8 +1094,9 @@ const HabitRowItem: React.FC<HabitRowItemProps> = ({
 					const unscheduled = target === 0 && done === 0;
 
 					return (
-						<TouchableOpacity
+						<PressableScale
 							key={index}
+							hitSlop={{ top: 8, bottom: 8 }}
 							style={{
 								width: 28,
 								alignItems: "center",
@@ -1081,7 +1127,7 @@ const HabitRowItem: React.FC<HabitRowItemProps> = ({
 									{unscheduled ? "–" : target > 1 ? `${done}/${target}` : "×"}
 								</Text>
 							)}
-						</TouchableOpacity>
+						</PressableScale>
 					);
 				})}
 			</View>

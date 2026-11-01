@@ -1,3 +1,4 @@
+import { easeOut, springs } from "@/src/utils/motion";
 import { useColors } from "@/src/context/themeContext";
 import { Ionicons } from "@expo/vector-icons";
 import React, { createContext, useCallback, useContext, useState } from "react";
@@ -108,23 +109,28 @@ export const AlertProvider: React.FC<{ children: React.ReactNode }> = ({
 	const [visible, setVisible] = useState(false);
 	const [config, setConfig] = useState<AlertConfig | null>(null);
 	const [fadeAnim] = useState(new Animated.Value(0));
-	const [scaleAnim] = useState(new Animated.Value(0.8));
+	const [scaleAnim] = useState(new Animated.Value(0.95));
 	const theme = useColors();
 
 	const showAlert = useCallback(
 		(alertConfig: AlertConfig) => {
 			setConfig(alertConfig);
 			setVisible(true);
+			// Dialogs are centred, not anchored: 0.95 → 1, critically damped
+			// (the old friction/tension spring wobbled for ~600ms).
+			fadeAnim.stopAnimation();
+			scaleAnim.stopAnimation();
+			scaleAnim.setValue(0.95);
 			Animated.parallel([
 				Animated.timing(fadeAnim, {
 					toValue: 1,
-					duration: 200,
+					duration: 180,
+					easing: easeOut,
 					useNativeDriver: true,
 				}),
 				Animated.spring(scaleAnim, {
 					toValue: 1,
-					friction: 8,
-					tension: 40,
+					...springs.snappy,
 					useNativeDriver: true,
 				}),
 			]).start();
@@ -136,15 +142,19 @@ export const AlertProvider: React.FC<{ children: React.ReactNode }> = ({
 		Animated.parallel([
 			Animated.timing(fadeAnim, {
 				toValue: 0,
-				duration: 150,
+				duration: 120,
+				easing: easeOut,
 				useNativeDriver: true,
 			}),
 			Animated.timing(scaleAnim, {
-				toValue: 0.8,
-				duration: 150,
+				toValue: 0.97,
+				duration: 120,
+				easing: easeOut,
 				useNativeDriver: true,
 			}),
-		]).start(() => {
+		]).start(({ finished }) => {
+			// A newer alert may have interrupted this exit; don't tear it down.
+			if (!finished) return;
 			setVisible(false);
 			setConfig(null);
 		});
@@ -163,7 +173,7 @@ export const AlertProvider: React.FC<{ children: React.ReactNode }> = ({
 		// Small delay to let animation complete before executing callback
 		setTimeout(() => {
 			button.onPress?.();
-		}, 150);
+		}, 120);
 	};
 
 	const getIconConfig = (
