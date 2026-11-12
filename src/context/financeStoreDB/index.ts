@@ -3,7 +3,12 @@
  */
 import { create } from "zustand";
 import { supabase as supabaseClient } from "../../config/supabase";
-import { generateId, objectToCamelCase, objectToSnakeCase } from "./helpers";
+import {
+	generateId,
+	objectToCamelCase,
+	objectToSnakeCase,
+	stripServerBalances,
+} from "./helpers";
 import type { FinanceStore } from "./storeInterface";
 import type {
 	Account,
@@ -76,6 +81,87 @@ const applyAccountDelta = (acc: Account, delta: number): Account => {
 		next.creditUsed = Math.max(0, (acc.creditUsed || 0) - delta);
 	}
 	return next;
+};
+
+/**
+ * Move money between a savings goal and (optionally) an account.
+ * `signed` > 0 contributes, < 0 withdraws.
+ *
+ * One RPC (finance_goal_move, scripts/finance-savings-goal-transfers.sql)
+ * updates the goal, records a `transfer` / `savings_goal` transaction and
+ * shifts the account balance atomically. It used to overwrite the account
+ * balance directly with no transaction, which lost the money on a failed
+ * goal save, skipped creditUsed on cards, and threw every stored closing
+ * balance off by the amount.
+ */
+const moveGoalMoney = async (
+	get: () => FinanceStore,
+	set: (partial: Partial<FinanceStore>) => void,
+	goalId: string,
+	signed: number,
+	note: string | undefined,
+	accountId: string | undefined,
+): Promise<boolean> => {
+	const { userId } = get();
+	if (!userId || !Number.isFinite(signed) || signed === 0) return false;
+
+	const id = generateId();
+	const now = new Date();
+	const date = localToday();
+	const time = now.toTimeString().split(" ")[0];
+
+	const { data, error } = await supabase.rpc("finance_goal_move", {
+		p_id: id,
+		p_goal_id: goalId,
+		p_amount: signed,
+		p_account_id: accountId || null,
+		p_note: note || null,
+		p_date: date,
+		p_time: time,
+	});
+	if (error) {
+		console.error("Error moving goal money:", error);
+		return false;
+	}
+	if (!data?.applied) return false;
+
+	const raw = objectToCamelCase(data.goal);
+	const goal: SavingsGoal = {
+		...raw,
+		contributions:
+			typeof raw.contributions === "string"
+				? JSON.parse(raw.contributions)
+				: raw.contributions || [],
+	};
+	const moved = Number(data.amount);
+
+	const state = get();
+	const next: Partial<FinanceStore> = {
+		savingsGoals: state.savingsGoals.map((g) => (g.id === goalId ? goal : g)),
+	};
+	if (accountId) {
+		const txn: Transaction = {
+			id,
+			type: "transfer",
+			amount: moved,
+			category: "savings_goal",
+			description: `${moved > 0 ? "Saved to" : "Withdrawn from"}: ${goal.name}`,
+			note,
+			date,
+			time,
+			accountId,
+			paymentMethod: "net_banking",
+			isRecurring: false,
+			createdAt: now.toISOString(),
+			updatedAt: now.toISOString(),
+		};
+		next.transactions = [txn, ...state.transactions];
+		next.accounts = state.accounts.map((a) =>
+			a.id === accountId ? applyAccountDelta(a, -moved) : a,
+		);
+	}
+	set(next);
+	return true;
 };
 
 /**
@@ -480,7 +566,9 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
 		// transaction, deriving the delta server-side. Splitting this into two
 		// requests let the insert commit while the balance update failed.
 		const { error } = await supabase.rpc("finance_add_transaction", {
-			p_row: objectToSnakeCase({ ...newTransaction, user_id: userId }),
+			p_row: objectToSnakeCase(
+				stripServerBalances({ ...newTransaction, user_id: userId }),
+			),
 		});
 		if (error) {
 			console.error("Error adding transaction:", error);
@@ -524,7 +612,7 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
 
 		const { error } = await supabase.rpc("finance_update_transaction", {
 			p_id: id,
-			p_updates: objectToSnakeCase(updates),
+			p_updates: objectToSnakeCase(stripServerBalances(updates)),
 		});
 		if (error) {
 			console.error("Error updating transaction:", error);
@@ -920,66 +1008,11 @@ export const useFinanceStore = create<FinanceStore>()((set, get) => ({
 	},
 
 	contributeToGoal: async (goalId, amount, note, accountId) => {
-		const { savingsGoals, accounts, userId } = get();
-		if (!userId) return;
-
-		const goal = savingsGoals.find((g) => g.id === goalId);
-		if (!goal) return;
-
-		const newAmount = goal.currentAmount + amount;
-		const contribution = {
-			id: generateId(),
-			amount,
-			date: new Date().toISOString(),
-			note,
-			accountId,
-			type: "contribution" as const,
-		};
-
-		await get().updateSavingsGoal(goalId, {
-			currentAmount: newAmount,
-			isCompleted: newAmount >= goal.targetAmount,
-			contributions: [...goal.contributions, contribution],
-		});
-
-		if (accountId) {
-			await get().updateAccount(accountId, {
-				balance:
-					(accounts.find((a) => a.id === accountId)?.balance || 0) - amount,
-			});
-		}
+		await moveGoalMoney(get, set, goalId, Math.abs(amount), note, accountId);
 	},
 
 	withdrawFromGoal: async (goalId, amount, note, accountId) => {
-		const { savingsGoals, accounts, userId } = get();
-		if (!userId) return;
-
-		const goal = savingsGoals.find((g) => g.id === goalId);
-		if (!goal) return;
-
-		const actualWithdrawal = Math.min(amount, goal.currentAmount);
-		const contribution = {
-			id: generateId(),
-			amount: -actualWithdrawal,
-			date: new Date().toISOString(),
-			note,
-			accountId,
-			type: "withdrawal" as const,
-		};
-
-		await get().updateSavingsGoal(goalId, {
-			currentAmount: goal.currentAmount - actualWithdrawal,
-			isCompleted: false,
-			contributions: [...goal.contributions, contribution],
-		});
-
-		if (accountId && actualWithdrawal > 0) {
-			await get().updateAccount(accountId, {
-				balance:
-					(accounts.find((a) => a.id === accountId)?.balance || 0) +
-					actualWithdrawal,
-			});
-		}
+		await moveGoalMoney(get, set, goalId, -Math.abs(amount), note, accountId);
 	},
 
 	// Bill Reminders

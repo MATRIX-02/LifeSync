@@ -9,6 +9,14 @@ import {
 } from "@/src/context/financeStoreDB/types";
 import { Theme } from "@/src/context/themeContext";
 import { useFinanceCategories } from "@/src/hooks/useFinanceCategories";
+import { useMonthlyReports } from "@/src/hooks/useMonthlyReports";
+import {
+	billsDueIn,
+	currentMonthKey,
+	monthBounds,
+	monthLabel,
+	shiftMonth,
+} from "@/src/services/financeMonthlyReports";
 import { NotificationService } from "@/src/services/notificationService";
 import { COLORS } from "@/src/types/finance";
 import {
@@ -230,24 +238,44 @@ export default function BudgetManager({
 
 	const [selectedTemplate, setSelectedTemplate] = useState<string | null>(null);
 
-	// Calculate budget spending
-	const budgetData = useMemo(() => {
-		const now = new Date();
-		const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1)
-			.toISOString()
-			.split("T")[0];
-		const spending = getSpendingByCategory(startOfMonth);
+	// Budgets and bills are viewed one month at a time. Past months come from
+	// the stored monthly report, so their limits stay what they were then.
+	const [month, setMonth] = useState(currentMonthKey());
+	const isCurrentMonth = month === currentMonthKey();
+	const { getReport } = useMonthlyReports(month);
+	const report = getReport(month);
 
-		return budgets.map((budget) => {
-			const spent =
-				spending.find((s) => s.category === budget.category)?.amount || 0;
-			const percentage = budget.amount > 0 ? (spent / budget.amount) * 100 : 0;
-			return { ...budget, spent, percentage };
-		});
-	}, [budgets, transactions, getSpendingByCategory]);
+	const budgetData = useMemo(
+		() =>
+			report.budgets.map((b) => ({
+				id: b.budgetId,
+				category: b.category,
+				amount: b.limit,
+				spent: b.spent,
+				percentage: b.limit > 0 ? (b.spent / b.limit) * 100 : 0,
+			})),
+		[report],
+	);
 
-	const totalBudget = budgets.reduce((sum, b) => sum + (b.amount || 0), 0);
-	const totalSpent = budgetData.reduce((sum, b) => sum + b.spent, 0);
+	// Months to offer in the picker: from the earliest month with any data up
+	// to now, newest first.
+	const [showMonthPicker, setShowMonthPicker] = useState(false);
+	const pickerMonths = useMemo(() => {
+		if (!showMonthPicker) return [];
+		const current = currentMonthKey();
+		let earliest = current;
+		for (const t of transactions)
+			if (t.date && t.date.slice(0, 7) < earliest) earliest = t.date.slice(0, 7);
+		for (const b of billReminders)
+			if (b.dueDate && b.dueDate.slice(0, 7) < earliest)
+				earliest = b.dueDate.slice(0, 7);
+		const out: string[] = [];
+		for (let m = current; m >= earliest; m = shiftMonth(m, -1)) out.push(m);
+		return out;
+	}, [showMonthPicker, transactions, billReminders]);
+
+	const totalBudget = report.totalBudget;
+	const totalSpent = report.totalSpent;
 	const remainingBudget = totalBudget - totalSpent;
 
 	// Upcoming bills
@@ -495,9 +523,14 @@ export default function BudgetManager({
 
 	const handleContribute = () => {
 		if (!showContribute || !contributionAmount) return;
+		const amount = parseFloat(contributionAmount);
+		if (!Number.isFinite(amount) || amount <= 0) {
+			Alert.error("Invalid amount", "Enter an amount greater than zero.");
+			return;
+		}
 		contributeToGoal(
 			showContribute.id,
-			parseFloat(contributionAmount),
+			amount,
 			paymentNote || undefined,
 			selectedAccountId || undefined
 		);
@@ -509,9 +542,21 @@ export default function BudgetManager({
 
 	const handleWithdraw = () => {
 		if (!showWithdraw || !withdrawalAmount) return;
+		const amount = parseFloat(withdrawalAmount);
+		if (!Number.isFinite(amount) || amount <= 0) {
+			Alert.error("Invalid amount", "Enter an amount greater than zero.");
+			return;
+		}
+		if (amount > showWithdraw.currentAmount) {
+			Alert.error(
+				"Not enough saved",
+				`This goal holds ${currency}${formatAmount(showWithdraw.currentAmount)}.`,
+			);
+			return;
+		}
 		withdrawFromGoal(
 			showWithdraw.id,
-			parseFloat(withdrawalAmount),
+			amount,
 			paymentNote || undefined,
 			selectedAccountId || undefined
 		);
@@ -691,8 +736,90 @@ export default function BudgetManager({
 		);
 	};
 
+	const renderMonthSelector = () => (
+		<>
+			<View style={styles.monthSelector}>
+				<TouchableOpacity
+					style={styles.monthDropdown}
+					onPress={() => setShowMonthPicker(true)}
+					accessibilityLabel="Choose month"
+				>
+					<Ionicons name="calendar-outline" size={16} color={theme.primary} />
+					<Text style={styles.monthLabel}>{monthLabel(month)}</Text>
+					<Ionicons name="chevron-down" size={16} color={theme.textMuted} />
+				</TouchableOpacity>
+			</View>
+
+			<Modal
+				visible={showMonthPicker}
+				transparent
+				animationType="fade"
+				onRequestClose={() => setShowMonthPicker(false)}
+			>
+				<TouchableOpacity
+					style={styles.monthPickerOverlay}
+					activeOpacity={1}
+					onPress={() => setShowMonthPicker(false)}
+				>
+					<TouchableOpacity activeOpacity={1} style={styles.monthPickerCard}>
+						<Text style={styles.monthPickerTitle}>Choose month</Text>
+						<ScrollView style={{ maxHeight: 420 }}>
+							{pickerMonths.map((m, i) => {
+								const year = m.slice(0, 4);
+								const showYear = i === 0 || pickerMonths[i - 1].slice(0, 4) !== year;
+								const r = getReport(m);
+								const active = m === month;
+								return (
+									<React.Fragment key={m}>
+										{showYear && (
+											<Text style={styles.monthPickerYear}>{year}</Text>
+										)}
+										<TouchableOpacity
+											style={[
+												styles.monthPickerRow,
+												active && styles.monthPickerRowActive,
+											]}
+											onPress={() => {
+												setMonth(m);
+												setShowMonthPicker(false);
+											}}
+										>
+											<Text
+												style={[
+													styles.monthPickerName,
+													active && { color: theme.primary },
+												]}
+											>
+												{monthLabel(m).split(" ")[0]}
+												{m === currentMonthKey() ? "  ·  This month" : ""}
+											</Text>
+											<Text style={styles.monthPickerMeta}>
+												{r.totalBudget > 0
+													? `${currency}${formatAmount(r.totalSpent)} / ${currency}${formatAmount(r.totalBudget)}`
+													: r.bills.length
+														? `${r.bills.length} bill${r.bills.length > 1 ? "s" : ""}`
+														: ""}
+											</Text>
+										</TouchableOpacity>
+									</React.Fragment>
+								);
+							})}
+						</ScrollView>
+					</TouchableOpacity>
+				</TouchableOpacity>
+			</Modal>
+		</>
+	);
+
 	const renderBudgetsTab = () => (
 		<ScrollView style={styles.tabContent} showsVerticalScrollIndicator={false}>
+			{renderMonthSelector()}
+			{!isCurrentMonth && report.estimated && budgetData.length > 0 && (
+				<Text style={styles.monthNote}>
+					Limits for this month weren't recorded at the time, so they're
+					taken from your current budgets. Spending is exact.
+				</Text>
+			)}
 			{/* Compact Budget Overview Card */}
 			<View style={styles.overviewCard}>
 				<View style={styles.overviewRow}>
@@ -763,17 +890,19 @@ export default function BudgetManager({
 						{budgetData.length === 1 ? "category" : "categories"} tracked
 					</Text>
 				</View>
-				<TouchableOpacity
-					style={styles.addSmallButton}
-					onPress={() => {
-						setEditingBudgetId(null);
-						setBudgetForm({ category: "", amount: "" });
-						setShowAddBudget(true);
-					}}
-				>
-					<Ionicons name="add" size={18} color="#FFF" />
-					<Text style={styles.addSmallText}>Add Budget</Text>
-				</TouchableOpacity>
+				{isCurrentMonth && (
+					<TouchableOpacity
+						style={styles.addSmallButton}
+						onPress={() => {
+							setEditingBudgetId(null);
+							setBudgetForm({ category: "", amount: "" });
+							setShowAddBudget(true);
+						}}
+					>
+						<Ionicons name="add" size={18} color="#FFF" />
+						<Text style={styles.addSmallText}>Add Budget</Text>
+					</TouchableOpacity>
+				)}
 			</View>
 
 			{budgetData.length === 0 ? (
@@ -783,9 +912,13 @@ export default function BudgetManager({
 						size={40}
 						color={theme.textMuted}
 					/>
-					<Text style={styles.emptyText}>No budgets set</Text>
+					<Text style={styles.emptyText}>
+						{isCurrentMonth ? "No budgets set" : "No budgets this month"}
+					</Text>
 					<Text style={styles.emptySubtext}>
-						Create category budgets to track spending
+						{isCurrentMonth
+							? "Create category budgets to track spending"
+							: "No budgets were tracked in this month"}
 					</Text>
 				</View>
 			) : (
@@ -816,6 +949,7 @@ export default function BudgetManager({
 										</Text>
 									</View>
 								</View>
+								{isCurrentMonth && (
 								<View style={styles.billActionButtons}>
 								<TouchableOpacity
 									style={styles.billActionBtn}
@@ -846,6 +980,7 @@ export default function BudgetManager({
 									/>
 								</TouchableOpacity>
 								</View>
+								)}
 							</View>
 							<View style={styles.budgetProgressContainer}>
 								<View style={styles.budgetProgressBg}>
@@ -1060,15 +1195,24 @@ export default function BudgetManager({
 	);
 
 	const renderBillsTab = () => {
-		// Separate unpaid and paid bills
-		const unpaidBills = billReminders.filter((b) => !b.isPaid);
-		const paidBills = billReminders.filter((b) => b.isPaid);
+		// Bills due in the selected month. The current month also carries any
+		// unpaid bills from earlier months, so nothing overdue drops out of view.
+		const monthStart = monthBounds(month).from;
+		const dueThisMonth = billsDueIn(billReminders, month);
+		const unpaidBills = [
+			...(isCurrentMonth
+				? billReminders.filter((b) => !b.isPaid && b.dueDate < monthStart)
+				: []),
+			...dueThisMonth.filter((b) => !b.isPaid),
+		].sort((a, b) => (a.dueDate < b.dueDate ? -1 : 1));
+		const paidBills = dueThisMonth.filter((b) => b.isPaid);
 
 		return (
 			<ScrollView
 				style={styles.tabContent}
 				showsVerticalScrollIndicator={false}
 			>
+				{renderMonthSelector()}
 				{/* Bills Summary */}
 				<View style={styles.billsSummary}>
 					<View style={styles.billsSummaryRow}>
@@ -1118,14 +1262,18 @@ export default function BudgetManager({
 					</TouchableOpacity>
 				</View>
 
-				{billReminders.length === 0 ? (
+				{unpaidBills.length + paidBills.length === 0 ? (
 					<View style={styles.emptyState}>
 						<Ionicons
 							name="calendar-outline"
 							size={40}
 							color={theme.textMuted}
 						/>
-						<Text style={styles.emptyText}>No bill reminders</Text>
+						<Text style={styles.emptyText}>
+							{billReminders.length === 0
+								? "No bill reminders"
+								: `No bills due in ${monthLabel(month)}`}
+						</Text>
 						<Text style={styles.emptySubtext}>
 							Add bills to never miss a payment
 						</Text>
@@ -1302,7 +1450,7 @@ export default function BudgetManager({
 								<Text style={[styles.billSectionLabel, { marginTop: 20 }]}>
 									Paid ({paidBills.length})
 								</Text>
-								{paidBills.slice(0, 5).map((bill) => (
+								{paidBills.map((bill) => (
 									<View
 										key={bill.id}
 										style={[styles.billItem, styles.billItemPaid]}
@@ -1339,11 +1487,6 @@ export default function BudgetManager({
 										</View>
 									</View>
 								))}
-								{paidBills.length > 5 && (
-									<Text style={styles.showMoreText}>
-										+ {paidBills.length - 5} more paid bills
-									</Text>
-								)}
 							</>
 						)}
 					</>
@@ -2474,20 +2617,39 @@ export default function BudgetManager({
 								<TouchableOpacity
 									style={styles.deleteDebtButton}
 									onPress={() => {
+										const goal = showSavingsDetails;
+										const held = goal.currentAmount || 0;
+										const remove = () => {
+											deleteSavingsGoal(goal.id);
+											setShowSavingsDetails(null);
+										};
+										// Money in a goal isn't in any account. Deleting it
+										// silently used to make that money disappear.
 										Alert.alert(
 											"Delete Goal",
-											"Are you sure you want to delete this savings goal?",
-											[
-												{ text: "Cancel", style: "cancel" },
-												{
-													text: "Delete",
-													style: "destructive",
-													onPress: () => {
-														deleteSavingsGoal(showSavingsDetails.id);
-														setShowSavingsDetails(null);
-													},
-												},
-											]
+											held > 0
+												? `This goal still holds ${currency}${formatAmount(held)}. Withdraw it to an account first, or it won't be returned anywhere.`
+												: "Are you sure you want to delete this savings goal?",
+											held > 0
+												? [
+														{ text: "Cancel", style: "cancel" },
+														{
+															text: "Withdraw first",
+															onPress: () => {
+																setShowSavingsDetails(null);
+																setShowWithdraw(goal);
+															},
+														},
+														{
+															text: "Delete anyway",
+															style: "destructive",
+															onPress: remove,
+														},
+													]
+												: [
+														{ text: "Cancel", style: "cancel" },
+														{ text: "Delete", style: "destructive", onPress: remove },
+													],
 										);
 									}}
 								>

@@ -63,6 +63,12 @@ Miss one and the field is silently dropped on save or lost on cloud restore. Any
 
 **3. `jsonb` columns take arrays, not strings.** `savings_goals.contributions`, `finance_debts.payments` and `split_groups.members` / `expenses` / `settlements` / `settings` / `activity` are all `jsonb`. `JSON.stringify`-ing them double-encodes — a JSON *string* lands inside the jsonb column instead of an array. Pass the array through. The read paths tolerate both (`typeof x === "string" ? JSON.parse(x) : x`), which is what let this go unnoticed.
 
+**4. Transaction closing balances are server-computed.** `finance_transactions.account_balance_after` / `to_account_balance_after` / `total_balance_after` are maintained by a deferred trigger (`docs/FINANCE_CLOSING_BALANCE.md`). Every write path must pass rows through `stripServerBalances()` - writing back a stale local copy overwrites the correct values and nothing re-fires to fix them. The Transactions tab pages straight from Supabase (`TransactionList.tsx`, 50 rows per page, filters server-side) rather than filtering the store's full copy.
+
+**5. Budgets and Bills are per month.** `finance_monthly_reports` (one row per user per month, `docs/FINANCE_MONTHLY_REPORTS.md`) freezes each month's budget limits. Spent is always recomputed from transactions. `useMonthlyReports` must not save before the stored reports have loaded, or it overwrites past months' frozen limits with today's budgets.
+
+**6. Savings goal money moves are transactions.** `contributeToGoal` / `withdrawFromGoal` call the `finance_goal_move` RPC (`scripts/finance-savings-goal-transfers.sql`), which updates the goal, inserts a `type: "transfer"`, `category: "savings_goal"`, no `toAccountId` row and shifts the balance atomically. **A withdrawal is stored with a negative amount**, so `_finance_effect` moves money back into the account; display code must use `Math.abs` and treat `amount < 0` as inflow. Never set an account `balance` directly for money movement - it shifts every stored closing balance.
+
 ## Notifications
 
 `src/services/notificationService.ts` is a single static class serving **every** module — habits, bills, water, pomodoro, fasting. Each notification carries a `data.type` discriminator (`habit_reminder`, `bill_reminder`, `water_reminder`, …).

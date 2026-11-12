@@ -7,6 +7,7 @@ import { AppState } from "react-native";
 import { supabase } from "../config/supabase";
 import { logToDbLog } from "../context/habitStoreDB";
 import { customExerciseToDb } from "../context/workoutStoreDB/helpers";
+import { stripServerBalances } from "../context/financeStoreDB/helpers";
 import { getQueueState } from "./writeQueue";
 
 // Types for sync status
@@ -828,11 +829,13 @@ export const syncFinanceToCloud = async (
 		if (financeData.transactions && financeData.transactions.length > 0) {
 			const transactionsWithUser = financeData.transactions
 				.map((t) =>
-					objectToSnakeCase({
-						...t,
-						id: assignIdIfMissing(t, "id"),
-						user_id: userId,
-					}),
+					objectToSnakeCase(
+						stripServerBalances({
+							...t,
+							id: assignIdIfMissing(t, "id"),
+							user_id: userId,
+						}),
+					),
 				)
 				.map((t: any) =>
 					sanitizeUUIDRefs(t, ["account_id", "to_account_id", "recurring_id"]),
@@ -1378,6 +1381,10 @@ export const deleteAllCloudData = async (
 			await supabase.from("finance_budgets").delete().eq("user_id", userId);
 			await supabase.from("savings_goals").delete().eq("user_id", userId);
 			await supabase.from("bill_reminders").delete().eq("user_id", userId);
+			await supabase
+				.from("finance_monthly_reports")
+				.delete()
+				.eq("user_id", userId);
 			await supabase.from("finance_debts").delete().eq("user_id", userId);
 			await supabase.from("split_groups").delete().eq("user_id", userId);
 		}

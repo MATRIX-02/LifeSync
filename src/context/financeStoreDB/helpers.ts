@@ -40,3 +40,22 @@ export const generateId = () =>
 		const v = c === "x" ? r : (r & 0x3) | 0x8;
 		return v.toString(16);
 	});
+
+/**
+ * Drop the server-maintained closing balances from a transaction write.
+ * They're computed by a trigger (docs/FINANCE_CLOSING_BALANCE.md) that only
+ * fires when balance-affecting columns change, so writing back a stale local
+ * copy would overwrite the correct values and never get corrected.
+ */
+export const stripServerBalances = <T extends Record<string, any>>(row: T): T => {
+	const {
+		accountBalanceAfter,
+		toAccountBalanceAfter,
+		totalBalanceAfter,
+		account_balance_after,
+		to_account_balance_after,
+		total_balance_after,
+		...rest
+	} = row as any;
+	return rest as T;
+};

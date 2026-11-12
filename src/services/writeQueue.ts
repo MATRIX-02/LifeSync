@@ -93,7 +93,9 @@ export const getQueueState = (): QueueState => ({ ...state });
 const tableLabels: Record<string, string> = {
 	finance_accounts: "Account",
 	finance_transactions: "Transaction",
+	finance_monthly_reports: "Monthly report",
 	finance_add_transaction: "Transaction",
+	finance_goal_move: "Savings goal",
 	finance_update_transaction: "Transaction",
 	finance_delete_transactions: "Transaction",
 	user_habits: "Habit",

@@ -91,6 +91,11 @@ export interface Transaction {
 	tags?: string[];
 	attachments?: string[];
 	location?: string;
+	// Closing balances, maintained server-side by a trigger
+	// (docs/FINANCE_CLOSING_BALANCE.md). Read-only: never send them in a write.
+	accountBalanceAfter?: number | null;
+	toAccountBalanceAfter?: number | null;
+	totalBalanceAfter?: number | null;
 	createdAt: string;
 	updatedAt: string;
 }
